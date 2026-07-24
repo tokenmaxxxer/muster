@@ -66,8 +66,17 @@ def relabel(num: int, add: list[str], remove: list[str]) -> None:
     gh(*args)
 
 
+# 라우터가 트래커에 쓰는 모든 문자열이 여기를 지난다. 실패 메시지에는 명령줄과
+# stderr 가 그대로 실려 있어, 자격증명이 섞이면 그대로 공개 코멘트가 된다.
+SECRET_RE = re.compile(r"gh[pousr]_[A-Za-z0-9]{16,}|x-access-token:[^@\s]+")
+
+
+def redact(s: str) -> str:
+    return SECRET_RE.sub("«redacted»", s)
+
+
 def comment(num: int, body: str) -> None:
-    gh("issue", "comment", str(num), *repo_args(), "--body", body)
+    gh("issue", "comment", str(num), *repo_args(), "--body", redact(body))
 
 
 # ------------------------------------------------------------- state machine
@@ -141,12 +150,20 @@ def prepare(num: int, stage: str) -> Path:
     return d
 
 
-def git(work: Path, *args: str) -> str:
+def git(work: Path, *args: str, env: dict | None = None) -> str:
     p = subprocess.run(["git", "-C", str(work), *args],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=env)
     if p.returncode:
         raise RuntimeError(f"git {' '.join(args)}\n{p.stderr.strip()}")
     return p.stdout
+
+
+# 토큰을 URL 에 넣으면 argv 에 남아 ps 로 보이고, push 실패 시 예외 메시지(= 명령줄)에
+# 실려 이슈 코멘트로 게시된다. 자격증명은 환경변수로만 넘기고 헬퍼가 읽게 한다.
+# 앞의 빈 credential.helper 는 시스템 키체인 헬퍼 체인을 끊는다.
+CRED_HELPER = ["-c", "credential.helper=", "-c",
+               'credential.helper=!f() { echo username=x-access-token; '
+               'echo "password=$GIT_TOKEN"; }; f']
 
 
 # ------------------------------------------------------------------- dispatch
@@ -225,8 +242,8 @@ def publish(num: int, stage: str, d: Path, note: str = "") -> None:
         git(work, "-c", "user.name=orchestrator",
             "-c", "user.email=orchestrator@tokenmaxxxer.local",
             "commit", "-m", f"build: issue #{num}\n\nProposal: pipeline")
-        url = f"https://x-access-token:{token()}@github.com/{C['repo']}.git"
-        git(work, "push", "--force", url, f"{branch}:{branch}")
+        git(work, *CRED_HELPER, "push", "--force", "origin", f"{branch}:{branch}",
+            env={**os.environ, "GIT_TOKEN": token()})
         body = f"Closes #{num}\n\n{art.read_text()}"
         # 재시도(리뷰 기각·QA 실패)에서는 브랜치만 갱신하면 된다. PR 을 다시 만들려
         # 들면 "already exists" 로 실패해 회귀 루프가 성립하지 않는다.

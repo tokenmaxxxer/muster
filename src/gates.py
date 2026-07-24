@@ -12,12 +12,25 @@ import urllib.request
 from pathlib import Path
 
 # 변경되면 무조건 사람에게. 파이프라인이 자기 규칙을 다시 쓸 수 없어야 한다.
-PROTECTED = [
-    ".github/*", "*.yml", "*.yaml",          # CI 설정
-    "adapters.yml", "pipeline.md", "profiles/*",  # 파이프라인 자신
-    "*.pem", "*.key", ".env*",               # 시크릿
-    "**/auth*", "**/migrations/*",           # 인증·마이그레이션
-]
+#
+# fnmatch 를 전체 경로에 쓰면 두 방향으로 다 틀린다: `**` 를 이해하지 못해
+# `**/auth*` 가 루트의 `auth.py` 를 놓치고, `*.yml` 은 `docker-compose.yml` 까지
+# 전부 막아 정상 변경에서 오탐이 쏟아진다(→ 게이트가 꺼진다). 경로를 세그먼트로
+# 쪼개서 판정한다.
+PROTECTED_DIRS = {".github", "migrations", "profiles", ".circleci"}
+PROTECTED_NAMES = {"adapters.yml", "adapters.e2e.yml", "pipeline.md",
+                   "Jenkinsfile", ".gitlab-ci.yml"}
+PROTECTED_GLOBS = ["*.pem", "*.key", "*.p12", ".env", ".env.*",
+                   "auth*", "*secret*", "*credential*"]
+
+
+def is_protected(path: str) -> bool:
+    parts = path.split("/")
+    if PROTECTED_DIRS & set(parts[:-1]):
+        return True
+    name = parts[-1]
+    return name in PROTECTED_NAMES or any(
+        fnmatch.fnmatch(name, g) for g in PROTECTED_GLOBS)
 
 REGISTRY = {
     "requirements.txt": "https://pypi.org/pypi/{}/json",
@@ -36,8 +49,7 @@ def changed_files(work: Path) -> list[str]:
 def writeset(d: Path, cfg: dict) -> list[str]:
     """보호 경로 변경 차단 + spec 이 선언한 write-set 준수."""
     files = changed_files(d / "work")
-    bad = [f"보호 경로 변경: {f}" for f in files
-           if any(fnmatch.fnmatch(f, pat) for pat in PROTECTED)]
+    bad = [f"보호 경로 변경: {f}" for f in files if is_protected(f)]
 
     spec = d / "spec.md"
     if spec.exists():
