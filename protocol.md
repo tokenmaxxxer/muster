@@ -34,8 +34,28 @@ steps:
   - 룰북 마켓플레이스 설치 → 커맨드 호출 → (필요하면) 다음 이벤트 발신
 ```
 
-프롬프트가 워크플로에 있으면 잘못된 것이다. 룰북의 `commands/<name>.md` 가
-절차와 `allowed-tools` 를 함께 선언하고, 워크플로는 `/plugin:command` 만 부른다.
+프롬프트가 워크플로에 있으면 잘못된 것이다.
+
+### 룰북은 두 모양이고, 배선이 다르다
+
+기존 룰북을 실측한 결과 구성이 갈린다. 하나로 취급하면 배선이 틀린다.
+
+| 모양 | 예 | 구성 | 워크플로가 하는 일 |
+|---|---|---|---|
+| **커맨드형** | qa-agent-rulebook (커맨드 6), review-agent-rulebook | `commands/<name>.md` 가 절차·`allowed-tools`·판단 기준을 갖는다 | `/plugin:command <인자>` 를 **부른다** |
+| **스티어링형** | coding-agent-rulebook (훅 23, 커맨드 1) | `hooks/` 가 UserPromptSubmit 지시·PreToolUse 게이트로 행동을 **바꾼다** | `plugins:` 목록에 **얹는다**. 부를 커맨드가 없다 |
+
+스티어링형은 "무엇을 하라"가 아니라 "어떻게 하라"이므로 호출 대상이 아니다.
+build 에이전트라면 계약(`spec.md`)이 지시가 되고, coding 룰북은 그 위에 얹혀
+쓰기 방식을 교정한다.
+
+**둘 다 헤드리스에서 작동한다 (실측).** `claude -p` 에서 SessionStart·
+UserPromptSubmit 훅이 발화하고, 플러그인으로 설치된 훅도 로드된다 — doctrine 의
+SessionStart 훅이 `docs/` 버킷을 실제로 생성하는 것으로 확인했다.
+
+**비용**: 플러그인 3개를 얹은 상태에서 "PONG" 한 마디에 컨텍스트 17.5k 토큰,
+$0.18. 이것이 룰북의 고정 비용이다 — 리뷰당 $3 목표 대비 6%지만, 에이전트마다
+필요한 플러그인만 얹어야 한다. **`plugins:` 목록은 짧을수록 좋다.**
 
 ## 2. 조율 — 규칙 셋
 
@@ -104,16 +124,19 @@ hosted 에서 성립하지 않는다.** 그 에이전트를 실제로 만들 때
 
 ## 5. 에이전트
 
-| 에이전트 | 트리거 | 룰북 | 격리 | 다음 |
+| 에이전트 | 트리거 | 룰북 (모양) | 격리 | 다음 |
 |---|---|---|---|---|
-| **review** | PR 열림·갱신 | review-agent-rulebook | A | 사람 머지 |
+| **review** | PR 열림·갱신 | review-agent-rulebook — 커맨드형 `/review:review` | A | 사람 머지 |
 | **gates** | PR 열림·갱신 | 없음 (LLM 0회) | A | 필수 체크 |
-| qa | 머지됨 | qa-agent-rulebook | A | `done` 또는 버그 이슈 |
-| plan | `pipeline:plan` | coding-agent-rulebook | A | `pipeline:build` |
-| build | `pipeline:build` | coding-agent-rulebook | A | PR → review |
+| qa | 머지됨 | qa-agent-rulebook — 커맨드형 `/testrun:testrun` | **제품 환경** | `done` 또는 버그 이슈 |
+| plan | `pipeline:plan` | coding-agent-rulebook — 스티어링형 | A | `pipeline:build` |
+| build | `pipeline:build` | coding-agent-rulebook — 스티어링형 | A | PR → review |
 | research | `pipeline:research` | (신규) | **B** | `pipeline:plan` |
 | diagnose | 외부 알럿 dispatch | (신규) | **B** | 이슈 발행 → `pipeline:research` |
 | mine | 주 1회 schedule | 없음 | A | 룰북 개정 이슈 |
+
+qa 의 격리가 A 가 아닌 이유: 제품을 실행하므로 대상 레포의 런타임이 필요하다.
+우리 에이전트 이미지는 *판단하는* 에이전트용이다 (§8).
 
 모델은 CLAUDE.md 의 라우팅 의도표를 따른다 — **판단은 opus, 작업은 sonnet.**
 
@@ -164,5 +187,13 @@ REST 호출 하나면 되고, 중앙 프로세스를 거치지 않는다.
   있지 않다. git "dubious ownership" 회피(`safe.directory`)가 필요하다는 열린 이슈가
   있어 1호에 미리 넣어 두었다. 첫 실행에서 실증한다.
 - 플러그인 설치가 조용히 실패하는 열린 이슈가 있다. 1호 첫 실행에서 확인한다.
-- 헤드리스에서 확인된 것은 플러그인 **커맨드**까지다. 훅·에이전트도 로드되는지는
-  미확인 — 룰북이 훅에 의존하면 그때 확인한다.
+- **qa 룰북의 커맨드는 `allowed-tools` 를 선언하지 않는다.** 로컬 대화형에서는
+  사람이 매번 승인하므로 문제가 없지만, CI 에서는 액션의 기본 도구 집합을 그대로
+  물려받는다. 하필 제품을 실행하는 에이전트라 방향이 반대다 — qa 를 배선하기 전에
+  룰북 쪽에서 좁혀야 한다.
+- **qa 는 우리 이미지로 못 돈다.** `testrun` 은 제품을 띄우고 테스트를 실행하므로
+  대상 레포의 런타임이 필요하다. 에이전트 이미지는 *판단하는* 에이전트용이고,
+  *제품을 실행하는* 에이전트는 제품의 환경을 쓴다. 그래서 qa 워크플로는 범용
+  템플릿이 될 수 없고 대상 레포마다 setup 단계가 다르다.
+
+*해소됨: 플러그인 훅·에이전트가 헤드리스에서 로드되는지 → 로드된다 (§1 실측).*
