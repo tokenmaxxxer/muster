@@ -78,13 +78,56 @@ def assert_installed(role: str, want: list[str]) -> None:
             f"  한 번 더 실행하거나 `claude` 세션에서 /plugin 으로 설치한 뒤 다시 시도한다.")
 
 
+def slug(cwd: str) -> str | None:
+    """origin 리모트에서 <owner>-<repo>. 룰북이 프로젝트를 식별하는 방식과 같다."""
+    p = subprocess.run(["git", "-C", cwd, "remote", "get-url", "origin"],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        return None
+    parts = p.stdout.strip().removesuffix(".git").replace(":", "/").split("/")
+    return "-".join(parts[-2:]) if len(parts) >= 2 else None
+
+
+def status(cwd: str) -> list[str]:
+    """각 역할이 노출한 상태를 **읽는다**. 쓰지 않는다 (protocol.md §1).
+
+    상태는 에이전트의 것이다. harness 가 이걸 고치기 시작하면 룰북의 전이 게이트를
+    우회하게 된다 — qa-cycle 은 state.md 쓰기를 가로채 막지만, 그 파일을 밖에서
+    고치면 문지기를 안 거친다.
+    """
+    out = []
+    s = slug(cwd)
+    out.append(f"프로젝트: {s or '(git 리모트 없음)'}   경로: {Path(cwd).resolve()}")
+
+    qa_ws = os.environ.get("QA_WORKSPACE") or json.loads(
+        (ROOT / "roles/qa.json").read_text()).get("env", {}).get("QA_WORKSPACE", "")
+    st = Path(qa_ws) / "projects" / (s or "") / "state.md" if qa_ws and s else None
+    if st and st.exists():
+        fm = st.read_text().split("---")
+        out.append("[qa] " + " / ".join(
+            l.strip() for l in (fm[1] if len(fm) > 2 else "").splitlines() if l.strip()))
+    else:
+        out.append(f"[qa] 상태 없음 — 이 프로젝트로 QA 사이클을 돈 적이 없다"
+                   f"{'' if qa_ws else ' (QA_WORKSPACE 미설정)'}")
+    out.append("[coding] 상태기계 없음 — 상태를 노출하지 않는다")
+    out.append("[review] 상태 없음 — PR 하나가 곧 한 사이클이다")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("role")
-    ap.add_argument("task", help="맡길 일. 룰북 커맨드면 '/plugin:command 인자'")
+    ap.add_argument("role", nargs="?", help="역할. 생략하면 상태만 보여준다")
+    ap.add_argument("task", nargs="?", help="맡길 일. 룰북 커맨드면 '/plugin:command 인자'")
     ap.add_argument("-C", "--cwd", default=".", help="작업 디렉터리")
     ap.add_argument("--dry-run", action="store_true", help="합쳐진 설정만 보고 안 띄운다")
     a = ap.parse_args()
+
+    if not a.role:
+        print("\n".join(status(a.cwd)))
+        print("\n역할: " + ", ".join(sorted(p.stem for p in (ROOT / "roles").glob("*.json"))))
+        return 0
+    if not a.task:
+        sys.exit("맡길 일이 없다. 사용법: spawn.py <역할> \"<맡길 일>\" [-C <경로>]")
 
     s = role_settings(a.role)
     on = [k for k, v in s.get("enabledPlugins", {}).items() if v]

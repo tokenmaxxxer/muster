@@ -7,7 +7,8 @@ tokenmaxxxer 의 하네스 — **역할별 환경으로 에이전트를 켜주�
 ```
 protocol.md   규약 — harness 가 하는 일 셋, 상태 노출 계약, 격리
 roles/        역할 하나 = 파일 하나. 플러그인 셋 + 샌드박스 경계
-spawn.py      역할 환경으로 헤드리스 세션을 띄운다
+spawn.py      상태를 읽고, 역할 환경으로 헤드리스 세션을 띄운다
+orchestrate/  그걸 대화에서 부르는 플러그인 (/orchestrate:run)
 gates/        결정론 검사. LLM 0회
 ledger/       성적표
 ```
@@ -20,12 +21,23 @@ ledger/       성적표
 
 ## 쓰기
 
-```bash
-python3 spawn.py review "PR 12 를 리뷰해라" -C ~/work/some-repo
-python3 spawn.py qa "/testrun:testrun smoke"  -C ~/work/some-repo
-python3 spawn.py coding "<spec.md 내용>"      -C ~/work/some-repo
+대화에서 부르는 것이 기본이다. 트리거를 따로 만들지 않는다 — 일을 맡기는 자리가
+이미 대화이기 때문이다.
 
-python3 spawn.py review "x" --dry-run    # 합쳐진 설정만 본다
+```
+/plugin marketplace add tokenmaxxxer/harness
+/plugin install orchestrate@tokenmaxxxer-harness
+
+/orchestrate:run                          지금 상태만 본다
+/orchestrate:run qa /testrun:testrun smoke
+```
+
+셸에서 직접 쓸 수도 있다:
+
+```bash
+python3 spawn.py                              # 상태 조회 (읽기 전용)
+python3 spawn.py qa "/testrun:testrun smoke" -C ~/work/some-repo
+python3 spawn.py review "x" --dry-run         # 합쳐진 설정만 본다
 ```
 
 인증은 로그인된 것을 그대로 쓴다. 토큰도 시크릿도 필요 없다.
