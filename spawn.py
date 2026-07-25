@@ -120,6 +120,43 @@ def status(cwd: str) -> list[str]:
     return out
 
 
+def _base(cwd: str) -> str:
+    """비교 기준 ref. origin/HEAD 가 가리키는 기본 브랜치를 우선 쓴다."""
+    p = subprocess.run(["git", "-C", cwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+                       capture_output=True, text=True)
+    if p.returncode == 0 and p.stdout.strip():
+        return p.stdout.strip()
+    for cand in ("origin/main", "origin/master"):
+        if subprocess.run(["git", "-C", cwd, "rev-parse", "--verify", "-q", cand],
+                          capture_output=True).returncode == 0:
+            return cand
+    return "origin/main"          # 없으면 그대로 실패시켜 "검사 불가"로 보고한다
+
+
+def gate_report(cwd: str) -> list[str]:
+    """세션이 무엇을 건드렸는지 결정론적으로 본다. LLM 0회.
+
+    **막지는 않는다.** 세션이 끝난 뒤라 되돌릴 수 없고, muster 는 판정하지 않는다.
+    대신 조용히 넘어가지도 않는다 — 보호 경로(인증·시크릿·마이그레이션·CI 설정)를
+    건드렸거나 실재하지 않는 패키지를 넣었으면 사람이 알아야 한다.
+
+    게이트가 못 돌아도 그것을 "이상 없음"으로 말하지 않는다. 검사 불가와 통과는
+    정반대 처분을 받아야 한다는 게 게이트의 원칙이고, 보고에도 같이 적용된다.
+    """
+    sys.path.insert(0, str(ROOT / "gates"))
+    try:
+        import ci, gates
+        # 비교 기준을 레포에서 찾는다. origin/main 을 고정하면 기본 브랜치가
+        # master·develop 인 레포에서 매번 "검사 불가"가 뜨고, 그러면 게이트가
+        # 있으나 마나가 된다.
+        gates.BASE = os.environ.get("GATE_BASE") or _base(cwd)
+        bad = ci.check(Path(cwd).resolve())
+    except Exception as e:                       # git 아님, base 부재, import 실패 등
+        return [f"[게이트] 검사 불가 — {type(e).__name__}: {str(e)[:120]}"]
+    return ["[게이트] 이상 없음"] if not bad else \
+           ["[게이트] 확인 필요:"] + [f"  - {b}" for b in bad]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("role", nargs="?", help="역할. 생략하면 상태만 보여준다")
@@ -149,13 +186,17 @@ def main() -> int:
         print(f"[{a.role}] 플러그인 {len(on)}개, 작업 디렉터리 {a.cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
-        return subprocess.run(
+        rc = subprocess.run(
             ["claude", "-p", "--settings", settings],
             cwd=a.cwd, input=a.task, text=True,
             env={**os.environ, "CLAUDE_ROLE": a.role},
         ).returncode
     finally:
         os.unlink(settings)
+
+    for line in gate_report(a.cwd):
+        print(line, file=sys.stderr)
+    return rc
 
 
 if __name__ == "__main__":
