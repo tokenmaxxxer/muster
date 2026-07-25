@@ -8,6 +8,7 @@ Not a dispatcher. A power outlet. **Each role owns its state; muster only reads 
 
 ```
 protocol.md   the contract — muster's three jobs, the state-exposure deal, isolation
+              (protocol.ko.md is the same contract in Korean)
 roles/        one role is one file: rulebook bundle plus sandbox boundary
 spawn.py      reads state, brings up a session in a role's environment
 orchestrate/  the plugin that calls it from a conversation (/orchestrate:run)

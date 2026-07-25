@@ -8,6 +8,7 @@
 
 ```
 protocol.md   규약 — muster 가 하는 일 셋, 상태 노출 계약, 격리
+              (protocol.ko.md 가 같은 규약의 한국어판)
 roles/        역할 하나 = 파일 하나. 룰북 번들 + 샌드박스 경계
 spawn.py      상태를 읽고, 역할 환경으로 세션을 띄운다
 orchestrate/  그걸 대화에서 부르는 플러그인 (/orchestrate:run)

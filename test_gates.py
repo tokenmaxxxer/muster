@@ -145,7 +145,8 @@ def t_protected_paths():
     # 미탐: 루트에 있어도 막아야 한다. 뒤 넷은 muster 가 자기 규칙을 다시 쓰는 경로다.
     for p in ["auth.py", "migrations/001.sql", ".env", "config/.env.prod",
               ".github/workflows/ci.yml", "app/secrets.pem", "lib/credentials.json",
-              "protocol.md", "spawn.py", "roles/qa.json", "gates/gates.py"]:
+              "protocol.md", "protocol.ko.md", "spawn.py", "roles/qa.json",
+              "gates/gates.py"]:
         assert gates.is_protected(p), f"놓침: {p}"
     # 오탐: 평범한 설정 변경까지 막으면 게이트가 꺼진다. 뒤 둘은 **대상 레포**의
     # 정상 자산이다 — 보호는 루트 한 단계에만 걸려야 한다.

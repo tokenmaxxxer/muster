@@ -23,7 +23,8 @@ BASE = os.environ.get("GATE_BASE", "origin/main")
 # 비교는 전부 소문자로 (SecretConfig.py 를 놓치지 않기 위해).
 PROTECTED_DIRS = {".github", ".circleci", "migrations", "auth"}
 # 파이프라인이 자기 규칙을 다시 쓸 수 없어야 한다.
-PROTECTED_ROOT_FILES = {"protocol.md", "spawn.py", "jenkinsfile", ".gitlab-ci.yml"}
+PROTECTED_ROOT_FILES = {"protocol.md", "protocol.ko.md", "spawn.py",
+                        "jenkinsfile", ".gitlab-ci.yml"}
 # 역할 정의와 배선. 루트의 것만 — 앱의 src/roles/ 는 정상 자산이다.
 PROTECTED_ROOT_DIRS = {"roles", "gates", "agents", "images", "profiles"}
 # 인증 계열은 좁게(auth.py 는 막고 author.py 는 통과), 자격증명 계열은 넓게.

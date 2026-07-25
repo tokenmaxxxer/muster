@@ -1,45 +1,48 @@
-# protocol — 에이전트 규약
+# protocol — the agent contract
 
-*2026-07-25 재설계 2판. 사람과 에이전트가 같이 읽는 계약서.
-설계 근거는 `orchestrator-design-2026-07.md`.*
+*[한국어](protocol.ko.md)*
 
-## 한 장
+*Second design, 2026-07-25. A contract people and agents read together.
+The reasoning behind it is in `orchestrator-design-2026-07.md`.*
+
+## On one page
 
 ```
-                    사람
-                     │  "이 일 맡아줘"
+                    person
+                     │  "take this on"
                      ▼
               ┌─────────────┐
-              │   muster   │   상태를 **읽고**, 역할을 고르고, 환경을 켠다
-              └──────┬──────┘   상태를 쓰지 않는다
+              │   muster    │   **reads** state, picks a role, brings up its environment
+              └──────┬──────┘   never writes state
          ┌───────────┼───────────┐
          ▼           ▼           ▼
-      coding        qa        review      ← 각자 자기 상태기계를 소유
-    (플러그인셋)  (플러그인셋)  (플러그인셋)     "지금 이거 할 차례예요"
+      coding        qa        review      ← each owns its own state machine
+   (plugin set)  (plugin set) (plugin set)   "this is my turn, this is my step"
 ```
 
-**상태는 에이전트의 것이다.** muster 는 조회할 뿐 쓰지 않는다.
+**State belongs to the agent.** muster queries it and never writes it.
 
-이전 판은 muster 안에 라벨 상태기계를 두었다. 그러면 진실이 두 곳에 생기고,
-더 나쁘게는 muster 의 라벨 전이가 에이전트의 전이 게이트를 **우회한다** —
-`qa-cycle` 이 `state.md` 쓰기를 가로채 막아도, 라벨은 그 문지기를 안 거친다.
-그 상태기계를 걷어냈다.
+The first design put a label state machine inside muster. That creates two
+sources of truth, and worse, muster's label transitions **bypass the agent's own
+transition gate** — `qa-cycle` can intercept a write to `state.md` and refuse it,
+but a label never passes that gatekeeper. That state machine was removed.
 
-## 1. muster 가 하는 일 — 셋뿐
+## 1. What muster does — three things
 
-**① 상태 조회.** 각 에이전트가 노출한 상태를 읽는다. 쓰지 않는다.
+**① Query state.** Read what each agent exposes. Never write it.
 
-**② 역할 결정.** 어떤 사건에 어떤 역할을 깨울지 고른다.
+**② Pick a role.** Decide which role an event should wake.
 
-**③ 환경 스폰.** 그 역할의 플러그인 셋과 경계를 얹어 헤드리스 세션을 띄운다.
+**③ Spawn an environment.** Bring up a headless session carrying that role's
+plugin set and boundary.
 
-이 셋 밖의 것을 muster 가 알기 시작하면 설계가 새는 것이다. "QA 가 몇 단계인지"
-는 알아도 되지만 "왜 그 단계인지"는 몰라야 한다.
+Anything muster starts knowing beyond these three is the design leaking. "Which
+step QA is on" is fine to know; "why it is on that step" must not be.
 
-## 2. 상태 노출 계약
+## 2. The state-exposure contract
 
-각 에이전트는 자기 상태를 **읽을 수 있는 한 곳**에 노출한다. 형식은 YAML
-frontmatter 를 가진 마크다운이다 (`qa-cycle` 이 이미 쓰는 형식).
+Each agent exposes its state in **one readable place**. The format is markdown
+with YAML frontmatter (the format `qa-cycle` already uses).
 
 ```yaml
 ---
@@ -50,28 +53,31 @@ evidence: runs/2026-07-25-smoke.md
 ---
 ```
 
-두 가지 관례가 있다. **대부분의 사이클은 프로젝트 디렉터리에 기록을 두고, qa 만
-중앙 워크스페이스를 쓴다** — qa 는 여러 프로젝트를 한 곳에서 추적하기 때문이다.
+There are two conventions. **Most cycles keep their record in the project
+directory; only qa uses a central workspace** — qa tracks many projects from one
+place.
 
-| 역할 | 상태 위치 |
+| role | where state lives |
 |---|---|
 | qa | `$QA_WORKSPACE/projects/<owner>-<repo>/state.md` |
-| review | `<프로젝트>/review-record.md` (`REVIEW_RECORD_NAME` 으로 덮음) |
-| feasibility | `<프로젝트>/feasibility-record.md` |
-| ops | `<프로젝트>/state.md` |
-| product | `<프로젝트>/product-record.md` |
-| coding | **없음** — 상태기계로 승격되지 않았다. 스티어링만 한다 |
+| review | `<project>/review-record.md` (overridden by `REVIEW_RECORD_NAME`) |
+| feasibility | `<project>/feasibility-record.md` |
+| ops | `<project>/state.md` |
+| product | `<project>/product-record.md` |
+| coding | **none** — never promoted to a state machine. It only steers |
 
-**규칙 셋**
+**Three rules**
 
-1. 상태 파일은 **한 플러그인만** 쓴다. `qa-cycle` 이 `state.md` 의 유일한 소유자다.
-2. 전이 통제는 그 플러그인의 `PreToolUse` 게이트가 한다. muster 가 아니다.
-3. **muster 는 읽기 전용이다.** 상태를 옮기고 싶으면 그 역할의 커맨드를 부른다.
+1. A state file is written by **exactly one plugin**. `qa-cycle` is the sole
+   owner of `state.md`.
+2. Transition control belongs to that plugin's `PreToolUse` gate. Not to muster.
+3. **muster is read-only.** To move state, call that role's command.
 
-## 3. 역할 = 플러그인 셋 + 경계
+## 3. A role is a plugin set plus a boundary
 
-역할 하나가 `roles/<name>.json` 파일 하나다. 담는 것은 **룰북과 경계뿐**이고,
-플러그인 목록은 `spawn.py` 가 그 룰북의 `marketplace.json` 을 읽어 펼친다.
+One role is one `roles/<name>.json`. It carries **only the rulebook and the
+boundary**; `spawn.py` expands the plugin list by reading that rulebook's
+`marketplace.json`.
 
 ```json
 { "marketplace": "tokenmaxxxer-qa",
@@ -79,90 +85,105 @@ evidence: runs/2026-07-25-smoke.md
   "sandbox": { "network": {…}, "filesystem": {…}, "credentials": {…} } }
 ```
 
-이게 **애초에 오케스트레이터가 필요했던 이유**다. 레포의 `.claude/settings.json`
-을 고치면 그 레포에서 일하는 **모든** 에이전트에 적용되어, 코딩 에이전트가 QA 룰북
-까지 읽는다. 역할별 환경은 세션 단위로만 갈린다 — 그래서 역할마다 세션을 따로 띄운다.
+This is **why an orchestrator was needed in the first place.** Editing a
+repository's `.claude/settings.json` applies to **every** agent working in that
+repository, so the coding agent ends up reading the QA rulebook too. A
+per-role environment can only be drawn at the session boundary — which is why
+each role gets its own session.
 
-### 실측으로 확인한 함정 셋
+### Three traps, each one measured
 
-**① `--settings` 는 병합이지 교체가 아니다.** 역할 파일에 qa 룰북만 적어도 사용자
-전역 플러그인이 그대로 딸려온다. 전역 목록을 읽어 역할이 켜지 않은 것을 전부
-`false` 로 덮어야 격리가 성립한다.
+**① `--settings` merges, it does not replace.** A role file naming only the qa
+rulebook still arrives with the user's global plugins attached. Isolation only
+holds if you read the global list and override everything the role did not
+enable to `false`.
 
-**② `<role>-agent-env` 번들만 켜면 룰북이 안 붙는다.** 번들의 `dependencies` 는
-`--settings` 의 `enabledPlugins` 로 해결되지 않는다. A/B: 번들만 켠 세션은
-`doctrine` 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개별로 켠 세션은
-생겼다. **번들이 켜졌다는 사실만 보고 넘어가면 룰북 0개로 도는 세션을 성공으로
-착각한다** — ablation 을 통째로 오염시킨다.
+**② Enabling only the `<role>-agent-env` bundle attaches no rulebook.** A
+bundle's `dependencies` are not resolved through `--settings`' `enabledPlugins`.
+A/B: the bundle-only session never ran doctrine's SessionStart hook, so no
+`docs/` buckets appeared; the session that enabled each plugin individually grew
+them. **Taking "the bundle is enabled" as proof is how a session running zero
+rulebooks gets mistaken for a success** — which contaminates an ablation
+wholesale.
 
-**③ 첫 스폰은 마켓플레이스 등록만 하고 끝난다.** 플러그인은 다음 실행부터 붙는다.
-`spawn.py` 가 설치를 확인해 미설치면 멈춘다.
+**③ The first spawn only registers the marketplace.** Plugins attach from the
+next run onward. `spawn.py` verifies installation and stops if anything is
+missing.
 
-## 4. 격리 — 컨테이너가 아니라 샌드박스
+## 4. Isolation — a sandbox, not a container
 
-컨테이너를 쓰지 않는다. Claude Code 의 Bash 샌드박스가 **우리가 필요한 것을 더
-잘 준다.** macOS 는 Seatbelt 라 설치할 것도 없다.
+No containers. Claude Code's Bash sandbox **gives us more of what we need**, and
+on macOS it is Seatbelt, so there is nothing to install.
 
-| 필요한 것 | 컨테이너(hosted CI) | Bash 샌드박스 |
+| requirement | container (hosted CI) | Bash sandbox |
 |---|---|---|
-| egress 통제 | **불가** (`--network` 미지원) | `network.allowedDomains` |
-| 자격증명 격리 | 시크릿 명시 주입 | `credentials.envVars` 마스킹 + `injectHosts` |
-| 파일시스템 경계 | 컨테이너 경계 | `filesystem.denyRead/allowWrite`, OS 강제 |
-| 자식 프로세스까지 | ✓ | ✓ (OS 레벨) |
-| 인증 | 별도 토큰 시크릿 필요 | **키체인 OAuth 그대로** |
+| egress control | **not possible** (`--network` unsupported) | `network.allowedDomains` |
+| credential isolation | secrets injected explicitly | `credentials.envVars` masking plus `injectHosts` |
+| filesystem boundary | the container edge | `filesystem.denyRead/allowWrite`, OS-enforced |
+| covers child processes | ✓ | ✓ (at the OS level) |
+| authentication | needs its own token secret | **the keychain OAuth already there** |
 
-마지막 줄이 결정적이다. CI 컨테이너는 `CLAUDE_CODE_OAUTH_TOKEN` 을 시크릿으로
-넣어야 하는데, 로컬 스폰은 이미 로그인된 자격증명을 그대로 쓴다. **인증 문제가
-사라진다.**
+The last row decides it. A CI container needs `CLAUDE_CODE_OAUTH_TOKEN` as a
+secret; a local spawn uses credentials that are already logged in. **The
+authentication problem disappears.**
 
-`sandbox.credentials.envVars` 는 1판의 미해결 결함 하나를 구조적으로 닫는다 —
-워커 env 를 거부목록으로 지우던 방식(이름 하나 빠지면 뚫림)이 마스킹·호스트 한정
-주입으로 바뀐다.
+`sandbox.credentials.envVars` structurally closes one unsolved defect from the
+first design — clearing worker env by denylist (one missed name and it leaks)
+becomes masking plus host-scoped injection.
 
-**주의**: `filesystem.disabled: true` 로 파일시스템 층을 끄면 샌드박스 안의 명령이
-`~/.claude/settings.json` 이나 `$PATH` 의 실행파일을 고쳐 **다음 실행에서 자기
-권한을 넓힐 수 있다**. 끄지 않는다.
+**Careful**: turning off the filesystem layer with `filesystem.disabled: true`
+lets a command inside the sandbox edit `~/.claude/settings.json` or an
+executable on `$PATH` and **widen its own permissions on the next run.** Leave
+it on.
 
-## 5. 승인 — 토큰
+## 5. Approval — tokens
 
-`qa-cycle` 의 사람 전용 전이 4개(`Confirmed-Defect`·`Go`·`No-Go`·
-`Shipped-Under-Exception`)는 `signoff` 가 발행한 verdict 토큰이 있어야 통과하고,
-통과하는 순간 토큰이 소모된다.
+`qa-cycle`'s four human-only transitions (`Confirmed-Defect`, `Go`, `No-Go`,
+`Shipped-Under-Exception`) require a verdict token minted by `signoff`, and the
+token is consumed the moment it passes.
 
-토큰이 실제로 보장하는 성질은 "사람이 했다"가 아니라 **"행위자가 자기 승인을
-스스로 만들 수 없다"** 이다. 그래서 승인자를 사람에서 **별도 컨텍스트의 리뷰
-에이전트**로 바꿔도 그 성질은 살아남는다 — 승인 세션은 작업 세션과 다른 프로세스,
-다른 플러그인 셋, 다른 컨텍스트다.
+What a token actually guarantees is not "a human did this" but **"an actor
+cannot mint its own approval."** That property survives replacing the approver
+with a **review agent in a separate context** — the approving session is a
+different process, a different plugin set, a different context from the working
+one.
 
-> ⚠️ 이건 `qa-cycle` 의 설계 의도(사람 전용)를 바꾸는 결정이다. 바꾸려면
-> `docs/specs/qa-cycle-state-machine.md` 와 `signoff` 를 함께 고쳐야 하고,
-> 그건 룰북 소유자의 결정이다. muster 가 우회해서는 안 된다.
+> ⚠️ This would change `qa-cycle`'s design intent (human-only). Changing it means
+> changing `docs/specs/qa-cycle-state-machine.md` and `signoff` together, and
+> that is the rulebook owner's decision. muster must not route around it.
 
-## 6. 불변식
+## 6. Invariants
 
-1. **muster 는 상태를 쓰지 않는다.** 읽고, 역할을 고르고, 켤 뿐이다.
-2. **상태 파일은 한 플러그인만 쓴다.** 전이 통제는 그 플러그인의 게이트가 한다.
-3. **역할마다 세션이 다르다.** 플러그인 스코핑의 경계가 세션이기 때문이다.
-4. **승인은 행위자가 스스로 만들 수 없다.** 별도 세션·별도 컨텍스트에서만.
-5. **신뢰할 수 없는 값을 셸에 보간하지 않는다.** 이슈 제목의 `$(…)` 가 실행된다 —
-   이슈는 누구나 열 수 있으므로 원격 코드 실행이다. env 로 넘겨 인용한다.
-6. **재시도는 멱등하다.** 매 시도를 base + 계약에서 새로 시작한다.
-7. **`filesystem.disabled` 를 켜지 않는다.** 샌드박스가 자기 권한을 넓힐 수 있다.
+1. **muster never writes state.** It reads, picks a role, and brings it up.
+2. **A state file is written by exactly one plugin.** Transition control belongs
+   to that plugin's gate.
+3. **Every role gets its own session,** because the session is the boundary of
+   plugin scoping.
+4. **An actor cannot mint its own approval.** Only a separate session in a
+   separate context can.
+5. **Untrusted values are never interpolated into a shell.** A `$(…)` in an
+   issue title executes — and anyone can open an issue, so that is remote code
+   execution. Pass through env and quote.
+6. **Retries are idempotent.** Every attempt starts fresh from base plus the
+   contract.
+7. **`filesystem.disabled` stays off.** The sandbox could widen its own
+   permissions.
 
-## 7. 출하 순서
+## 7. Shipping order
 
-| 순 | 무엇 | 증명하는 것 |
+| # | what | what it proves |
 |---|---|---|
-| 1 | `roles/*.json` + 스폰 한 번 | 역할별 플러그인 환경이 실제로 갈리는가 |
-| 2 | 상태 조회 → 역할 결정 | muster 가 에이전트 내부를 모르고도 배차하는가 |
-| 3 | qa bench on/off | 룰북이 값을 하는가 (조직 최초의 실측) |
-| 4 | 트리거 소스 추가 (이슈·알럿) | 사건이 사람 손을 안 거치고 들어오는가 |
-| 5 | 승인 에이전트 | 토큰을 별도 컨텍스트가 발행 |
+| 1 | `roles/*.json` plus one spawn | that per-role plugin environments really do differ |
+| 2 | query state → pick a role | that muster can dispatch without knowing an agent's internals |
+| 3 | qa bench on/off | that the rulebook earns its keep — the organisation's first measurement |
+| 4 | more trigger sources (issues, alerts) | that events arrive without passing through a person |
+| 5 | an approving agent | a token minted by a separate context |
 
-## 8. 미확정
+## 8. Unsettled
 
-- **coding 룰북의 상태 노출** — 지금은 상태기계가 없다. `qa-cycle` 같은 승격이
-  필요한지, 아니면 coding 은 상태 없이 도는 게 맞는지 미정.
-- **승인자를 LLM 으로 바꾸는 결정** — §5 참조. 룰북 소유자의 결정이다.
-- **muster 를 무엇이 부르는가** — 사람이 직접 / cron / 이슈 웹훅. 1~2 단계는
-  사람이 부르는 것으로 충분하다. 상시 프로세스를 만들지 않는다.
+- **State exposure for the coding rulebook** — there is no state machine today.
+  Whether it needs a promotion like `qa-cycle`'s, or whether coding is right to
+  run stateless, is undecided.
+- **Moving the approver to an LLM** — see §5. The rulebook owner's decision.
+- **What calls muster** — a person directly, cron, or an issue webhook. For
+  stages 1–2 a person is enough. No long-running process is being built.
