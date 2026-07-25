@@ -16,6 +16,9 @@ concurrency:
 jobs:
   gates:
     runs-on: ubuntu-latest
+    # container: 를 쓰지 않는다. 등급 A 의 컨테이너는 "에이전트가 임의 bash 를 돌릴 때
+    # 손댈 수 있는 것"을 줄이려는 것인데 여기엔 에이전트가 없다 — 결정론적 파이썬만
+    # 돌고 시크릿도 없다. 격리는 이유가 있을 때 붙이지 의례로 붙이지 않는다.
     permissions:
       contents: read          # 검사만 한다. 아무것도 쓰지 않는다.
     steps:

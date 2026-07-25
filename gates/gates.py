@@ -26,7 +26,8 @@ PROTECTED_DIRS = {".github", ".circleci", "migrations", "auth"}
 # 라우터와 함께 은퇴하므로 그 자리를 protocol.md 가 잇는다.
 PROTECTED_ROOT_FILES = {"protocol.md", "adapters.yml", "adapters.e2e.yml",
                         "pipeline.md", "jenkinsfile", ".gitlab-ci.yml"}
-PROTECTED_ROOT_DIRS = {"profiles"}          # 루트의 것만. 앱의 src/profiles/ 는 정상
+# 에이전트가 도는 이미지와 배선. 루트의 것만 — 앱의 src/images/ 는 정상 자산이다.
+PROTECTED_ROOT_DIRS = {"images", "agents", "profiles"}
 # 인증 계열은 좁게(auth.py 는 막고 author.py 는 통과), 자격증명 계열은 넓게.
 # 자격증명의 미탐 비용은 유출이고 오탐 비용은 사람 확인 한 번이다.
 PROTECTED_GLOBS = ["*.pem", "*.key", "*.p12", ".env", ".env.*",

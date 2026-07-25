@@ -1,0 +1,36 @@
+# 등급 A 에이전트가 도는 이미지 (protocol.md §3).
+#
+# 이 이미지가 사주는 것: **에이전트가 실행할 수 있는 것의 목록.** 러너 기본 이미지에는
+# aws·kubectl·docker·ssh 키·수십 개 언어 런타임이 깔려 있다. 에이전트가 임의 bash 를
+# 돌릴 수 있는 이상, 거기 있는 것은 전부 공격면이다. 여기 없는 것은 못 쓴다.
+#
+# 사주지 않는 것: **egress 통제.** hosted 러너는 container.options 에서 --network 를
+# 지원하지 않는다. egress 가 필요한 등급 B(research·diagnose)는 self-hosted 로 간다.
+FROM node:22-slim
+
+# git      — checkout·diff
+# python3  — gates/
+# ca-certs — 레지스트리 조회
+# curl     — deps 게이트가 시스템 CA 로 조회한다 (urllib 은 CA 번들 없이 전부 오탐)
+# gh       — 룰북 커맨드의 allowed-tools 가 gh pr diff/view 를 쓴다
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git ca-certificates python3 curl gnupg \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update && apt-get install -y --no-install-recommends gh \
+ && apt-get purge -y gnupg && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
+
+# claude-code 를 미리 박아 둔다. claude-code-action 의 path_to_claude_code_executable
+# 로 가리키면 실행 시점에 네트워크 설치가 없다 — 설치 단계가 조용히 실패하는 열린
+# 이슈를 우회하고, egress 를 조일 등급 B 로 갈 때 그대로 쓰인다.
+RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
+# 경로가 틀리면 워크플로가 아니라 여기서 깨져야 한다.
+RUN test -x /usr/local/bin/claude && claude --version
+
+# 루트로 돌지 않는다. Actions 는 워크스페이스를 uid 1001 로 마운트한다.
+RUN useradd -m -u 1001 agent
+USER agent
+ENV HOME=/home/agent
