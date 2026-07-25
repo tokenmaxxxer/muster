@@ -1,0 +1,17 @@
+{
+  "extraKnownMarketplaces": {
+    "tokenmaxxxer-qa": {"source": {"source": "directory", "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/qa-agent-rulebook"}}
+  },
+  "enabledPlugins": {
+    "qa-cycle@tokenmaxxxer-qa": true, "intake@tokenmaxxxer-qa": true,
+    "testrun@tokenmaxxxer-qa": true, "bugreport@tokenmaxxxer-qa": true,
+    "regress@tokenmaxxxer-qa": true, "stats@tokenmaxxxer-qa": true,
+    "signoff@tokenmaxxxer-qa": true
+  },
+  "env": {"QA_WORKSPACE": "/Users/jk/workspace/10_WORK/tokenmaxxxer/qa-workspace"},
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {"allowWrite": ["/Users/jk/workspace/10_WORK/tokenmaxxxer/qa-workspace"]},
+    "credentials": {"envVars": [{"name": "GH_TOKEN", "mode": "mask", "injectHosts": ["api.github.com"]}]}
+  }
+}

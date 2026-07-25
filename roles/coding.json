@@ -1,0 +1,15 @@
+{
+  "extraKnownMarketplaces": {
+    "tokenmaxxxer-coding": {"source": {"source": "directory", "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/coding-agent-rulebook"}}
+  },
+  "enabledPlugins": {
+    "doctrine@tokenmaxxxer-coding": true, "warrant@tokenmaxxxer-coding": true,
+    "no-mock@tokenmaxxxer-coding": true, "no-footgun@tokenmaxxxer-coding": true,
+    "dispatch@tokenmaxxxer-coding": true, "scout@tokenmaxxxer-coding": true
+  },
+  "sandbox": {
+    "enabled": true,
+    "network": {"allowedDomains": ["api.anthropic.com", "*.github.com", "registry.npmjs.org", "pypi.org", "files.pythonhosted.org"]},
+    "credentials": {"envVars": [{"name": "GH_TOKEN", "mode": "mask", "injectHosts": ["api.github.com"]}]}
+  }
+}

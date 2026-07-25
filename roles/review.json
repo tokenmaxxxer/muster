@@ -1,0 +1,12 @@
+{
+  "extraKnownMarketplaces": {
+    "tokenmaxxxer-review": {"source": {"source": "directory", "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/review-agent-rulebook"}}
+  },
+  "enabledPlugins": {"review@tokenmaxxxer-review": true},
+  "sandbox": {
+    "enabled": true,
+    "network": {"allowedDomains": ["api.anthropic.com", "*.github.com", "github.com"]},
+    "filesystem": {"denyRead": ["~/"], "allowRead": ["."]},
+    "credentials": {"envVars": [{"name": "GH_TOKEN", "mode": "mask", "injectHosts": ["api.github.com"]}]}
+  }
+}
