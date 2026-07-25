@@ -21,9 +21,9 @@ from pathlib import Path
 
 import yaml
 
-import gates
-
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "gates"))
+import gates  # noqa: E402  — 게이트는 gates/ 로 옮겼다 (라우터는 은퇴 예정)
 C: dict = {}
 
 

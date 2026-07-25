@@ -51,17 +51,21 @@ stages:
     publish: merge
     verdict: true
     on_fail: build
-    # 크로스모델: build 가 Claude 면 review 는 Codex. 같은 모델·같은 컨텍스트면
-    # 자기 논리를 재승인할 뿐이라 독립성이 성립하지 않는다.
+    # 독립성의 원천은 모델이 아니라 **컨텍스트**다. 리뷰어에게 빌더의 추론 과정을
+    # 주지 않고 spec + diff 만 준다 — 같은 모델이라도 신선한 컨텍스트면 서로를
+    # 재승인하지 않는다(이 레포 개발 중 실측: 신선한 컨텍스트의 Claude 리뷰어가
+    # 토큰 유출과 보호경로 판정 오류를 찾아냈다).
+    # 크로스모델(Codex)을 쓰던 자리인데, tokenmaxxxer 는 Claude 기반 조직이라
+    # 상시 타사 실행자를 두는 것과 모순이었다.
     cmd: |
       printf '`git diff origin/main` 을 확인해, 아래 명세의 각 요구사항이 충족되는지만
       판정하라. 코드 품질 평론은 하지 마라. 불확실하면 기각한다.
-      {"approved": <bool>, "reason": "<한 줄>"} JSON 만 출력하라.
+      {"approved": <bool>, "reason": "<한 줄>"} JSON 만 %s/verdict.json 에 써라.
 
       --- 명세 ---
-      %s' "$(cat "$SPEC")" |
-      codex exec --sandbox read-only --skip-git-repo-check \
-        -o "$OUT/verdict.json" -
+      %s' "$OUT" "$(cat "$SPEC")" |
+      claude -p --output-format json --safe-mode \
+        --permission-mode acceptEdits --add-dir "$OUT"
 
   qa:
     next: done

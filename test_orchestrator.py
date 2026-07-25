@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent / "gates"))
 import gates
 import main
 
@@ -101,6 +102,46 @@ def t_rename_bypass():
         assert any("보호 경로" in b for b in gates.writeset(Path(td), {}))
 
 
+def t_commit_bypass():
+    # git status 는 워커가 자기 작업을 커밋하면 깨끗해진다 — 커밋 diff 도 봐야
+    # 게이트가 안 뚫린다. 수정 전 코드에서는 이 테스트가 실패한다(빈 리스트 반환).
+    with tempfile.TemporaryDirectory() as td:
+        work = _repo(td)
+        (Path(td) / "spec.md").write_text("- write: a.txt\n")
+        (work / ".github").mkdir()
+        (work / ".github" / "ci.yml").write_text("evil")
+        run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                        capture_output=True, check=True)
+        run("add", "-A"); run("-c", "user.email=t@t", "-c", "user.name=t",
+                              "commit", "-qm", "protected path, committed")
+        bad = gates.writeset(Path(td), {})
+        assert any("보호 경로" in b for b in bad), f"커밋 후 게이트가 못 봤다: {bad}"
+
+
+def t_origin_main_missing():
+    # origin/main 자체가 없으면 "변경 없음"이 아니라 "검사 불가" — 워킹트리만 보고
+    # 조용히 통과시키면 안 된다.
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td) / "work"
+        work.mkdir(parents=True)
+        run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                        capture_output=True, check=True)
+        run("init", "-q", "-b", "main")
+        run("config", "user.email", "t@t"); run("config", "user.name", "t")
+        (work / "a.txt").write_text("x")
+        run("add", "-A"); run("commit", "-qm", "init")
+        # origin/main 브랜치를 의도적으로 만들지 않는다
+        try:
+            gates.changed_files(work)
+            assert False, "origin/main 없이도 조용히 통과했다"
+        except RuntimeError as e:
+            assert "fail closed" in str(e), e
+
+        (Path(td) / "spec.md").write_text("- write: a.txt\n")
+        bad = gates.writeset(Path(td), {})
+        assert bad and "fail closed" in bad[0], bad
+
+
 def t_deps_fail_closed():
     # 못 읽은 매니페스트를 "새 의존성 0개" 로 취급하면 환각 패키지가 통과한다
     for bad in ["{not json", '{"dependencies": [']:
@@ -117,6 +158,32 @@ def t_deps_fail_closed():
     # optional/peer 도 검사 대상
     j = '{"optionalDependencies":{"a":"1"},"peerDependencies":{"b":"2"}}'
     assert gates.dep_names("package.json", j) == {"a", "b"}
+
+
+def t_dep_direct_reference():
+    # 이름은 레지스트리에 있어도 버전 스펙이 URL/직접 참조면 실제 설치 출처는 임의다
+    for spec in ["git+https://evil.example/x.git", "file:../local-evil",
+                 "https://evil.example/pkg-1.0.0.tgz", "github:evil/lodash",
+                 "evil/lodash#main"]:
+        j = json.dumps({"dependencies": {"lodash": spec}})
+        try:
+            gates.dep_names("package.json", j)
+            assert False, f"직접 참조를 통과시켰다: {spec}"
+        except ValueError:
+            pass
+    # 정상 레지스트리 범위는 여전히 통과
+    j = json.dumps({"dependencies": {"lodash": "^1.0.0"}})
+    assert gates.dep_names("package.json", j) == {"lodash"}
+
+    # requirements.txt 도 같은 구멍 — bare URL, `pkg @ https://` 직접 참조
+    for bad in ["https://evil.example/pkg.tar.gz\n",
+                "evil-pkg @ https://evil.example/pkg.tar.gz\n"]:
+        try:
+            gates.dep_names("requirements.txt", bad)
+            assert False, f"직접 참조를 통과시켰다: {bad}"
+        except ValueError:
+            pass
+    assert gates.dep_names("requirements.txt", "requests==2.31.0\n") == {"requests"}
 
 
 def t_writeset_fail_closed():
