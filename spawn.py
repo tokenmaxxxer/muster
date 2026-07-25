@@ -79,24 +79,41 @@ def role_settings(role: str) -> dict:
     return s
 
 
-def assert_installed(role: str, want: list[str]) -> None:
-    """역할의 플러그인이 실제로 설치돼 있는지 확인. 없으면 멈춘다.
-
-    첫 스폰은 마켓플레이스를 **등록만** 하고 플러그인은 다음 실행부터 붙는다
-    (실측). 그 사이 세션은 룰북 0개로 조용히 돌아간다 — 겉보기엔 성공이라
-    ablation 결과를 통째로 오염시킨다. 조용한 실패를 시끄러운 실패로 바꾼다.
-    """
+def _installed() -> set[str]:
     try:
-        have = set(json.loads(
+        return set(json.loads(
             (Path.home() / ".claude/plugins/installed_plugins.json").read_text())["plugins"])
     except (OSError, ValueError, KeyError):
-        have = set()
-    missing = [p for p in want if p not in have]
-    if missing:
-        sys.exit(
-            f"[{role}] 플러그인이 아직 설치되지 않았다: {', '.join(missing)}\n"
-            f"  마켓플레이스 등록만 된 상태로 띄우면 룰북 0개로 돈다.\n"
-            f"  한 번 더 실행하거나 `claude` 세션에서 /plugin 으로 설치한 뒤 다시 시도한다.")
+        return set()
+
+
+def ensure_installed(role: str, want: list[str], settings: str) -> None:
+    """역할의 룰북이 실제로 설치되게 만든다. 안 되면 멈춘다.
+
+    첫 스폰은 마켓플레이스를 **등록만** 하고 플러그인은 다음 실행부터 붙는다(실측).
+    그 사이 세션은 룰북 0개로 조용히 돌아간다 — 겉보기엔 성공이라 ablation 결과를
+    통째로 오염시킨다.
+
+    그래서 미설치면 **워밍업 실행 한 번**으로 등록시키고 다시 확인한다. 확인만 하고
+    멈추면 등록할 기회가 영영 없어 교착이다(실제로 그렇게 만들었다가 재현했다).
+    워밍업 뒤에도 없으면 그때는 진짜로 멈춘다 — 룰북 없이 도는 것보다 낫다.
+    """
+    missing = [p for p in want if p not in _installed()]
+    if not missing:
+        return
+    print(f"[{role}] 룰북 설치 중: {', '.join(missing)}", file=sys.stderr)
+    # 처음 보는 마켓플레이스는 **두 번** 걸린다 — 1회차가 등록하고 2회차가 설치한다
+    # (실측). 한 번만 돌리고 포기하면 사용자가 같은 명령을 두 번 쳐야 한다.
+    for _ in range(2):
+        subprocess.run(["claude", "-p", "--settings", settings],
+                       input="ok", text=True, capture_output=True)
+        missing = [p for p in want if p not in _installed()]
+        if not missing:
+            return
+    sys.exit(
+        f"[{role}] 룰북을 설치하지 못했다: {', '.join(missing)}\n"
+        f"  이대로 띄우면 룰북 0개로 돈다. `claude` 세션에서 /plugin 으로 설치한 뒤\n"
+        f"  다시 시도한다.")
 
 
 def slug(cwd: str) -> str | None:
@@ -198,12 +215,13 @@ def main() -> int:
     if a.dry_run:
         print(json.dumps(s, indent=2, ensure_ascii=False))
         return 0
-    assert_installed(a.role, on)
 
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(s, f)
         settings = f.name
     try:
+        # 설정 파일이 있어야 워밍업이 그 마켓플레이스를 등록할 수 있다.
+        ensure_installed(a.role, on, settings)
         print(f"[{a.role}] 플러그인 {len(on)}개, 작업 디렉터리 {a.cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
