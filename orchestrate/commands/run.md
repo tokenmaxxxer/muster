@@ -6,12 +6,12 @@ argument-hint: "[역할 [맡길 일]] — 예: qa /testrun:testrun smoke | 비�
 
 인자: $ARGUMENTS
 
-`HARNESS=${CLAUDE_PLUGIN_ROOT}/..` 로 두고, 아래는 전부 `python3 $HARNESS/spawn.py` 를 쓴다.
+`MUSTER=${CLAUDE_PLUGIN_ROOT}/..` 로 두고, 아래는 전부 `python3 $MUSTER/spawn.py` 를 쓴다.
 
 ## 인자가 없으면 — 상태만 보고한다
 
 ```
-python3 $HARNESS/spawn.py -C <현재 작업 디렉터리>
+python3 $MUSTER/spawn.py -C <현재 작업 디렉터리>
 ```
 
 출력을 그대로 옮기지 말고 **읽어서 한 문단으로** 말해라: 어떤 프로젝트인지, 진행
@@ -23,7 +23,7 @@ python3 $HARNESS/spawn.py -C <현재 작업 디렉터리>
 ## 역할과 일이 주어지면 — 띄운다
 
 ```
-python3 $HARNESS/spawn.py <역할> "<맡길 일>" -C <작업 디렉터리>
+python3 $MUSTER/spawn.py <역할> "<맡길 일>" -C <작업 디렉터리>
 ```
 
 띄우기 전에 확인할 것:

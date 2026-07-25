@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""라우터·게이트 자체 점검. 네트워크·GitHub 없이 도는 것만.
+"""게이트 자체 점검. 네트워크·GitHub 없이 도는 것만.
 
   python3 test_orchestrator.py
 """
@@ -9,49 +9,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "src"))
 sys.path.insert(0, str(Path(__file__).parent / "gates"))
 import gates
-import main
-
-main.C = {
-    "stages": {
-        "plan":   {"next": "build",  "contract": "spec.md"},
-        "build":  {"next": "review", "contract": "summary.md", "on_fail": "build"},
-        "review": {"next": "qa",     "contract": "verdict.json", "verdict": True},
-        "qa":     {"next": "done",   "contract": "run.md"},
-    },
-    "max_attempts": 3,
-}
 
 
-def t_stage_of():
-    assert main.stage_of({"pipeline:build"}) == ("build", False)
-    assert main.stage_of({"pipeline:build:running"}) == ("build", True)
-    assert main.stage_of({"bug", "attempt:2"}) == (None, False)
-    # 배차 대기와 배차됨이 동시에 있으면 배차됨이 이긴다 (중복 스폰 방지)
-    assert main.stage_of({"pipeline:qa", "pipeline:qa:running"}) == ("qa", True)
 
-
-def t_attempt():
-    assert main.attempt_of({"pipeline:build"}) == 0
-    assert main.attempt_of({"attempt:2", "pipeline:build"}) == 2
-
-
-def t_verdict():
-    with tempfile.TemporaryDirectory() as td:
-        d = Path(td)
-        (d / "out").mkdir()
-        # codex 는 코드펜스로 감싸 내보내는 경우가 있다 — 관대하게 파싱해야 한다
-        (d / "out" / "verdict.json").write_text(
-            '설명\n```json\n{"approved": false, "reason": "요구사항 3 누락"}\n```')
-        ok, why = main.verdict_ok(d, "review")
-        assert ok is False and "요구사항 3" in why, (ok, why)
-
-        (d / "out" / "verdict.json").write_text('{"approved": true, "reason": "ok"}')
-        assert main.verdict_ok(d, "review")[0] is True
-        # verdict 스테이지가 아니면 항상 통과
-        assert main.verdict_ok(d, "qa")[0] is True
 
 
 def _repo(td: str) -> Path:
@@ -66,22 +28,6 @@ def _repo(td: str) -> Path:
     run("branch", "-f", "origin/main")          # diff 기준점 대역
     return work
 
-
-def t_verdict_strict_bool():
-    # 리뷰어가 기각하려고 낸 산출물이 머지로 이어지면 안 된다.
-    with tempfile.TemporaryDirectory() as td:
-        d = Path(td); (d / "out").mkdir()
-        v = d / "out" / "verdict.json"
-        for payload in ['{"approved": "false", "reason": "미충족"}',
-                        '{"approved": "no"}', '{"approved": 0.0}',
-                        '{"approved": {}}', '{"reason": "판정 없음"}']:
-            v.write_text(payload)
-            assert main.verdict_ok(d, "review")[0] is False, payload
-        v.write_text('{"approved": true, "reason": "ok"}')
-        assert main.verdict_ok(d, "review")[0] is True
-        # 깨진 JSON 은 예외가 아니라 기각으로 (회수 루프를 죽이면 안 된다)
-        v.write_text('{"approved": tru')
-        assert main.verdict_ok(d, "review")[0] is False
 
 
 def t_rename_bypass():
@@ -194,24 +140,18 @@ def t_writeset_fail_closed():
         assert any("fail closed" in b for b in gates.writeset(Path(td), {}))
 
 
-def t_redact():
-    # push 실패 메시지에는 명령줄이 통째로 실린다. 자격증명이 트래커로 새면 안 된다.
-    leak = ("git push https://x-access-token:gho_AAAAAAAAAAAAAAAAAAAAAAAA@github.com/o/r\n"
-            "fatal: Authentication failed")
-    out = main.redact(leak)
-    assert "gho_" not in out and "x-access-token:" not in out, out
-    assert "Authentication failed" in out, "진단 정보까지 지우면 안 된다"
-
 
 def t_protected_paths():
-    # 미탐: 루트에 있어도 막아야 한다
+    # 미탐: 루트에 있어도 막아야 한다. 뒤 넷은 muster 가 자기 규칙을 다시 쓰는 경로다.
     for p in ["auth.py", "migrations/001.sql", ".env", "config/.env.prod",
-              ".github/workflows/ci.yml", "adapters.yml", "app/secrets.pem",
-              "lib/credentials.json"]:
+              ".github/workflows/ci.yml", "app/secrets.pem", "lib/credentials.json",
+              "protocol.md", "spawn.py", "roles/qa.json", "gates/gates.py"]:
         assert gates.is_protected(p), f"놓침: {p}"
-    # 오탐: 평범한 설정 변경까지 막으면 게이트가 꺼진다
+    # 오탐: 평범한 설정 변경까지 막으면 게이트가 꺼진다. 뒤 둘은 **대상 레포**의
+    # 정상 자산이다 — 보호는 루트 한 단계에만 걸려야 한다.
     for p in ["docker-compose.yml", "openapi.yaml", "app/settings.yaml",
-              "calc.py", "src/handlers/user.py", "README.md"]:
+              "calc.py", "src/handlers/user.py", "README.md",
+              "src/app/roles/admin.py", "lib/gates/rate.go"]:
         assert not gates.is_protected(p), f"오탐: {p}"
 
 

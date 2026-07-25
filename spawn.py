@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""역할별 플러그인 환경으로 에이전트를 띄운다. harness 의 핵심 동작 하나.
+"""역할별 플러그인 환경으로 에이전트를 띄운다. muster 의 핵심 동작 하나.
 
   python3 spawn.py <역할> <맡길 일> [-C <작업 디렉터리>] [--dry-run]
   python3 spawn.py review "PR 12 를 리뷰해라"
@@ -91,7 +91,7 @@ def slug(cwd: str) -> str | None:
 def status(cwd: str) -> list[str]:
     """각 역할이 노출한 상태를 **읽는다**. 쓰지 않는다 (protocol.md §1).
 
-    상태는 에이전트의 것이다. harness 가 이걸 고치기 시작하면 룰북의 전이 게이트를
+    상태는 에이전트의 것이다. muster 가 이걸 고치기 시작하면 룰북의 전이 게이트를
     우회하게 된다 — qa-cycle 은 state.md 쓰기를 가로채 막지만, 그 파일을 밖에서
     고치면 문지기를 안 거친다.
     """
