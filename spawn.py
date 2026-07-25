@@ -95,22 +95,28 @@ def status(cwd: str) -> list[str]:
     우회하게 된다 — qa-cycle 은 state.md 쓰기를 가로채 막지만, 그 파일을 밖에서
     고치면 문지기를 안 거친다.
     """
-    out = []
-    s = slug(cwd)
-    out.append(f"프로젝트: {s or '(git 리모트 없음)'}   경로: {Path(cwd).resolve()}")
+    # 역할 → 상태 파일. 대부분의 사이클은 프로젝트 디렉터리에 기록을 두고,
+    # qa 만 중앙 워크스페이스를 쓴다(여러 프로젝트를 한 곳에서 추적하므로).
+    IN_PROJECT = {"review": "review-record.md", "feasibility": "feasibility-record.md",
+                  "ops": "state.md", "product": "product-record.md"}
+    root, s = Path(cwd).resolve(), slug(cwd)
+    out = [f"프로젝트: {s or '(git 리모트 없음)'}   경로: {root}"]
+
+    def frontmatter(p: Path) -> str:
+        parts = p.read_text().split("---")
+        return " / ".join(l.strip() for l in (parts[1] if len(parts) > 2 else "").splitlines()
+                          if l.strip()) or "(frontmatter 없음)"
 
     qa_ws = os.environ.get("QA_WORKSPACE") or json.loads(
         (ROOT / "roles/qa.json").read_text()).get("env", {}).get("QA_WORKSPACE", "")
-    st = Path(qa_ws) / "projects" / (s or "") / "state.md" if qa_ws and s else None
-    if st and st.exists():
-        fm = st.read_text().split("---")
-        out.append("[qa] " + " / ".join(
-            l.strip() for l in (fm[1] if len(fm) > 2 else "").splitlines() if l.strip()))
-    else:
-        out.append(f"[qa] 상태 없음 — 이 프로젝트로 QA 사이클을 돈 적이 없다"
-                   f"{'' if qa_ws else ' (QA_WORKSPACE 미설정)'}")
-    out.append("[coding] 상태기계 없음 — 상태를 노출하지 않는다")
-    out.append("[review] 상태 없음 — PR 하나가 곧 한 사이클이다")
+    qa_st = Path(qa_ws) / "projects" / (s or "") / "state.md" if qa_ws and s else None
+    out.append(f"[qa] {frontmatter(qa_st)}" if qa_st and qa_st.exists()
+               else f"[qa] 진행 중 아님{'' if qa_ws else ' (QA_WORKSPACE 미설정)'}")
+
+    for role, name in sorted(IN_PROJECT.items()):
+        hits = [p for p in (root / name, root / "docs" / name) if p.exists()]
+        out.append(f"[{role}] {frontmatter(hits[0])}" if hits else f"[{role}] 진행 중 아님")
+    out.append("[coding] 상태기계 없음 — 스티어링만 한다")
     return out
 
 

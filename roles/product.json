@@ -1,14 +1,14 @@
 {
   "extraKnownMarketplaces": {
-    "tokenmaxxxer-review": {
+    "tokenmaxxxer-product": {
       "source": {
         "source": "directory",
-        "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/review-agent-rulebook"
+        "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/product-agent-rulebook"
       }
     }
   },
   "enabledPlugins": {
-    "review-agent-env@tokenmaxxxer-review": true
+    "product-agent-env@tokenmaxxxer-product": true
   },
   "sandbox": {
     "enabled": true,
