@@ -53,6 +53,13 @@ def role_settings(role: str) -> dict:
              if not p["name"].endswith("-agent-env")]
 
     s = {k: v for k, v in spec.items() if k not in ("marketplace", "path")}
+
+    # 역할 파일의 env 는 **기본값**이지 강제가 아니다. 이미 환경에 있으면 그쪽이 이긴다 —
+    # 안 그러면 bench 처럼 격리된 워크스페이스를 넘기려는 호출이 조용히 무시되고,
+    # 실행이 실제 워크스페이스에 쓰게 된다(실제로 그렇게 오염시켰다).
+    for k in list(s.get("env", {})):
+        if k in os.environ:
+            s["env"][k] = os.environ[k]
     s["extraKnownMarketplaces"] = {
         spec["marketplace"]: {"source": {"source": "directory", "path": spec["path"]}}}
     s["enabledPlugins"] = {f"{n}@{spec['marketplace']}": True for n in names}

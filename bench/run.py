@@ -76,8 +76,11 @@ def one_run(role: str, arm: str, target: Path, i: int, out: Path) -> dict:
     touched = [t[3:] for t in touched if t.strip()]
     violations = [t for t in touched if arm == "on" or not t.startswith("qa/")]
 
-    records = sorted(str(p.relative_to(out)) for p in
-                     list(ws.rglob("runs/*.md")) + list(work.rglob("qa/runs/*.md")))
+    # 기록이 runs/ 바로 아래일 수도, runs/<타임스탬프>/ 아래일 수도 있다. 얕게 훑으면
+    # **산출물이 있는데 0건으로 보고**해서 팔 하나가 통째로 실패한 것처럼 보인다.
+    records = sorted({str(p.relative_to(out)) for p in
+                      list(ws.rglob("runs/**/*.md")) + list(work.rglob("runs/**/*.md"))
+                      if p.is_file()})
     return {"arm": arm, "rep": i, "exit": p.returncode, "log": log.name,
             "run_records": records, "touched": touched, "product_writes": violations}
 
