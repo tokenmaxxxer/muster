@@ -50,11 +50,17 @@ evidence: runs/2026-07-25-smoke.md
 ---
 ```
 
+두 가지 관례가 있다. **대부분의 사이클은 프로젝트 디렉터리에 기록을 두고, qa 만
+중앙 워크스페이스를 쓴다** — qa 는 여러 프로젝트를 한 곳에서 추적하기 때문이다.
+
 | 역할 | 상태 위치 |
 |---|---|
 | qa | `$QA_WORKSPACE/projects/<owner>-<repo>/state.md` |
-| coding | (미정 — 승격 시 정한다) |
-| review | 상태 없음. PR 하나가 곧 한 사이클이다 |
+| review | `<프로젝트>/review-record.md` (`REVIEW_RECORD_NAME` 으로 덮음) |
+| feasibility | `<프로젝트>/feasibility-record.md` |
+| ops | `<프로젝트>/state.md` |
+| product | `<프로젝트>/product-record.md` |
+| coding | **없음** — 상태기계로 승격되지 않았다. 스티어링만 한다 |
 
 **규칙 셋**
 
@@ -64,24 +70,33 @@ evidence: runs/2026-07-25-smoke.md
 
 ## 3. 역할 = 플러그인 셋 + 경계
 
-역할 하나가 `roles/<name>.json` 파일 하나다. 스폰할 때 `--settings` 로 얹는다.
+역할 하나가 `roles/<name>.json` 파일 하나다. 담는 것은 **룰북과 경계뿐**이고,
+플러그인 목록은 `spawn.py` 가 그 룰북의 `marketplace.json` 을 읽어 펼친다.
 
-```
-claude -p "<맡길 일>" --settings roles/qa.json
+```json
+{ "marketplace": "tokenmaxxxer-qa",
+  "path": "…/qa-agent-rulebook",
+  "sandbox": { "network": {…}, "filesystem": {…}, "credentials": {…} } }
 ```
 
 이게 **애초에 오케스트레이터가 필요했던 이유**다. 레포의 `.claude/settings.json`
 을 고치면 그 레포에서 일하는 **모든** 에이전트에 적용되어, 코딩 에이전트가 QA 룰북
 까지 읽는다. 역할별 환경은 세션 단위로만 갈린다 — 그래서 역할마다 세션을 따로 띄운다.
 
-`roles/*.json` 이 담는 것:
+### 실측으로 확인한 함정 셋
 
-| 항목 | 무엇 |
-|---|---|
-| `extraKnownMarketplaces` + `enabledPlugins` | 그 역할의 룰북만 |
-| `sandbox.network.allowedDomains` | 나갈 수 있는 도메인 |
-| `sandbox.filesystem` | 읽고 쓸 수 있는 경로 |
-| `sandbox.credentials.envVars` | 자격증명 마스킹·호스트 한정 주입 |
+**① `--settings` 는 병합이지 교체가 아니다.** 역할 파일에 qa 룰북만 적어도 사용자
+전역 플러그인이 그대로 딸려온다. 전역 목록을 읽어 역할이 켜지 않은 것을 전부
+`false` 로 덮어야 격리가 성립한다.
+
+**② `<role>-agent-env` 번들만 켜면 룰북이 안 붙는다.** 번들의 `dependencies` 는
+`--settings` 의 `enabledPlugins` 로 해결되지 않는다. A/B: 번들만 켠 세션은
+`doctrine` 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개별로 켠 세션은
+생겼다. **번들이 켜졌다는 사실만 보고 넘어가면 룰북 0개로 도는 세션을 성공으로
+착각한다** — ablation 을 통째로 오염시킨다.
+
+**③ 첫 스폰은 마켓플레이스 등록만 하고 끝난다.** 플러그인은 다음 실행부터 붙는다.
+`spawn.py` 가 설치를 확인해 미설치면 멈춘다.
 
 ## 4. 격리 — 컨테이너가 아니라 샌드박스
 

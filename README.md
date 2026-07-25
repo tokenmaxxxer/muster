@@ -9,6 +9,7 @@ protocol.md   규약 — muster 가 하는 일 셋, 상태 노출 계약, 격리
 roles/        역할 하나 = 파일 하나. 룰북 번들 + 샌드박스 경계
 spawn.py      상태를 읽고, 역할 환경으로 세션을 띄운다
 orchestrate/  그걸 대화에서 부르는 플러그인 (/orchestrate:run)
+bench/        ablation 러너 — 룰북 on/off 를 같은 표적에 돌린다
 gates/        결정론 검사. 세션이 끝나면 spawn.py 가 부른다. LLM 0회
 ledger/       성적표
 ```
@@ -124,4 +125,5 @@ python3 test_gates.py
   답의 형태를 보여준다 — 작업 세션이 자기 승인을 못 만들고 사용자 턴에서 발행된
   일회용 토큰만 받는다. 같은 패턴을 warrant 에 적용하면 풀리지만 룰북 소유자의 결정이다.
 - **coding 룰북에 상태기계가 없다.** 다른 다섯 역할은 `<role>-cycle` 로 승격됐다.
-- **아무것도 재지 않았다.** `qa-agent-rulebook/bench` 가 준비돼 있고 한 번도 안 돌았다.
+- **채점이 수동이다.** 발견이 정답 키를 맞혔는지는 사람이 판정한다(키의 adjudication
+  조항). 러너는 채점표만 만든다 — 자동 판정을 흉내 내면 원장이 거짓말을 시작한다.
