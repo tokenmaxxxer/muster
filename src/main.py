@@ -8,6 +8,7 @@ LLM 호출 0회. 상태는 전부 트래커 라벨과 git 에 있고, 이 프로
 라벨·머지)는 전부 라우터가 한다 — GitHub 은 코멘트 권한과 라벨 권한을 분리하지
 않으므로, 워커에게 토큰을 주면 워커가 자기 게이트를 떼어낼 수 있다.
 """
+import fcntl
 import json
 import os
 import re
@@ -44,13 +45,26 @@ def repo_args() -> list[str]:
 
 
 def issues() -> list[dict]:
-    # --state all 이어야 한다: build 가 만든 PR 본문의 `Closes #N` 이 머지 시점에
-    # 이슈를 닫으므로, open 만 보면 머지 직후 qa 스테이지가 영원히 배차되지 않는다.
-    # 진행 여부는 이슈 상태가 아니라 라벨이 판정한다.
-    # ponytail: 최근 100개 스캔. 이슈가 수천 개가 되면 --search 로 라벨 필터링.
-    out = gh("issue", "list", *repo_args(), "--state", "all", "--limit", "100",
-             "--json", "number,title,body,labels,updatedAt")
-    return json.loads(out)
+    """진행 중인 파이프라인 이슈만. 라벨별로 조회해 합친다.
+
+    `--state all` 이어야 한다: build 가 만든 PR 본문의 `Closes #N` 이 머지 시점에
+    이슈를 닫으므로, open 만 보면 머지 직후 qa 가 영원히 배차되지 않는다. 진행
+    여부는 이슈 상태가 아니라 라벨이 판정한다.
+
+    전체를 100개씩 훑지 않는 이유는 굶주림이다 — 앞선 이슈가 100개를 채우면 QA 를
+    기다리던 이슈가 목록 밖으로 밀려 영원히 멈춘다. `--search` 의 label OR 로 한 번에
+    받을 수도 있지만 검색 인덱스는 최종 일관성이라 라벨 전이 직후를 놓친다.
+    `--label` 은 즉시 일관적이고, 호출 수는 진행 중인 스테이지 수에 비례할 뿐이다.
+    """
+    seen: dict[int, dict] = {}
+    for stage in C["stages"]:
+        for lab in (f"pipeline:{stage}", f"pipeline:{stage}:running"):
+            out = gh("issue", "list", *repo_args(), "--state", "all",
+                     "--label", lab, "--limit", "100",
+                     "--json", "number,title,body,labels,updatedAt")
+            for iss in json.loads(out):
+                seen[iss["number"]] = iss
+    return list(seen.values())
 
 
 def labels_of(iss: dict) -> set[str]:
@@ -114,6 +128,18 @@ def advance(num: int, stage: str) -> None:
     add = ["pipeline:done"] if nxt == "done" else [f"pipeline:{nxt}"]
     relabel(num, add, [f"pipeline:{stage}:running"])
     log(f"#{num} {stage} → {nxt}")
+
+
+def still_mine(num: int, stage: str) -> bool:
+    """되돌릴 수 없는 조치(머지·PR) 직전에 트래커를 다시 읽는다.
+
+    워커가 도는 동안 사람이 `pipeline:human` 을 붙였거나(비상 정지), 다른 라우터가
+    stale 로 회수해 갔을 수 있다. 다시 읽지 않으면 라우터는 그 개입을 무시하고
+    머지해버린다 — 게이트가 있으나 마나가 되는 유일한 경로다.
+    """
+    out = gh("issue", "view", str(num), *repo_args(), "--json", "labels")
+    labels = {lab["name"] for lab in json.loads(out)["labels"]}
+    return f"pipeline:{stage}:running" in labels and "pipeline:human" not in labels
 
 
 def is_stale(iss: dict) -> bool:
@@ -208,10 +234,24 @@ def dispatch(num: int, iss: dict, stage: str, procs: dict) -> None:
         escalate(num, stage, f"루프 예산 소진: attempt {attempt}/{C['max_attempts']}")
         return
     relabel(num, [f"pipeline:{stage}:running"], [f"pipeline:{stage}"])
-    d = prepare(num, stage)
+    # 쓴 다음 다시 읽는다. 목록 조회가 낡은 라벨을 돌려주면(라벨 인덱스는 갱신 직후
+    # 잠시 뒤처진다) 이미 끝난 스테이지를 다시 배차하게 된다. 스폰 전에 확인하면
+    # 낭비되는 것은 API 호출 한 번뿐이다.
+    if not still_mine(num, stage):
+        log(f"#{num} {stage} 배차 취소 — 락 확인 실패 (낡은 라벨 또는 개입)")
+        return
+    # 락을 먼저 잡으므로, 스폰까지 못 가면 락을 반드시 되돌린다. 안 그러면 clone·fetch
+    # 실패 한 번에 procs 에 없는 :running 이 남아 stale 타임아웃까지 이슈가 멈춘다.
+    try:
+        d = prepare(num, stage)
+        proc = spawn(num, iss, stage, d)
+    except Exception as e:
+        log(f"#{num} dispatch {stage} 실패: {e}")
+        relabel(num, [f"pipeline:{stage}"], [f"pipeline:{stage}:running"])
+        comment(num, f"⚠️ `{stage}` 배차 실패 — 큐로 되돌림\n\n```\n{e}\n```")
+        return
     log(f"#{num} dispatch {stage} (attempt {attempt})")
-    procs[num] = dict(stage=stage, proc=spawn(num, iss, stage, d), dir=d,
-                      attempt=attempt, iss=iss)
+    procs[num] = dict(stage=stage, proc=proc, dir=d, attempt=attempt, iss=iss)
 
 
 # -------------------------------------------------------------------- publish
@@ -267,8 +307,13 @@ def verdict_ok(d: Path, stage: str) -> tuple[bool, str]:
         return True, ""
     raw = (d / "out" / C["stages"][stage]["contract"]).read_text()
     m = re.search(r"\{.*\}", raw, re.S)
-    v = json.loads(m.group(0)) if m else {}
-    return bool(v.get("approved")), str(v.get("reason", ""))[:500]
+    try:
+        v = json.loads(m.group(0)) if m else {}
+    except json.JSONDecodeError as e:
+        return False, f"판정을 파싱할 수 없음: {e}"
+    # `is True` 여야 한다. bool() 은 "false"·"no"·{} 같은 비어 있지 않은 값을 전부
+    # 참으로 만들어, 기각하려던 리뷰어의 산출물이 머지로 이어진다.
+    return v.get("approved") is True, str(v.get("reason", ""))[:500]
 
 
 # ----------------------------------------------------------------------- reap
@@ -297,26 +342,31 @@ def reap(procs: dict) -> bool:
         rc = r["proc"].returncode
         art = d / "out" / C["stages"][stage]["contract"]
 
-        if rc != 0:
-            fail(num, stage, attempt, f"실행자 종료 코드 {rc}")
-            continue
-        if not (art.exists() and art.stat().st_size > 0):
-            fail(num, stage, attempt, f"계약 산출물 없음: {art.name}")
-            continue
-        bad = gates.check(C["stages"][stage].get("gates", []), d, C)
-        if bad:
-            escalate(num, stage, "기계 게이트 차단:\n" + "\n".join(bad))
-            continue
-        ok, why = verdict_ok(d, stage)
-        if not ok:
-            fail(num, stage, attempt, f"계약 검증 기각: {why}")
-            continue
+        # 회수 전체를 감싼다. procs 에서 이미 뺐으므로 여기서 예외가 새어나가면
+        # 라벨이 :running 에 박제되고 stale 타임아웃까지 아무 일도 일어나지 않는다.
         try:
+            if not still_mine(num, stage):
+                log(f"#{num} {stage} 회수 포기 — 그 사이 사람/다른 라우터가 가져감")
+                continue
+            if rc != 0:
+                fail(num, stage, attempt, f"실행자 종료 코드 {rc}")
+                continue
+            if not (art.exists() and art.stat().st_size > 0):
+                fail(num, stage, attempt, f"계약 산출물 없음: {art.name}")
+                continue
+            bad = gates.check(C["stages"][stage].get("gates", []), d, C)
+            if bad:
+                escalate(num, stage, "기계 게이트 차단:\n" + "\n".join(bad))
+                continue
+            ok, why = verdict_ok(d, stage)
+            if not ok:
+                fail(num, stage, attempt, f"계약 검증 기각: {why}")
+                continue
             publish(num, stage, d, note=why)
-        except RuntimeError as e:
-            fail(num, stage, attempt, f"게시 실패: {e}")
-            continue
-        advance(num, stage)
+            advance(num, stage)          # 게시 성공 후 라벨 전이도 같은 보호 안에서
+        except Exception as e:
+            log(f"#{num} {stage} 회수 중 오류: {e}")
+            escalate(num, stage, f"회수 실패 — 산출물·PR 상태를 사람이 확인해야 한다:\n{e}")
     return done
 
 
@@ -366,8 +416,19 @@ def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
     if cmd == "bootstrap":
         return bootstrap()
+    # 라우터는 하나만. `:running` 라벨은 check-then-act 이라 락이 되지 못한다 —
+    # 두 라우터가 같은 큐를 보면 둘 다 배차하고, 한쪽이 다른 쪽의 정상 작업을
+    # stale 로 회수해 `pipeline:human` 과 실제 머지가 모순되는 상태가 된다.
+    # ponytail: 호스트 단위 락. 여러 호스트로 늘리면 외부 조정자가 필요하다.
+    lockf = open(ROOT / ".router.lock", "w")
+    try:
+        fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit("라우터가 이미 실행 중이다 (.router.lock). 중복 실행은 이중 배차를 만든다.")
+
     procs: dict = {}
     busy = True
+    idle = 0
     log(f"라우터 시작 — repo={C['repo']} config={cfg.name}")
     while True:
         try:
@@ -375,7 +436,10 @@ def main() -> None:
         except Exception as e:                     # 라우터는 죽지 않는다
             log(f"tick 오류(무시하고 계속): {e}")
             busy = True
-        if cmd == "drain" and not procs and not busy:   # 파이프라인이 비면 종료 (E2E용)
+        # 라벨 인덱스가 갱신 직후 잠시 뒤처지므로 한 번 조용한 것으로는 끝났다고
+        # 보지 않는다. 연속 두 번 비어야 종료 (E2E용).
+        idle = 0 if (busy or procs) else idle + 1
+        if cmd == "drain" and idle >= 2:
             return
         time.sleep(C["poll_seconds"] if cmd != "drain" else 2)
 

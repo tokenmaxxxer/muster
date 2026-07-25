@@ -66,6 +66,67 @@ def _repo(td: str) -> Path:
     return work
 
 
+def t_verdict_strict_bool():
+    # 리뷰어가 기각하려고 낸 산출물이 머지로 이어지면 안 된다.
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td); (d / "out").mkdir()
+        v = d / "out" / "verdict.json"
+        for payload in ['{"approved": "false", "reason": "미충족"}',
+                        '{"approved": "no"}', '{"approved": 0.0}',
+                        '{"approved": {}}', '{"reason": "판정 없음"}']:
+            v.write_text(payload)
+            assert main.verdict_ok(d, "review")[0] is False, payload
+        v.write_text('{"approved": true, "reason": "ok"}')
+        assert main.verdict_ok(d, "review")[0] is True
+        # 깨진 JSON 은 예외가 아니라 기각으로 (회수 루프를 죽이면 안 된다)
+        v.write_text('{"approved": tru')
+        assert main.verdict_ok(d, "review")[0] is False
+
+
+def t_rename_bypass():
+    # git mv 한 번으로 보호 경로와 write-set 을 동시에 빠져나가면 안 된다.
+    with tempfile.TemporaryDirectory() as td:
+        work = _repo(td)
+        (Path(td) / "spec.md").write_text("- write: allowed*\n")
+        (work / "allowed.txt").write_text("x")
+        run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                        capture_output=True, check=True)
+        run("add", "-A"); run("-c", "user.email=t@t", "-c", "user.name=t",
+                              "commit", "-qm", "add")
+        (work / ".github").mkdir()
+        run("mv", "allowed.txt", ".github/pwn.js")
+        files = gates.changed_files(work)
+        assert ".github/pwn.js" in files, files
+        assert "allowed.txt" in files, f"rename 원본도 검사해야 한다: {files}"
+        assert any("보호 경로" in b for b in gates.writeset(Path(td), {}))
+
+
+def t_deps_fail_closed():
+    # 못 읽은 매니페스트를 "새 의존성 0개" 로 취급하면 환각 패키지가 통과한다
+    for bad in ["{not json", '{"dependencies": [']:
+        try:
+            gates.dep_names("package.json", bad)
+            assert False, f"파싱 실패를 통과시켰다: {bad}"
+        except ValueError:
+            pass
+    try:
+        gates.dep_names("requirements.txt", "-r extras.txt\n")
+        assert False, "간접 참조를 통과시켰다"
+    except ValueError:
+        pass
+    # optional/peer 도 검사 대상
+    j = '{"optionalDependencies":{"a":"1"},"peerDependencies":{"b":"2"}}'
+    assert gates.dep_names("package.json", j) == {"a", "b"}
+
+
+def t_writeset_fail_closed():
+    with tempfile.TemporaryDirectory() as td:
+        work = _repo(td)
+        (work / "anything.py").write_text("x")
+        (Path(td) / "spec.md").write_text("# 명세\n요구사항만 있고 write-set 없음\n")
+        assert any("fail closed" in b for b in gates.writeset(Path(td), {}))
+
+
 def t_redact():
     # push 실패 메시지에는 명령줄이 통째로 실린다. 자격증명이 트래커로 새면 안 된다.
     leak = ("git push https://x-access-token:gho_AAAAAAAAAAAAAAAAAAAAAAAA@github.com/o/r\n"
@@ -112,7 +173,7 @@ def t_dep_names():
     multi = json.dumps(json.loads(flat), indent=2)
     assert gates.dep_names("package.json", flat) == {"left-pad", "jest"}
     assert gates.dep_names("package.json", multi) == {"left-pad", "jest"}
-    assert gates.dep_names("package.json", "깨진 json") == set()
+    # 깨진 매니페스트는 빈 집합이 아니라 오류다 — t_deps_fail_closed 참조
     assert gates.dep_names("requirements.txt",
                            "requests==2.31.0\n# 주석\nhttpx>=0.27\n\n") == {"requests", "httpx"}
 
@@ -124,7 +185,9 @@ def t_parse_new_deps():
         (work / "package.json").write_text('{"dependencies": {"left-pad": "^1.0.0"}}')
         subprocess.run(["git", "-C", str(work), "add", "-A"], check=True,
                        capture_output=True)
-        found = dict((n, m) for m, n in gates.parse_new_deps(work))
+        new, errs = gates.parse_new_deps(work)
+        assert errs == [], errs
+        found = dict((n, m) for m, n in new)
         assert found.get("httpx") == "requirements.txt", found
         assert found.get("left-pad") == "package.json", found
         assert "requests" not in found, "기존 의존성은 새 것으로 잡히면 안 된다"
