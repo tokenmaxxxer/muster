@@ -1,15 +1,6 @@
 {
-  "extraKnownMarketplaces": {
-    "tokenmaxxxer-feasibility": {
-      "source": {
-        "source": "directory",
-        "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/feasibility-agent-rulebook"
-      }
-    }
-  },
-  "enabledPlugins": {
-    "feasibility-agent-env@tokenmaxxxer-feasibility": true
-  },
+  "marketplace": "tokenmaxxxer-feasibility",
+  "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/feasibility-agent-rulebook",
   "sandbox": {
     "enabled": true,
     "network": {

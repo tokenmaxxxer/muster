@@ -1,15 +1,6 @@
 {
-  "extraKnownMarketplaces": {
-    "tokenmaxxxer-product": {
-      "source": {
-        "source": "directory",
-        "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/product-agent-rulebook"
-      }
-    }
-  },
-  "enabledPlugins": {
-    "product-agent-env@tokenmaxxxer-product": true
-  },
+  "marketplace": "tokenmaxxxer-product",
+  "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/product-agent-rulebook",
   "sandbox": {
     "enabled": true,
     "network": {

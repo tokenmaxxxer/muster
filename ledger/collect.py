@@ -1,150 +1,115 @@
 #!/usr/bin/env python3
-"""원장 — 리뷰 에이전트의 성적을 수확한다.
+"""원장 — 리뷰가 값을 하는지 잰다.
 
-이 레포가 존재하는 이유다. METR RCT 의 교훈(체감 +20%, 실측 -19%)이 여기 걸려 있다:
-**체감은 못 믿으므로 재야 한다.** 룰북 개선이 취향 논쟁이 되지 않게 하는 유일한 수단.
+  python3 ledger/collect.py [<레포 경로>] [--json]
 
-  python3 ledger/collect.py <owner/repo> [--since 2026-07-01] [--out ledger/data.jsonl]
+이 레포가 존재하는 이유다. METR RCT 의 교훈(체감 +20%, 실측 -19%)이 여기 걸려
+있다: **체감은 못 믿으므로 재야 한다.** 룰북 개선이 취향 논쟁이 되지 않게 하는
+유일한 수단이다.
 
-지표 넷과 목표선 (DoorDash 자체 리뷰어 실측):
+읽는 것은 `review-cycle` 이 남긴 `review-record.md` 다. 이전 판은 GitHub PR 코멘트를
+긁어 "코멘트가 달렸는가"를 셌는데 그건 대리지표였다. 지금은 **판정 자체가 지표다** —
+요구사항마다 Present/Surface/Absent/Incorrect 중 하나가 붙는다.
 
-  수용률       high/critical 지적 중 머지 전 수정으로 이어진 비율   목표 60%
-  리뷰당 비용   토큰 비용                                          목표 $3 이하
-  응답 시간    PR 오픈 → 첫 리뷰                                   목표 10분 이내
-  revert율     머지 후 되돌림                                      불변이 정상
-
-셋은 자동으로 나오고 **수용률만 안 나온다** — "이 지적이 반영됐다"는 판정에 의미
-이해가 필요하기 때문이다. 그래서 대리지표(지적 이후 해당 파일이 다시 커밋됐는가)를
-같이 내되 `accepted` 필드는 비워 둔다. 표본이 쌓이기 전에 대리지표를 정답으로
-취급하면 원장이 거짓말을 시작하고, 그러면 안 재느니만 못하다.
+수용률은 그 판정이 **다음 판에서 바뀌었는가**로 잰다. Absent/Incorrect 였던 것이
+줄었으면 지적이 반영된 것이다. 파일의 git 이력을 걸어 연속한 두 판을 비교하므로
+사람이 손으로 라벨링할 필요가 없다.
 """
 import argparse
 import json
+import re
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 
-BOT = "claude"          # 리뷰 작성자 식별. 봇 이름이 바뀌면 여기만 고친다.
+RECORD = "review-record.md"
+VERDICTS = ("Present", "Surface", "Absent", "Incorrect")
+# 요구사항 한 블록에 verdict 한 줄. 상태기계 스펙이 "정확히 하나"를 요구한다.
+VERDICT_RE = re.compile(r"^\s*verdict:\s*(\w+)\s*$", re.M)
 
 
-def gh_json(*args: str):
-    p = subprocess.run(["gh", *args], capture_output=True, text=True)
-    if p.returncode != 0:
-        sys.exit(f"gh 실패: {' '.join(args)}\n{p.stderr.strip()}")
-    return json.loads(p.stdout or "null")
+def parse(text: str) -> dict:
+    """한 판의 판정 분포. 어휘 밖의 값은 세지 않고 따로 보고한다 —
+    조용히 버리면 요구사항 수가 맞지 않는 것을 아무도 모른다."""
+    found = VERDICT_RE.findall(text or "")
+    status = re.search(r"^status:\s*(\S+)", text or "", re.M)
+    counts = {v: found.count(v) for v in VERDICTS}
+    return {"status": status.group(1) if status else None,
+            "counts": counts, "total": sum(counts.values()),
+            "unknown": sorted({v for v in found if v not in VERDICTS})}
 
 
-def ts(s: str | None) -> datetime | None:
-    return datetime.fromisoformat(s.replace("Z", "+00:00")) if s else None
+def history(repo: Path, path: str) -> list[str]:
+    """오래된 순으로 각 커밋 시점의 파일 내용."""
+    log = subprocess.run(
+        ["git", "-C", str(repo), "log", "--reverse", "--format=%H", "--", path],
+        capture_output=True, text=True)
+    out = []
+    for sha in log.stdout.split():
+        blob = subprocess.run(["git", "-C", str(repo), "show", f"{sha}:{path}"],
+                              capture_output=True, text=True)
+        if blob.returncode == 0:
+            out.append(blob.stdout)
+    return out
 
 
-def pr_record(repo: str, pr: dict) -> dict:
-    """PR 하나의 원장 항목. 판정하지 않고 사실만 담는다."""
-    num = pr["number"]
-    revs = gh_json("api", f"repos/{repo}/pulls/{num}/reviews", "--paginate")
-    coms = gh_json("api", f"repos/{repo}/pulls/{num}/comments", "--paginate")
-
-    bot_events = [r for r in (revs or []) if BOT in (r.get("user") or {}).get("login", "").lower()]
-    bot_coms = [c for c in (coms or []) if BOT in (c.get("user") or {}).get("login", "").lower()]
-
-    opened, first = ts(pr["createdAt"]), None
-    for e in bot_events + bot_coms:
-        t = ts(e.get("submitted_at") or e.get("created_at"))
-        if t and (first is None or t < first):
-            first = t
-
-    return {
-        "repo": repo,
-        "pr": num,
-        "opened_at": pr["createdAt"],
-        "merged_at": pr.get("mergedAt"),
-        "findings": len(bot_coms),
-        # 응답 시간(분). 리뷰가 없으면 None — 0 이 아니다. 침묵은 정상 동작이므로
-        # 리뷰 없는 PR 을 "0분 응답"으로 세면 평균이 거짓이 된다.
-        "response_min": round((first - opened).total_seconds() / 60, 1)
-        if first and opened else None,
-        # 대리지표: 지적이 달린 파일이 그 뒤에 다시 커밋됐는가. 반영의 **증거가
-        # 아니라 후보**다. accepted 의 근거로 쓰되 값을 대신하지 않는다.
-        "touched_after": _touched_after(repo, num, bot_coms),
-        # 사람이 채운다. 표본이 쌓이면 그때 자동 판정을 학습시킨다.
-        "accepted": None,
-        "cost_usd": None,        # merge_costs() 가 채운다
-    }
+def unresolved(text: str) -> int:
+    """미해결 지적 수 = Absent + Incorrect."""
+    c = parse(text)["counts"]
+    return c["Absent"] + c["Incorrect"]
 
 
-def _touched_after(repo: str, num: int, coms: list) -> int:
-    if not coms:
-        return 0
-    commits = gh_json("api", f"repos/{repo}/pulls/{num}/commits", "--paginate") or []
-    later = [(c["sha"], ts(c["commit"]["committer"]["date"])) for c in commits]
-    n = 0
-    for c in coms:
-        at, path = ts(c.get("created_at")), c.get("path")
-        if not (at and path):
-            continue
-        for sha, cts in later:
-            if cts and cts > at:
-                files = gh_json("api", f"repos/{repo}/commits/{sha}") or {}
-                if any(f.get("filename") == path for f in files.get("files", [])):
-                    n += 1
-                    break
-    return n
+def collect(repo: Path) -> dict:
+    cur = repo / RECORD
+    revs = history(repo, RECORD)
+    if cur.exists():                       # 아직 커밋 안 된 최신 판도 한 판으로 센다
+        text = cur.read_text()
+        if not revs or revs[-1] != text:
+            revs = revs + [text]
+
+    fixed = seen = 0
+    for a, b in zip(revs, revs[1:]):
+        # 요구사항 텍스트를 짝지어 추적하는 편이 정확하지만 블록 형식이 룰북 쪽에서
+        # 아직 고정되지 않았다. **셈이 확실한 것만** 센다 — 과소평가는 하되
+        # 과대평가는 하지 않는다. 형식이 굳으면 요구사항 단위로 올린다.
+        before = unresolved(a)
+        fixed += max(0, before - unresolved(b))
+        seen += before
+
+    return {"repo": str(repo), "found": cur.exists(),
+            "current": parse(cur.read_text()) if cur.exists() else None,
+            "revisions": len(revs), "findings_seen": seen, "findings_fixed": fixed,
+            "acceptance_pct": round(fixed / seen * 100, 1) if seen else None}
 
 
-def merge_costs(rows: list[dict], repo: str) -> None:
-    """워크플로가 아티팩트로 올린 비용을 붙인다. 없으면 None 으로 둔다."""
-    arts = gh_json("api", f"repos/{repo}/actions/artifacts", "--paginate") or {}
-    by_pr = {}
-    for a in arts.get("artifacts", []):
-        name = a.get("name", "")
-        if name.startswith("ledger-"):
-            try:
-                by_pr.setdefault(int(name.split("-")[1]), a["id"])
-            except (IndexError, ValueError):
-                continue
-    if by_pr:
-        print(f"  비용 아티팩트 {len(by_pr)}건 발견 "
-              f"(내려받기는 gh run download 로 별도 — 여기서는 존재만 확인)",
-              file=sys.stderr)
-
-
-def summarize(rows: list[dict]) -> str:
-    n = len(rows)
-    reviewed = [r for r in rows if r["response_min"] is not None]
-    resp = sorted(r["response_min"] for r in reviewed)
-    judged = [r for r in rows if r["accepted"] is not None]
-    out = [f"PR {n}건 / 리뷰가 달린 것 {len(reviewed)}건 / 지적 {sum(r['findings'] for r in rows)}건"]
-    if resp:
-        out.append(f"응답 시간 중앙값 {resp[len(resp) // 2]}분  (목표 10분 이내)")
-    if judged:
-        acc = sum(1 for r in judged if r["accepted"]) / len(judged) * 100
-        out.append(f"수용률 {acc:.1f}%  (n={len(judged)}, 목표 60%)")
-    else:
-        out.append("수용률 — 아직 없음. accepted 를 사람이 채워야 나온다")
+def report(d: dict) -> str:
+    if not d["found"]:
+        return (f"{d['repo']}\n  {RECORD} 없음 — 이 레포로 리뷰 사이클을 돈 적이 없다.\n"
+                f"  python3 spawn.py review \"<맡길 일>\" -C {d['repo']}")
+    c = d["current"]
+    out = [d["repo"],
+           f"  상태 {c['status'] or '(없음)'}   요구사항 {c['total']}건   개정 {d['revisions']}판",
+           "  판정: " + (", ".join(f"{k} {v}" for k, v in c["counts"].items() if v) or "없음")]
+    if c["unknown"]:
+        out.append(f"  ⚠ 어휘 밖 판정: {', '.join(c['unknown'])} — 스펙은 "
+                   f"{'/'.join(VERDICTS)} 넷만 허용한다")
+    out.append(f"  수용률: {d['acceptance_pct']}% "
+               f"({d['findings_fixed']}/{d['findings_seen']} 해소, 목표 60%)"
+               if d["acceptance_pct"] is not None else
+               "  수용률: 아직 없음 — 지적이 달린 개정이 2판 이상 쌓여야 나온다")
     return "\n".join(out)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("repo")
-    ap.add_argument("--since", default=None, help="YYYY-MM-DD")
-    ap.add_argument("--out", default="ledger/data.jsonl", type=Path)
+    ap.add_argument("repo", nargs="?", default=".")
+    ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
-
-    prs = gh_json("pr", "list", "-R", a.repo, "--state", "all", "--limit", "100",
-                  "--json", "number,createdAt,mergedAt") or []
-    if a.since:
-        prs = [p for p in prs if p["createdAt"][:10] >= a.since]
-    print(f"PR {len(prs)}건 수집 중…", file=sys.stderr)
-
-    rows = [pr_record(a.repo, p) for p in prs]
-    merge_costs(rows, a.repo)
-
-    a.out.parent.mkdir(parents=True, exist_ok=True)
-    a.out.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n")
-    print(f"→ {a.out}", file=sys.stderr)
-    print(summarize(rows))
+    repo = Path(a.repo).resolve()
+    if not (repo / ".git").exists():
+        sys.exit(f"git 레포가 아니다: {repo}")
+    d = collect(repo)
+    print(json.dumps(d, ensure_ascii=False, indent=2) if a.json else report(d))
     return 0
 
 

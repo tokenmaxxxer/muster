@@ -1,15 +1,6 @@
 {
-  "extraKnownMarketplaces": {
-    "tokenmaxxxer-coding": {
-      "source": {
-        "source": "directory",
-        "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/coding-agent-rulebook"
-      }
-    }
-  },
-  "enabledPlugins": {
-    "coding-agent-env@tokenmaxxxer-coding": true
-  },
+  "marketplace": "tokenmaxxxer-coding",
+  "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/coding-agent-rulebook",
   "sandbox": {
     "enabled": true,
     "network": {

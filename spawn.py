@@ -29,12 +29,33 @@ USER_SETTINGS = Path.home() / ".claude" / "settings.json"
 
 
 def role_settings(role: str) -> dict:
-    """역할 설정 + 전역 플러그인 차단을 합친 것."""
+    """역할 설정 + 룰북 플러그인 펼침 + 전역 플러그인 차단을 합친 것."""
     f = ROOT / "roles" / f"{role}.json"
     if not f.exists():
         have = ", ".join(sorted(p.stem for p in (ROOT / "roles").glob("*.json")))
         sys.exit(f"모르는 역할: {role}  (있는 것: {have})")
-    s = json.loads(f.read_text())
+    spec = json.loads(f.read_text())
+
+    # 룰북의 marketplace.json 을 읽어 플러그인을 **하나씩** 켠다.
+    #
+    # `<role>-agent-env` 번들만 켜는 방식은 안 된다 — 번들의 dependencies 는
+    # `--settings` 의 enabledPlugins 로는 해결되지 않는다(A/B 실측: 번들만 켠 세션은
+    # doctrine 의 SessionStart 훅이 안 돌아 docs/ 버킷이 안 생겼고, 개별로 켠 세션은
+    # 생겼다). 번들이 켜졌다는 사실만 보고 넘어가면 룰북 0개로 도는 세션을
+    # "성공"으로 착각한다.
+    #
+    # 목록을 손으로 적지 않고 마켓플레이스에서 읽는 이유는 룰북에 플러그인이
+    # 추가돼도 여기를 안 고치기 위해서다. env 번들 자체는 내용이 없으므로 제외한다.
+    mkt_file = Path(spec["path"]) / ".claude-plugin" / "marketplace.json"
+    if not mkt_file.exists():
+        sys.exit(f"[{role}] 룰북을 찾을 수 없다: {mkt_file}")
+    names = [p["name"] for p in json.loads(mkt_file.read_text())["plugins"]
+             if not p["name"].endswith("-agent-env")]
+
+    s = {k: v for k, v in spec.items() if k not in ("marketplace", "path")}
+    s["extraKnownMarketplaces"] = {
+        spec["marketplace"]: {"source": {"source": "directory", "path": spec["path"]}}}
+    s["enabledPlugins"] = {f"{n}@{spec['marketplace']}": True for n in names}
 
     # 역할이 켜지 않은 전역 플러그인은 전부 끈다. 켜야 할 것을 적는 게 아니라
     # 꺼야 할 것을 빠짐없이 적는 쪽이라, 전역에 플러그인이 새로 깔려도 새지 않는다.

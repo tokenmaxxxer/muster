@@ -1,15 +1,6 @@
 {
-  "extraKnownMarketplaces": {
-    "tokenmaxxxer-ops": {
-      "source": {
-        "source": "directory",
-        "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/ops-agent-rulebook"
-      }
-    }
-  },
-  "enabledPlugins": {
-    "ops-agent-env@tokenmaxxxer-ops": true
-  },
+  "marketplace": "tokenmaxxxer-ops",
+  "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/ops-agent-rulebook",
   "sandbox": {
     "enabled": true,
     "network": {
