@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""게이트 자체 점검. 네트워크·GitHub 없이 도는 것만.
+"""muster 자체 점검. 네트워크·GitHub 없이 도는 것만.
 
-  python3 test_orchestrator.py
+  python3 test_gates.py
 """
 import json
 import subprocess
@@ -10,7 +10,66 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "gates"))
+sys.path.insert(0, str(Path(__file__).parent))
 import gates
+import spawn
+
+
+def _board(td: str, subject: str, **roles: str) -> Path:
+    """계약 v2 §10 의 블랙보드를 만든다: docs/reports/records/<subject>/<역할>.md"""
+    root = Path(td) / "repo"
+    d = root / spawn.BOARD / subject
+    d.mkdir(parents=True)
+    for role, fm in roles.items():
+        (d / f"{role}.md").write_text(f"---\n{fm}\n---\n\n본문\n")
+    return root
+
+
+def t_slug_is_directory_name():
+    """§9: 레포 디렉터리 이름. 리모트가 없어도 깨지지 않는 것이 요점이다."""
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td) / "car-wash-app"
+        d.mkdir()
+        assert spawn.slug(str(d)) == "car-wash-app", spawn.slug(str(d))
+
+
+def t_board_reads_loop_state():
+    with tempfile.TemporaryDirectory() as td:
+        root = _board(td, "2026-07-26-wash",
+                      product="kind: product-record\nloop_state: measuring",
+                      feasibility="kind: feasibility-record\nloop_state: verdict\nverdict: go")
+        b = spawn.board(root)
+        assert list(b) == ["2026-07-26-wash"], b
+        assert b["2026-07-26-wash"]["product"]["loop_state"] == "measuring"
+        assert b["2026-07-26-wash"]["feasibility"]["verdict"] == "go"
+        line = "\n".join(spawn.status(str(root)))
+        assert "loop_state: measuring" in line, line
+        assert "verdict: go" in line, line
+        # 기록이 없는 역할을 "상태 없음"으로 뭉뚱그리면 누가 안 깨어났는지 못 본다
+        assert "기록 없음" in line and "qa" in line, line
+
+
+def t_board_tolerates_trailing_comment():
+    """§2: 주석을 못 읽는 파서는 **게이트 결함이지 기록의 위반이 아니다**."""
+    with tempfile.TemporaryDirectory() as td:
+        root = _board(td, "s", coding="kind: build-proposal  # re-scoped\n"
+                                      "loop_state: approved   # 사람이 승인함")
+        fm = spawn.board(root)["s"]["coding"]
+        assert fm["kind"] == "build-proposal", fm
+        assert fm["loop_state"] == "approved", fm
+
+
+def t_board_absent_names_the_v1_location():
+    """보드 없음과 v1 자리에 있음은 정반대 처분을 받아야 한다."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td) / "repo"
+        root.mkdir()
+        empty = "\n".join(spawn.status(str(root)))
+        assert "보드 없음" in empty and "계약 v1" not in empty, empty
+
+        (root / "review-record.md").write_text("---\nphase: scoped\n---\n")
+        stale = "\n".join(spawn.status(str(root)))
+        assert "계약 v1" in stale and "review" in stale, stale
 
 
 

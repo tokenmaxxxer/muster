@@ -123,45 +123,91 @@ def ensure_installed(role: str, want: list[str], settings: str) -> None:
         f"  다시 시도한다.")
 
 
-def slug(cwd: str) -> str | None:
-    """origin 리모트에서 <owner>-<repo>. 룰북이 프로젝트를 식별하는 방식과 같다."""
-    p = subprocess.run(["git", "-C", cwd, "remote", "get-url", "origin"],
-                       capture_output=True, text=True)
-    if p.returncode != 0:
-        return None
-    parts = p.stdout.strip().removesuffix(".git").replace(":", "/").split("/")
-    return "-".join(parts[-2:]) if len(parts) >= 2 else None
+ROLES = ("product", "feasibility", "coding", "qa", "review", "ops")
+BOARD = "docs/reports/records"          # 계약 v2 §10. 전부 대상 레포 안에 있다
+# 계약 v1 이 쓰던 자리. 아직 v2 로 안 옮긴 레포를 **말해주기 위해서만** 본다
+LEGACY = {"review": "review-record.md", "feasibility": "feasibility-record.md",
+          "ops": "state.md", "product": "product-record.md"}
+
+
+def slug(cwd: str) -> str:
+    """레포 디렉터리 이름 (계약 v2 §9).
+
+    v1 은 origin 리모트에서 <owner>-<repo> 를 뽑았는데, 그건 폐지된
+    `$QA_WORKSPACE` 의 레포 간 경로 때문에만 있던 것이다. 리모트 없는 레포에서
+    깨지지 않는 것이 §9 가 이 규칙을 고른 이유다.
+    """
+    return Path(cwd).resolve().name
+
+
+def frontmatter(p: Path) -> dict[str, str]:
+    """맨 앞 `---` 블록만 얕게 읽는다. 값의 트레일링 주석은 떼어낸다 —
+    계약 §2: 주석을 허용하지 않는 파서는 **게이트 결함이지 기록의 위반이 아니다**."""
+    try:
+        text = p.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    body = text.split("---", 2)
+    if len(body) < 3:
+        return {}
+    out = {}
+    for line in body[1].splitlines():
+        k, sep, v = line.partition(":")
+        if sep and k.strip() and not k.startswith((" ", "-", "\t")):
+            out[k.strip()] = v.split("#")[0].strip()
+    return out
+
+
+def board(root: Path) -> dict[str, dict[str, dict[str, str]]]:
+    """블랙보드를 읽는다: subject → 역할 → frontmatter (계약 v2 §10)."""
+    recs = root / BOARD
+    if not recs.is_dir():
+        return {}
+    found = {}
+    for d in sorted(p for p in recs.iterdir() if p.is_dir()):
+        roles = {r: frontmatter(d / f"{r}.md") for r in ROLES if (d / f"{r}.md").is_file()}
+        if roles:
+            found[d.name] = roles
+    return found
 
 
 def status(cwd: str) -> list[str]:
-    """각 역할이 노출한 상태를 **읽는다**. 쓰지 않는다 (protocol.md §1).
+    """보드를 **읽는다**. 쓰지 않는다 (protocol.md §1).
 
     상태는 에이전트의 것이다. muster 가 이걸 고치기 시작하면 룰북의 전이 게이트를
-    우회하게 된다 — qa-cycle 은 state.md 쓰기를 가로채 막지만, 그 파일을 밖에서
-    고치면 문지기를 안 거친다.
+    우회하게 된다 — 게이트는 기록 쓰기를 가로채 막지만, 그 파일을 밖에서 고치면
+    문지기를 안 거친다.
     """
-    # 역할 → 상태 파일. 대부분의 사이클은 프로젝트 디렉터리에 기록을 두고,
-    # qa 만 중앙 워크스페이스를 쓴다(여러 프로젝트를 한 곳에서 추적하므로).
-    IN_PROJECT = {"review": "review-record.md", "feasibility": "feasibility-record.md",
-                  "ops": "state.md", "product": "product-record.md"}
-    root, s = Path(cwd).resolve(), slug(cwd)
-    out = [f"프로젝트: {s or '(git 리모트 없음)'}   경로: {root}"]
+    root = Path(cwd).resolve()
+    out = [f"프로젝트: {slug(cwd)}   경로: {root}"]
 
-    def frontmatter(p: Path) -> str:
-        parts = p.read_text().split("---")
-        return " / ".join(l.strip() for l in (parts[1] if len(parts) > 2 else "").splitlines()
-                          if l.strip()) or "(frontmatter 없음)"
+    b = board(root)
+    if b:
+        for subject, roles in b.items():
+            out.append(f"subject: {subject}")
+            for r in ROLES:
+                fm = roles.get(r)
+                if fm is None:
+                    continue
+                bits = [f"loop_state: {fm.get('loop_state', '(없음)')}"]
+                if fm.get("verdict"):          # feasibility. coding 이 여기 깨어난다(§3)
+                    bits.append(f"verdict: {fm['verdict']}")
+                out.append(f"  [{r}] " + "   ".join(bits))
+            missing = [r for r in ROLES if r not in roles]
+            if missing:
+                out.append(f"  (기록 없음: {', '.join(missing)})")
+        return out
 
-    qa_ws = os.environ.get("QA_WORKSPACE") or json.loads(
-        (ROOT / "roles/qa.json").read_text()).get("env", {}).get("QA_WORKSPACE", "")
-    qa_st = Path(qa_ws) / "projects" / (s or "") / "state.md" if qa_ws and s else None
-    out.append(f"[qa] {frontmatter(qa_st)}" if qa_st and qa_st.exists()
-               else f"[qa] 진행 중 아님{'' if qa_ws else ' (QA_WORKSPACE 미설정)'}")
-
-    for role, name in sorted(IN_PROJECT.items()):
-        hits = [p for p in (root / name, root / "docs" / name) if p.exists()]
-        out.append(f"[{role}] {frontmatter(hits[0])}" if hits else f"[{role}] 진행 중 아님")
-    out.append("[coding] 상태기계 없음 — 스티어링만 한다")
+    # 보드가 없다. "아무 일도 없다"와 "옛 자리에 있다"는 정반대 처분을 받아야 한다.
+    stale = sorted(r for r, name in LEGACY.items()
+                   if (root / name).exists() or (root / "docs" / name).exists())
+    if stale:
+        out.append(f"보드 없음. 계약 v1 자리에 기록이 있다: {', '.join(stale)}")
+        out.append(f"  이 레포는 아직 계약 v2 로 안 옮겨졌다. v2 는 {BOARD}/<subject>/<역할>.md 다.")
+    else:
+        out.append(f"보드 없음 ({BOARD}/). 아직 아무 역할도 기록을 쓰지 않았다.")
     return out
 
 

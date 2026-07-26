@@ -39,39 +39,61 @@ plugin set and boundary.
 Anything muster starts knowing beyond these three is the design leaking. "Which
 step QA is on" is fine to know; "why it is on that step" must not be.
 
-## 2. The state-exposure contract
+## 2. The state-exposure contract — muster does not own it
 
-Each agent exposes its state in **one readable place**. The format is markdown
-with YAML frontmatter (the format `qa-cycle` already uses).
+**`docs/specs/role-handoff-contract.md` (v2, `status: final`) is the authority
+here, not this document.** It lives in `review-agent-rulebook` and defines the
+shared record format for all six roles. What follows is only what muster needs
+in order to read the board; where the two disagree, the contract wins.
+
+The board is fully in-repo (contract §10): every role writes one status record
+at `docs/reports/records/<subject>/<role>.md`, inside doctrine's `reports`
+bucket. muster reads the frontmatter and nothing else.
 
 ```yaml
----
-phase: session-executed
-updated_by: testrun
-transition: session-chartered -> session-executed
-evidence: runs/2026-07-25-smoke.md
----
+kind: feasibility-record
+subject: 2026-07-26-car-wash
+produced_by: feasibility
+loop_state: verdict
+verdict: go
 ```
 
-There are two conventions. **Most cycles keep their record in the project
-directory; only qa uses a central workspace** — qa tracks many projects from one
-place.
+`loop_state` (contract §7) is **the one field of a role's state machine other
+roles may depend on.** A role's internal sub-states are its own business and
+muster must not try to infer them.
 
-| role | where state lives |
-|---|---|
-| qa | `$QA_WORKSPACE/projects/<owner>-<repo>/state.md` |
-| review | `<project>/review-record.md` (overridden by `REVIEW_RECORD_NAME`) |
-| feasibility | `<project>/feasibility-record.md` |
-| ops | `<project>/state.md` |
-| product | `<project>/product-record.md` |
-| coding | **none** — never promoted to a state machine. It only steers |
+Two things muster's reader has to get right, both named by the contract:
+
+- **Trailing comments are legal** (§2): `kind: build-proposal  # re-scoped`. A
+  parser that cannot read them is *a gate defect, not a violation by the
+  record's author.*
+- **A per-repo identifier is the repo's directory name** (§9). v1 derived
+  `<owner>-<repo>` from the git remote; that existed only for the now-abolished
+  `$QA_WORKSPACE` path, and the directory name is what keeps a remoteless repo
+  working.
 
 **Three rules**
 
-1. A state file is written by **exactly one plugin**. `qa-cycle` is the sole
-   owner of `state.md`.
-2. Transition control belongs to that plugin's `PreToolUse` gate. Not to muster.
+1. A record is written by **exactly one role** (contract §11's ownership table).
+2. Transition control belongs to that role's own gate. Not to muster.
 3. **muster is read-only.** To move state, call that role's command.
+
+### Transition state, stated plainly
+
+The contract's own text says landing it in each rulebook is separate work, "one
+proposal per repo", and as of 2026-07-26 **no rulebook has landed it and no
+repository has a board.** So muster reads the v2 board first and, finding none,
+checks the v1 locations (`review-record.md`, `feasibility-record.md`,
+`state.md`, `product-record.md`) — not to use them, but to say *"this repo has
+not moved to v2 yet"* instead of the flat "nothing in progress" that a v1 repo
+would otherwise get. **A false quiet is the failure mode being avoided.**
+
+`roles/qa.json` still carries `QA_WORKSPACE` and a sandbox `allowWrite` scoped
+to it. Contract §10 abolishes that external tree, but removing it before the qa
+rulebook lands v2 would break a rulebook that currently works — and under v2
+that same `allowWrite` will have to cover the target repo instead, since qa's
+evidence moves in-repo. Both changes belong to the same commit as qa's landing,
+not to this one.
 
 ## 3. A role is a plugin set plus a boundary
 
@@ -143,14 +165,19 @@ it on.
 token is consumed the moment it passes.
 
 What a token actually guarantees is not "a human did this" but **"an actor
-cannot mint its own approval."** That property survives replacing the approver
-with a **review agent in a separate context** — the approving session is a
-different process, a different plugin set, a different context from the working
-one.
+cannot mint its own approval."**
 
-> ⚠️ This would change `qa-cycle`'s design intent (human-only). Changing it means
-> changing `docs/specs/qa-cycle-state-machine.md` and `signoff` together, and
-> that is the rulebook owner's decision. muster must not route around it.
+**Whether an agent may ever hold that seat is settled elsewhere, and currently
+settled as no.** Contract §8 ("The human's seat") names four judgment points
+reserved for a human — minting or retiring a `subject`, the verdict tokens the
+contract reserves (qa's is-this-a-defect call), resolving cross-role disputes,
+and **approving scope changes**. warrant halting a headless coding run at
+`proposed → approved` is that clause being honoured, not a defect.
+
+> ⚠️ Moving any of those four to an agent is an amendment to the handoff
+> contract, decided there. muster must not route around it, and neither must a
+> single rulebook's hook. A proposal that tried exactly that was withdrawn on
+> 2026-07-26.
 
 ## 6. Invariants
 
@@ -181,9 +208,13 @@ one.
 
 ## 8. Unsettled
 
-- **State exposure for the coding rulebook** — there is no state machine today.
-  Whether it needs a promotion like `qa-cycle`'s, or whether coding is right to
-  run stateless, is undecided.
-- **Moving the approver to an LLM** — see §5. The rulebook owner's decision.
+- **Landing contract v2 in the six rulebooks** — the contract's own text says
+  this is one proposal per repo, and none has landed. Until then no repository
+  has a board and muster has nothing to read. This is the prerequisite for
+  everything below it.
+- **A WAKES-ON watcher** — contract §3 names "a future automated watcher, if one
+  is built" as the thing that could carry the table instead of a human. That is
+  muster's job, and it implements §3's table rather than inventing a schedule.
+  It cannot be written before the board exists.
 - **What calls muster** — a person directly, cron, or an issue webhook. For
   stages 1–2 a person is enough. No long-running process is being built.
