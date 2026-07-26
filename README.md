@@ -73,9 +73,28 @@ A local checkout still wins when one exists. `roles/<role>.json` keeps an option
 instead of the remote — so editing a rulebook and running it through muster does
 not require a commit and a push first.
 
-**A marketplace clone does not update itself.** `spawn.py` prints the rulebook's
-sha on every spawn, so a run against a stale clone is visible rather than assumed;
-`/plugin marketplace update <name>` refreshes it.
+**Nothing updates itself, and updating the clone is not enough.** A session loads
+plugins from `~/.claude/plugins/cache/`, not from the marketplace clone, and the two
+drift apart: `claude plugin update` compares the `version` *string* in plugin.json,
+and every rulebook sits at 0.1.0 forever, so it answers "already at the latest
+version" however many commits behind the cache is. Measured 2026-07-27: clone
+2018d54, cache 7107a49, and a gate fix merged minutes earlier was not what ran.
+
+`spawn.py` prints the **installed** sha on every spawn and says so when it differs
+from the clone. `spawn.py update [role]` closes the gap by uninstalling and
+reinstalling, which is the only route that moves the cache.
+
+Two things can pin a rulebook where `update` cannot move it, and both are reported
+rather than silently tolerated:
+
+- **A ghost registry entry.** `installed_plugins.json` keeps the entry when the
+  cache directory is deleted. An entry that says "installed" makes the installer
+  skip the plugin, so the cache never comes back and the session loads no rulebook
+  at all while muster reports it as present. Delete the named entry.
+- **A local-scope install.** A bundle installed into some project's
+  `.claude/settings.local.json` holds its dependencies at that commit; the
+  user-scope uninstall reports success and leaves the entry in place. Uninstall the
+  bundle with `--scope local` from that project.
 
 ### Before the first run: the target repo needs the contract
 
