@@ -46,12 +46,63 @@ success** — which contaminates an ablation outright.
 |---|---|---|
 | product | tokenmaxxxer-product | what to build |
 | feasibility | tokenmaxxxer-feasibility | whether it can be built, from the spec alone, with no market reasoning |
-| coding | tokenmaxxxer-coding | builds it (steering only, no state machine) |
+| coding | tokenmaxxxer-coding | builds it — `build-proposal`, `loop_state: proposed,approved,landed` |
 | review | tokenmaxxxer-review | whether it matches the spec, requirement by requirement |
 | qa | tokenmaxxxer-qa | whether it actually runs |
 | ops | tokenmaxxxer-ops | ships it and keeps it up |
 
 ## Using it
+
+### Before the first run: the target repo needs the contract
+
+Every role reads and writes the shared board defined by
+`docs/specs/role-handoff-contract.md`, and each rulebook's gate looks for that file
+**in the repository being worked on**. Without it a role still runs and still
+produces good-looking output — but with none of the contract's common header, so
+nothing lands on the board and no other role ever wakes. The session exits 0 and
+says nothing about it.
+
+`spawn.py` therefore refuses to start:
+
+```
+$ python3 spawn.py product "…" -C ~/work/new-app
+대상 레포에 docs/specs/role-handoff-contract.md 가 없다: …
+```
+
+Copy it in once per project:
+
+```bash
+cp <any rulebook>/docs/specs/role-handoff-contract.md \
+   ~/work/new-app/docs/specs/
+```
+
+`--no-contract` skips the check, for work that is not going near the board (asking
+the coding role for a one-off change, say). It is a flag rather than a warning
+because the failure it prevents is silent, and a warning on stderr in a headless
+run is not read.
+
+### The loop
+
+One call runs one role. After it, ask the board who is up next; `wake` evaluates
+contract §3's WAKES-ON table and names them.
+
+```bash
+python3 spawn.py product "build me a car-wash timing app" -C ~/work/new-app
+python3 spawn.py wake -C ~/work/new-app
+#   [feasibility] hypothesis docs/proposals/…md — feasibility has not read it yet
+python3 spawn.py feasibility "the board woke you. …" -C ~/work/new-app
+python3 spawn.py wake -C ~/work/new-app
+#   nothing standing — feasibility acknowledged it and is mid-work
+```
+
+**A board that has not changed wakes nobody** (contract §6). That is what ends the
+qa↔coding cycle rather than letting it ping-pong.
+
+`wake` reports; it does not spawn. Two of the six rows are content judgments —
+product's ("does this question the acceptance criteria") and ops's ("is this ready
+to roll out") — so they are printed as *not evaluated*, never as *did not fire*.
+
+### From a conversation
 
 Calling it from a conversation is the default. No separate trigger was built — the
 place where work gets handed over is already the conversation.
@@ -64,16 +115,26 @@ place where work gets handed over is already the conversation.
 /orchestrate:run qa /testrun:testrun smoke
 ```
 
-From a shell:
+### Every command
 
 ```bash
 python3 spawn.py                              # read the board (read-only)
 python3 spawn.py wake                         # who does the board wake? (contract §3)
-python3 spawn.py qa "/testrun:testrun smoke" -C ~/work/some-repo
-python3 spawn.py review "x" --dry-run         # print the merged settings only
+python3 spawn.py <role> "<task>" -C <repo>    # bring up that role
+python3 spawn.py <role> "x" --dry-run         # print the merged settings only
+python3 spawn.py <role> "x" --no-contract     # skip the contract precondition
 ```
 
 Authentication uses whatever is already logged in. No token, no secret.
+
+### Where a run stops on purpose
+
+Two halts are the contract working, not failures to route around:
+
+- **coding, at `proposed → approved`.** Contract §8 reserves approving scope changes
+  for a human. A headless run stops there and waits.
+- **any role, on a first read of an upstream artifact.** Contract §12 makes the role
+  ask once, by name, before acting on it — and forbids guessing the answer.
 
 ## Isolation — a sandbox, not a container
 
@@ -134,14 +195,17 @@ python3 test_gates.py
 
 ## Open
 
-- **`warrant`'s approval gate blocks headless runs (reproduced).** With the coding
-  rulebook enabled, work stops at the pre-start approval, and a headless session has
-  nobody to approve. `review-cycle` and `qa-cycle` already show the shape of the answer:
-  a working session cannot mint its own approval and only accepts a single-use token
-  issued from the user's turn. Applying that pattern to warrant resolves it, but that is
-  the rulebook owner's call.
-- **The coding rulebook has no state machine.** The other five roles were promoted to
-  `<role>-cycle`.
-- **Scoring is manual.** Whether a finding hit an answer-key entry is adjudicated by a
-  person (the key's adjudication clause). The runner only builds the scoresheet —
+- **A WAKES-ON watcher that also runs.** `wake` names whom to open; a person still
+  opens them. Contract §3 leaves that seat for "a future automated watcher, if one
+  is built". Worth building only once a subject has been carried end to end by
+  hand — every step so far has surfaced something a loop would have swallowed.
+- **The nine pre-existing failures in `feasibility-agent-rulebook`'s gate suite.**
+  They drive the gate at the v1 `feasibility-record.md` path, which its owned-path
+  rule no longer covers. Whether the gate should still govern it, or the cases
+  should move, is that rulebook's call.
+- **Contract §3's table disagrees with §5.** §5 says every role wakes on a finding
+  addressed to it; the table names findings only in coding's row. `wakes.py`
+  follows §5 — the table alone would leave findings addressed to anyone else unseen.
+- **Scoring is manual.** Whether a finding hit an answer-key entry is adjudicated by
+  a person (the key's adjudication clause). The runner only builds the scoresheet —
   imitating automatic adjudication is how the ledger starts lying.

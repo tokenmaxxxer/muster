@@ -43,12 +43,61 @@ doctrine 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개
 |---|---|---|
 | product | tokenmaxxxer-product | 무엇을 만들지 |
 | feasibility | tokenmaxxxer-feasibility | 될 일인지 (명세만 보고, 시장 논리 없이) |
-| coding | tokenmaxxxer-coding | 만든다 (스티어링만, 상태기계 없음) |
+| coding | tokenmaxxxer-coding | 만든다 — `build-proposal`, `loop_state: proposed,approved,landed` |
 | review | tokenmaxxxer-review | 명세대로인지 (요구사항별 판정) |
 | qa | tokenmaxxxer-qa | 실제로 도는지 |
 | ops | tokenmaxxxer-ops | 내보내고 지킨다 |
 
 ## 쓰기
+
+### 첫 실행 전 — 표적 레포에 계약 파일이 있어야 한다
+
+모든 역할이 `docs/specs/role-handoff-contract.md` 가 정의한 공유 보드를 읽고 쓰며,
+각 룰북의 게이트는 그 파일을 **작업 중인 레포에서** 찾는다. 없으면 역할은 그래도
+돌고 그럴듯한 산출물도 낸다 — 다만 계약의 공통 헤더가 하나도 안 붙어서 보드에
+아무것도 안 올라가고 다른 역할이 영영 안 깨어난다. 세션은 종료 0 이고 그 사실을
+아무것도 말해주지 않는다.
+
+그래서 `spawn.py` 가 아예 멈춘다:
+
+```
+$ python3 spawn.py product "…" -C ~/work/new-app
+대상 레포에 docs/specs/role-handoff-contract.md 가 없다: …
+```
+
+프로젝트당 한 번 복사해 넣는다:
+
+```bash
+cp <아무 룰북>/docs/specs/role-handoff-contract.md \
+   ~/work/new-app/docs/specs/
+```
+
+`--no-contract` 로 건너뛸 수 있다. 보드를 안 쓸 작업(코딩 역할에 단발 수정을
+맡기는 것 같은)에만 쓴다. 경고가 아니라 플래그인 이유는 이 검사가 막는 실패가
+조용하기 때문이다 — 헤드리스에서 stderr 경고는 아무도 안 읽는다.
+
+### 루프
+
+한 번 부르면 한 역할이 돈다. 끝나면 보드에게 다음이 누구인지 묻는다. `wake` 가
+계약 §3 의 WAKES-ON 표를 평가해 지목한다.
+
+```bash
+python3 spawn.py product "세차 타이밍 앱을 기획해라" -C ~/work/new-app
+python3 spawn.py wake -C ~/work/new-app
+#   [feasibility] hypothesis docs/proposals/…md — feasibility 가 아직 안 읽었다
+python3 spawn.py feasibility "보드가 너를 깨웠다. …" -C ~/work/new-app
+python3 spawn.py wake -C ~/work/new-app
+#   선 것 없음 — feasibility 가 확인했고 지금 작업 중이다
+```
+
+**바뀌지 않은 보드는 아무도 깨우지 않는다**(계약 §6). qa↔coding 이 무한 핑퐁하지
+않고 끝나는 것이 이 규칙 덕이다.
+
+`wake` 는 보고만 하고 띄우지 않는다. 여섯 줄 중 둘은 내용 판단이라 —
+product 의 "수용 기준을 흔드는가", ops 의 "내보낼 준비가 됐는가" — **"안 깨어남"이
+아니라 "못 잼"으로 찍힌다.**
+
+### 대화에서
 
 대화에서 부르는 것이 기본이다. 트리거를 따로 만들지 않는다 — 일을 맡기는 자리가
 이미 대화이기 때문이다.
@@ -61,16 +110,26 @@ doctrine 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개
 /orchestrate:run qa /testrun:testrun smoke
 ```
 
-셸에서 직접:
+### 명령 전부
 
 ```bash
 python3 spawn.py                              # 보드 조회 (읽기 전용)
 python3 spawn.py wake                         # 보드가 누구를 깨우나 (계약 §3)
-python3 spawn.py qa "/testrun:testrun smoke" -C ~/work/some-repo
-python3 spawn.py review "x" --dry-run         # 합쳐진 설정만 본다
+python3 spawn.py <역할> "<맡길 일>" -C <레포>   # 그 역할을 띄운다
+python3 spawn.py <역할> "x" --dry-run          # 합쳐진 설정만 본다
+python3 spawn.py <역할> "x" --no-contract      # 계약 전제조건을 건너뛴다
 ```
 
 인증은 로그인된 것을 그대로 쓴다. 토큰도 시크릿도 필요 없다.
+
+### 일부러 멈추는 자리
+
+두 정지는 계약이 지켜지는 것이지 우회할 실패가 아니다:
+
+- **coding, `proposed → approved` 에서.** 계약 §8 이 범위 변경 승인을 사람에게
+  유보한다. 헤드리스는 거기서 서서 기다린다.
+- **어느 역할이든, upstream 산출물의 첫 읽기에서.** 계약 §12 가 그것을 근거로
+  움직이기 전에 한 번 묻게 하고, 답을 **추측하는 것을 금지한다.**
 
 ## 격리 — 컨테이너가 아니라 샌드박스
 
@@ -125,10 +184,16 @@ python3 test_gates.py
 
 ## 미해결
 
-- **`warrant` 승인 게이트가 헤드리스에서 막힌다 (재현 완료).** coding 룰북을 켜면 작업 시작 전
-  승인에서 멈추는데 헤드리스에는 승인할 사람이 없다. `review-cycle`·`qa-cycle` 이
-  답의 형태를 보여준다 — 작업 세션이 자기 승인을 못 만들고 사용자 턴에서 발행된
-  일회용 토큰만 받는다. 같은 패턴을 warrant 에 적용하면 풀리지만 룰북 소유자의 결정이다.
-- **coding 룰북에 상태기계가 없다.** 다른 다섯 역할은 `<role>-cycle` 로 승격됐다.
+- **WAKES-ON 감시자를 실제로 돌리는 것.** `wake` 는 누구를 열지 말해줄 뿐 여는 것은
+  사람이다. 계약 §3 이 "만들어진다면 미래의 자동 감시자"에게 그 자리를 남겨뒀다.
+  다만 subject 하나를 손으로 끝까지 몰아본 다음에 만드는 게 맞다 — 지금까지 매
+  단계마다 루프였으면 삼켰을 것이 하나씩 나왔다.
+- **`feasibility-agent-rulebook` 게이트 스위트의 기존 9건 실패.** v1 경로인
+  `feasibility-record.md` 에 대고 게이트를 때리는데, 소유 경로 규칙이 그 경로를 더는
+  안 덮는다. 게이트가 그걸 계속 관할해야 하는지, 케이스를 옮겨야 하는지는 그 룰북의
+  판단이다.
+- **계약 §3 표와 §5 가 어긋난다.** §5 는 모든 역할이 자기 앞 finding 에 깨어난다고
+  하는데, 표는 coding 줄에만 finding 을 적었다. `wakes.py` 는 §5 를 따랐다 — 표만
+  따르면 coding 외 역할에게 온 finding 을 아무도 안 본다.
 - **채점이 수동이다.** 발견이 정답 키를 맞혔는지는 사람이 판정한다(키의 adjudication
   조항). 러너는 채점표만 만든다 — 자동 판정을 흉내 내면 원장이 거짓말을 시작한다.
