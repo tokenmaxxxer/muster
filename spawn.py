@@ -214,8 +214,77 @@ def role_settings(role: str) -> dict:
     return s
 
 
+def _plugin_names(spec: dict) -> list[str]:
+    d = rulebook_dir(spec)
+    if d is None:
+        return []
+    return [f"{p['name']}@{spec['marketplace']}"
+            for p in json.loads(_mkt(d).read_text())["plugins"]
+            if not p["name"].endswith("-agent-env")]
+
+
+def _installed_sha(plugin: str) -> str:
+    try:
+        e = json.loads((Path.home() / ".claude/plugins/installed_plugins.json")
+                       .read_text())["plugins"][plugin]
+        return e[0].get("gitCommitSha", "")[:7]
+    except (OSError, ValueError, KeyError, IndexError):
+        return ""
+
+
+def update(roles: list[str]) -> int:
+    """룰북을 지금 원격에 있는 것으로 갱신한다.
+
+    **지우고 다시 까는 것 말고는 길이 없다.** `claude plugin update` 는
+    plugin.json 의 `version` **문자열**만 보는데 룰북 아홉 개가 전부 0.1.0 에
+    머물러 있어서, 커밋이 몇 개 앞서 있든 "이미 최신"이라고 답한다. 마켓플레이스
+    클론을 갱신해도 설치본은 그대로다 — 그 둘은 다른 자리다(실측 2026-07-27:
+    클론 2018d54 / 설치본 7107a49, 방금 머지한 게이트 수정이 세션에 안 붙었다).
+    """
+    rc = 0
+    for role in roles:
+        spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
+        if spec.get("repo") and not spec.get("path"):
+            subprocess.run(["claude", "plugin", "marketplace", "update", spec["marketplace"]],
+                           capture_output=True, text=True)
+        names = _plugin_names(spec)
+        if not names:
+            print(f"[{role}] 룰북이 없다 — 먼저 한 번 띄워서 받는다", file=sys.stderr)
+            rc = 1
+            continue
+        before = {n: _installed_sha(n) for n in names}
+        head = subprocess.run(["git", "-C", str(rulebook_dir(spec)), "rev-parse", "--short=7", "HEAD"],
+                              capture_output=True, text=True).stdout.strip()
+        for n in names:
+            subprocess.run(["claude", "plugin", "uninstall", n], capture_output=True, text=True)
+            subprocess.run(["claude", "plugin", "install", n], capture_output=True, text=True)
+        for n in names:
+            after = _installed_sha(n)
+            if not after:
+                print(f"[{role}] {n}: 설치 실패", file=sys.stderr)
+                rc = 1
+            elif after != before[n]:
+                print(f"[{role}] {n}: {before[n] or '없음'} -> {after}")
+            elif head and not (head.startswith(after) or after.startswith(head)):
+                # 지웠다 깔았는데 안 움직였다. 대개 그 플러그인을 물고 있는 번들이
+                # **local scope** 로 깔려 있어서다 — user scope 의 uninstall 은
+                # 성공했다고 답하고 항목은 그대로 남는다(실측 2026-07-27).
+                # "그대로"로 넘기면 고친 룰북을 못 쓰는 채로 다 됐다고 믿게 된다.
+                print(f"[{role}] {n}: {after} 에서 **안 움직였다** (클론은 {head}). "
+                      f"local scope 설치가 물고 있을 수 있다: "
+                      f"claude plugin uninstall <번들> --scope local", file=sys.stderr)
+                rc = 1
+            else:
+                print(f"[{role}] {n}: {after} (그대로)")
+    return rc
+
+
 def rulebook_version(role: str) -> str:
-    """역할이 실제로 물고 있는 룰북의 커밋. 못 읽으면 그렇다고 말한다.
+    """역할이 **실제로 물고 도는** 룰북의 커밋. 못 읽으면 그렇다고 말한다.
+
+    클론이 아니라 **설치본**을 본다. 세션은 `~/.claude/plugins/cache/` 의 설치본을
+    읽고, 마켓플레이스 클론을 갱신해도 그쪽은 안 따라온다. 클론의 sha 를 보고하면
+    고쳐진 줄 알고 안 고쳐진 것을 돌린다 — 이 함수가 막으려던 바로 그 착각이다.
 
     로컬 체크아웃이든 github 클론이든 ref 나 sha 로 고정되지 않는다 — **그 순간
     거기 있는 것이 그대로 돈다.** 다른 브랜치든, 몇 커밋 뒤처졌든, 커밋 안 한 수정이
@@ -238,7 +307,18 @@ def rulebook_version(role: str) -> str:
         return "버전 불명 (git 레포가 아니다)"
     branch = git("rev-parse", "--abbrev-ref", "HEAD") or "?"
     dirty = "+커밋안됨" if git("status", "--porcelain") else ""
-    return f"{sha}{dirty} ({branch})"
+
+    # 도는 것은 설치본이다. 클론과 갈리면 **클론이 아니라 설치본**을 앞세운다.
+    live = {s for s in (_installed_sha(n) for n in _plugin_names(spec)) if s}
+    if not live:
+        return f"{sha}{dirty} ({branch}) — 설치본 없음"
+    if len(live) > 1:
+        return f"설치본이 서로 다르다: {', '.join(sorted(live))} / 클론 {sha} ({branch})"
+    installed = live.pop()
+    if not sha.startswith(installed) and not installed.startswith(sha):
+        return (f"{installed} (도는 것) ≠ {sha}{dirty} ({branch}, 클론) "
+                f"— `spawn.py update {role}` 로 맞춘다")
+    return f"{installed}{dirty} ({branch})"
 
 
 def _installed() -> set[str]:
@@ -546,6 +626,9 @@ def main() -> int:
     if a.role == "init":
         # 계약을 심는다. muster 가 남의 레포에 쓰는 유일한 경우.
         return init_contract(a.cwd)
+    if a.role == "update":
+        # 룰북을 원격 최신으로. 인자를 비우면 전부.
+        return update([a.task] if a.task else list(ROLES))
     if a.role == "wake":
         # 계약 §3 의 표를 기계로 평가하고, **누구를 열지**를 말한다.
         # 띄우지 않는다 — 무엇을 맡길지는 그 줄을 만족시킨 사건이 정하지 않는다.

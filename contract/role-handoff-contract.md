@@ -56,13 +56,13 @@ coding's records, closing the trial's two unsanctioned-kind gaps.
 | kind | produced by | path | `loop_state` vocabulary | required fields beyond common header |
 |---|---|---|---|---|
 | `hypothesis` | product | `docs/proposals/<date>-<slug>.md` | `idle,scoping,researching,hypothesis-registered,measuring,decided` | Background/Context, Problem Statement, Candidate Hypotheses, Known Risks, Goals/Success Metrics |
-| `product-record` | product | `docs/reports/records/<subject>/product.md` | same as `hypothesis` | pointer to the governing `hypothesis`; running acceptance-criteria notes |
+| `product-record` | product | `docs/reports/records/<subject>/product.md` | same as `hypothesis`, plus `scope-proposed,scope-approved` — see section 19 | pointer to the governing `hypothesis`; running acceptance-criteria notes; scope statement per section 19 once `loop_state` reaches `scope-proposed` |
 | `one-pager` | product | `product/one-pager.md` | n/a (standing doc, not per-subject) | Background/Context, Problem Statement, Candidate Hypotheses, Known Risks, Goals/Success Metrics |
 | `opportunity-tree` | product | `product/opportunity-tree.md` | n/a (continuous interview log) | — |
 | `build-proposal` | coding | `docs/proposals/<date>-build-<slug>.md` | `proposed,approved,landed` | `files:` (write-set freeze list), `## Request`, `## Constraints`, `## What will be done`, `## Out of scope` |
 | `coding-record` | coding | `docs/reports/records/<subject>/coding.md` | same as `build-proposal`, plus `finding-response` sub-entries per item 4, plus `findings-resolved` per section 15 | pointer to active `build-proposal`; commit shas landed; `resolved_findings:` list (when applicable) — see section 15 |
 | `qa-record` | qa | `docs/reports/records/<subject>/qa.md` (fully in-repo; see section 6) | `observed,reproducing,reproduced,handed-off,re-verifying,verified-fixed,not-a-defect,wont-fix` | intake profile, bug reports, regression records, run stats — all in-repo under this record's area |
-| `feasibility-record` | feasibility | `docs/reports/records/<subject>/feasibility.md` | `idle,scoped,probing,verdict` | `market_argument_supplied: false`, `technical`/`prior_art`/`legal_regulatory`/`threat_model` (each `unresolved\|pass:<evidence>\|fail:<evidence>\|blocked:<evidence>`), `verdict: go\|no-go\|conditional` (required once `loop_state` reaches `verdict`), `measurement_design: <description or pointer>`; `technical` enumerates the deploy/runtime config surface (env var names the build must honor) whenever it is foreseeable at feasibility time — see section 17 |
+| `feasibility-record` | feasibility | `docs/reports/records/<subject>/feasibility.md` | `idle,scoped,probing,verdict`, plus `scope-proposed,scope-approved` when this record is the subject's front record — see section 19 | `market_argument_supplied: false`, `technical`/`prior_art`/`legal_regulatory`/`threat_model` (each `unresolved\|pass:<evidence>\|fail:<evidence>\|blocked:<evidence>`), `verdict: go\|no-go\|conditional` (required once `loop_state` reaches `verdict`), `measurement_design: <description or pointer>`; `technical` enumerates the deploy/runtime config surface (env var names the build must honor) whenever it is foreseeable at feasibility time — see section 17 |
 | `spike-report` | feasibility | `docs/reports/records/<subject>/spikes/<spike-slug>.md` | n/a (closed report) | Spike Title, Description/Goal, Type, Timebox, Acceptance Criteria, Tasks, Outcomes, Recommendation, Open questions, Reversibility tag; fixture-N notation if fixtures are involved (records the fixture count it was authored against, so a downstream re-run can detect additions/removals) |
 | `ux-design-record` | ux-design | `docs/reports/records/<subject>/ux-design.md` | `idle,drafting,reviewed` | pointer to the governing `hypothesis`/`product-record`; screen/flow/wireframe specs or pointers to them |
 | `review-record` | review | `docs/reports/records/<subject>/review.md` | `idle,scoped,auditing,draft-reported,reported` | `closed_checks:` list keyed to the reviewed code sha — see section 16 |
@@ -88,7 +88,7 @@ the model's parallelism comes from, not an edge case.
 | role | wakes on |
 |---|---|
 | feasibility | a new or changed `hypothesis` record appears on the board |
-| coding | a feasibility `verdict: go`; a `qa-record` defect carrying a human is-this-a-defect verdict; a `finding` with `addressed_to: coding`; a `ux-design-record` reaching `loop_state: reviewed` |
+| coding | a feasibility `verdict: go`; a `qa-record` defect carrying a human is-this-a-defect verdict; a `finding` with `addressed_to: coding`; a `ux-design-record` reaching `loop_state: reviewed` — **all four triggers are gated by section 19's approval gate on a subject's FIRST build wake: none of them may wake coding into a subject's first build unless that subject's front record already shows `loop_state: scope-approved`.** Re-wakes on a subject already past its first build (e.g. a fix for a later finding) are unaffected — the precondition binds only the first entry into build for the subject. |
 | qa | any commit touching `src/`/`tests/` in the running system |
 | review | any commit landed by coding |
 | ux-design | a new or changed `product-record` (or `hypothesis`, for a chain-root case) appears on the board |
@@ -117,6 +117,13 @@ board match this row," not carrying memory of what should happen next.
 the human to run section 18's two value gates before round-done may be set:
 candidate-round-done -> (gates A and B run) -> round-done. Like every wake in
 this table, this edge is human-consulted, never automated — see section 18.
+
+**Pre-work approval-gate edge.** A subject's front record reaching
+`loop_state: scope-proposed` wakes the human to review it and, on approval,
+set `loop_state: scope-approved`: scope-proposed -> (human review) ->
+scope-approved. Like every wake in this table, this edge is human-consulted,
+never automated, and it is the ONLY path to `scope-approved` — no role may
+set that state on its own or any other role's record. See section 19.
 
 ## 4. Consumption semantics
 
@@ -249,7 +256,9 @@ human relaying a handoff.
   is-this-a-defect call).
 - Resolving cross-role disputes that DEPENDS-ON rules (section 4) do not
   settle.
-- Approving scope changes.
+- Approving scope changes, including the pre-work approval gate that moves
+  a subject's front record from `scope-proposed` to `scope-approved`
+  before any building role's first wake on that subject — see section 19.
 - Running section 18's two round-end value gates and setting a subject's
   `round-done` state — required before `round-done` may be set, never
   automated.
@@ -321,6 +330,33 @@ conflict to the user, rather than overwriting or merging into it silently.
 filename tag: coding's `build-proposal` filenames carry `-build-`
 (`<date>-build-<slug>.md`), distinct on its face from product's
 `<date>-<slug>.md`.
+
+**Section 21 grant.** Each role additionally owns, in the target project,
+the specific `docs/decisions/<date>-<slug>.md`, `docs/reports/<date>-<slug>.md`,
+and `docs/specs/` entries that role itself authors under section 21's
+trigger — never the directory as a whole, only the file(s) it writes there.
+This mirrors this table's existing `records/<subject>/<role>.md` grain: a
+role that makes a hard-to-reverse choice owns its own
+`docs/decisions/<date>-<slug>.md`; a role that produces a measurement,
+benchmark, test run, or investigation owns its own
+`docs/reports/<date>-<slug>.md`; a role whose work is system design tied to
+the code owns its own `docs/specs/` entry. Two roles never collide on the
+same file because each owns only the file it itself authored. This grant is
+what makes section 21's placement obligation satisfiable under this
+section's ownership scoping.
+
+**Handbook grant (component-scoped shared-write).** `docs/handbooks/<component>.md`
+is owned by the component, not by a single first-author role: any role that
+changes that component's operational surface (an environment variable,
+config key, dependency, migration, or run/setup/deploy step, per section
+21's handbook trigger) may create or update that component's handbook.
+This is deliberately different from this section's other grants, which are
+single-author write-once; a handbook is a living current-state doc that
+must track whichever role most recently touched the component's
+operational surface, per section 21's write-time maintenance rule.
+`<component>` itself is derived, not chosen, and creating a new handbook
+file requires a search for an existing one first — see section 21's
+"Deriving `<component>`" and "Search before write" paragraphs.
 
 **Carried over, unenforced (v1 §7's flagged tension).** warrant's
 `scope-gate.sh` allows any write under `docs/` unconditionally, regardless
@@ -531,3 +567,155 @@ both gates having fired is a contract violation the structure can point to.
 conventions, single-source-of-truth numbering, or any other concrete
 mechanism — is out of scope for this section. Passing the gate is what
 matters; the mechanism is each round's own choice.
+
+## 19. Pre-work approval gate
+
+Building work — coding, or any role producing the subject's primary
+deliverable — must not start on a subject until a human has approved a
+recorded scope statement. This section defines the gate; section 3's
+pre-work approval-gate edge and the amended coding row wire it into
+WAKES-ON.
+
+- **Who records the scope.** Whichever role is first to open the subject
+  (per section 9's minting rule — product or feasibility, ordinarily)
+  writes a scope statement into its OWN record: what will be done, the
+  intended write surface, what is explicitly out of scope, and how success
+  will be judged. This is written into the front record's own fields; a
+  role never writes another role's record to satisfy this section.
+- **`loop_state: scope-proposed`.** The front role sets its record's
+  `loop_state` to `scope-proposed` once the scope statement is written.
+  This is the state section 2 adds to `product-record` and, when it is the
+  front record instead, to `feasibility-record`.
+- **`loop_state: scope-approved` — human-owned, never self-certified.** Only
+  the human may move a record from `scope-proposed` to `scope-approved`,
+  per section 3's pre-work approval-gate edge and section 8's human's-seat
+  list. No role approves its own scope statement, and no role approves
+  another role's. An agent reading this contract in isolation has no path
+  to write `scope-approved` itself — the state is reachable only through
+  the human-consulted WAKES-ON edge.
+- **What the gate blocks.** No building role may be woken into a subject's
+  FIRST build until that subject's front record shows
+  `loop_state: scope-approved`. Section 3's coding row is amended
+  accordingly: feasibility's `verdict: go`, a qa-record defect, a `finding`
+  addressed to coding, and a `ux-design-record` reaching `reviewed` all
+  remain valid triggers, but none of them independently wakes coding into a
+  subject's first build without `scope-approved` already set on that
+  subject. This is a precondition added on top of the existing triggers,
+  not a replacement for them — adding scope-approved as a parallel,
+  independently-satisfiable edge would leave the pre-existing triggers free
+  to wake the first build on their own, which defeats the gate; the fix is
+  to amend the existing triggers themselves.
+- **Re-wakes are unaffected.** The precondition binds only a subject's
+  first entry into build. A later wake on a subject already past
+  `scope-approved` — a fix for a finding, a qa regression, a ux-design
+  revision — proceeds under the existing rows in section 3 without
+  re-clearing this gate.
+
+## 20. Per-role record minimum content
+
+Every role record (`docs/reports/records/<subject>/<role>.md`, per section
+11) must, at every point it is read by another role or a human, contain
+enough for a next reader to pick the work up cold. This section makes that
+requirement explicit rather than leaving it implicit in section 18 gate B's
+after-the-fact measurement.
+
+A role record must state, at minimum:
+
+1. **What was done** — the concrete work this record's role performed for
+   the subject.
+2. **Why** — including the alternative considered and why it was not taken,
+   whenever the role made a real choice (not required when there was no
+   choice to make).
+3. **The concrete basis the next reader needs to continue** — the upstream
+   commit sha or record path this record's conclusions rest on, this
+   record's own current `loop_state`, and any open (unresolved) `finding`
+   entries touching this subject.
+
+Additionally, whenever the role leaves work open, the record must state:
+
+4. **A next-steps backlog** — what a continuer should do next, concrete
+   enough to act on without re-deriving it from scratch.
+5. **An open-finding resolution path** — for any open finding or advisory
+   the role is aware of touching this subject, the intended resolution path
+   or who owns resolving it, not just the fact that it is open.
+
+This is a minimum, not a template — role-specific required fields (section
+2's table) are additional, not replaced by this list. This section pairs
+with section 18 gate B: gate B measures, after a round, whether a
+zero-context reader can reconstruct and continue from the records alone;
+this section is what each role does at write time so that measurement
+passes instead of failing on records that only show completion, not basis.
+
+## 21. Document placement beyond the role record
+
+The role record (section 11) is the subject-scoped work trail; it is not
+the only place durable project knowledge belongs. In the target project's
+own `docs/`, a role that produces one of the following must file it at the
+stated location instead of folding it into the role record. Section 11's
+"Section 21 grant" paragraph is what gives each role write-ownership of the
+file it authors here — this section states the obligation, that paragraph
+grants the ownership it requires:
+
+- **A hard-to-reverse choice** — a library, file format, schema, protocol,
+  storage engine, or interface picked over a named alternative, or any
+  change to a public/on-disk/wire shape — goes in
+  `docs/decisions/<date>-<slug>.md`, stating what was chosen, over what
+  alternative, and why.
+- **A measurement, benchmark, test run, or investigation** that produced
+  numbers or findings goes in `docs/reports/<date>-<slug>.md`, stating what
+  was run, what came back, and what it means.
+- **System design tied to the code** goes in `docs/specs/`.
+- **An operational surface change** — a role that introduces or changes an
+  environment variable, a config key, a dependency, a migration, or a
+  run/setup/deploy step in the target project — must create or update
+  `docs/handbooks/<component>.md`: what it is, what it defaults to, what
+  breaks without it, and the concrete commands to install, run, and operate
+  the deliverable (not only how to test it).
+
+  **Deriving `<component>`.** Mirroring section 9's `subject` derivation,
+  `<component>` is not asked-for but derived, deterministically, from the
+  artifact being changed: it is the name of the module, service, or
+  config-area that owns the operational surface being touched — e.g. the
+  directory or package containing the env var's consuming code, the
+  dependency's declaring manifest (service directory for a per-service
+  manifest, repo root for a repo-wide one), the migration's target
+  service/database, or the run/setup/deploy step's script or workflow
+  directory. Use that owning directory's own name (its `package.json`/
+  `pyproject.toml` name field, or failing that its directory basename) as
+  the slug, lowercased and hyphenated. Because the slug is read off the
+  surface's owning location rather than chosen by the role, two roles
+  independently changing the same logical surface derive the same slug.
+
+  **Search before write.** Before creating `docs/handbooks/<component>.md`,
+  a role must search `docs/handbooks/*` for a handbook already filed under
+  the derived `<component>` slug (or an evident naming variant of it) and,
+  if found, update that existing file in place rather than creating a new
+  one — mirroring section 9's search-before-mint discipline for `subject`.
+  Skipping this search is what would split one component's operational
+  surface into multiple never-converging handbook files.
+
+  A handbook is a living current-state doc, not a write-once record, so
+  section 11's "Section 21 grant" single-author ownership does not apply to
+  it. Instead, section 11 grants `docs/handbooks/<component>.md`
+  component-scoped shared-write ownership: any role that changes that
+  component's operational surface may create or update that component's
+  handbook, keyed to the component rather than to whichever role authored
+  it first — explicitly distinct from the per-role write-once record
+  ownership, which stays single-author unchanged.
+
+  **Write-time maintenance.** The role that changes a component's
+  operational surface must update that component's handbook in the same
+  unit of work that made the change (same-turn-sync), not on a separate
+  wake. This resolves the living-doc-vs-single-author-ownership
+  contradiction: last change wins as current state, and the surface-changer
+  owns the update, so no handbook is ever asserted-current-but-unmaintained.
+
+The role record links to these documents rather than duplicating their
+content — the record stays the per-role trail (what this role did, why,
+and where to look next); the decision/report/spec is the durable artifact
+future work depends on. This is the target project's own obligation,
+stated here in the contract body so it holds without any external
+doc-classification hook installed on the agents doing the work — the
+pre-work approval gate (section 19) and this placement rule are both
+contract-internal now, not dependent on host tooling the spawned agents do
+not carry.
