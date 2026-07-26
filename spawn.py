@@ -245,9 +245,12 @@ def update(roles: list[str]) -> int:
     rc = 0
     for role in roles:
         spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
-        if spec.get("repo") and not spec.get("path"):
-            subprocess.run(["claude", "plugin", "marketplace", "update", spec["marketplace"]],
-                           capture_output=True, text=True)
+        # 역할 파일에 로컬 path 가 있어도 클론을 갱신한다. 설치는 등록부가 가리키는
+        # 자리에서 이뤄지고, 등록부가 github 이면 로컬 체크아웃을 아무리 당겨도
+        # 설치본은 안 움직인다 — 그러면 "안 움직였다" 의 원인을 local scope 로
+        # 잘못 지목하게 된다(실측 2026-07-27).
+        subprocess.run(["claude", "plugin", "marketplace", "update", spec["marketplace"]],
+                       capture_output=True, text=True)
         names = _plugin_names(spec)
         if not names:
             print(f"[{role}] 룰북이 없다 — 먼저 한 번 띄워서 받는다", file=sys.stderr)
