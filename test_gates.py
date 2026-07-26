@@ -188,6 +188,29 @@ def t_rulebook_version_is_recorded():
             role.unlink()
 
 
+def t_rulebook_falls_back_to_github():
+    """로컬 체크아웃이 있으면 그쪽, 없으면 github. 절대경로 하나 때문에 다른 기계에서
+    아예 안 도는 상태였다 — 역할 파일이 제작자의 홈 경로를 박고 있었다."""
+    import json as _json
+    spec = _json.loads((spawn.ROOT / "roles" / "qa.json").read_text())
+    assert spec.get("repo"), "역할 파일에 repo 가 없으면 github 로 떨어질 수 없다"
+
+    local = spawn.rulebook_source(spec)
+    assert local["source"] == "directory", local        # 개발용 로컬이 이긴다
+
+    spec["path"] = "/nonexistent-checkout"
+    remote = spawn.rulebook_source(spec)
+    assert remote == {"source": "github", "repo": spec["repo"]}, remote
+
+    spec.pop("repo")
+    try:
+        spawn.rulebook_source(spec)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("소스가 없는데 통과시켰다")
+
+
 def t_board_absent_names_the_v1_location():
     """보드 없음과 v1 자리에 있음은 정반대 처분을 받아야 한다."""
     with tempfile.TemporaryDirectory() as td:

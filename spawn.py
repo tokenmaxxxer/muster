@@ -29,6 +29,64 @@ ROOT = Path(__file__).resolve().parent
 USER_SETTINGS = Path.home() / ".claude" / "settings.json"
 
 
+MARKETPLACES = Path.home() / ".claude" / "plugins" / "marketplaces"
+
+
+def _mkt(d: Path) -> Path:
+    return d / ".claude-plugin" / "marketplace.json"
+
+
+def rulebook_source(spec: dict) -> dict:
+    """룰북을 어디서 가져올지. **로컬 체크아웃이 있으면 그쪽이 이긴다.**
+
+    로컬 우선인 이유는 개발이다 — 룰북을 고치면서 muster 로 돌려볼 때 커밋·푸시를
+    거치게 하면 아무도 안 쓴다. 없으면 github 에서 받는다. 비공개 레포도 된다(실측).
+    """
+    p = spec.get("path")
+    if p and _mkt(Path(p)).exists():
+        return {"source": "directory", "path": p}
+    if spec.get("repo"):
+        return {"source": "github", "repo": spec["repo"]}
+    sys.exit(f"룰북을 어디서 가져올지 모른다. 역할 파일에 repo 나 path 가 필요하다: {spec}")
+
+
+def rulebook_dir(spec: dict) -> Path | None:
+    """`marketplace.json` 을 실제로 읽을 수 있는 디렉터리. 아직 없으면 None."""
+    p = spec.get("path")
+    if p and _mkt(Path(p)).exists():
+        return Path(p)
+    clone = MARKETPLACES / spec["marketplace"]
+    return clone if _mkt(clone).exists() else None
+
+
+def ensure_rulebook(role: str, spec: dict) -> Path:
+    """룰북을 손에 넣는다. github 소스면 한 번 받아와야 목록을 읽을 수 있다.
+
+    닭과 달걀: `enabledPlugins` 를 쓰려면 플러그인 이름이 필요하고, 이름은
+    `marketplace.json` 에 있고, 그 파일은 클론이 있어야 읽는다. 그래서 마켓플레이스
+    등록만 담은 설정으로 한 번 돌려 받아오고, 그 다음에 목록을 읽는다.
+    """
+    d = rulebook_dir(spec)
+    if d:
+        return d
+    print(f"[{role}] 룰북을 받는 중: {spec.get('repo')}", file=sys.stderr)
+    warm = {"extraKnownMarketplaces": {spec["marketplace"]: {"source": rulebook_source(spec)}}}
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(warm, f)
+        warm_path = f.name
+    try:
+        subprocess.run(["claude", "-p", "--settings", warm_path],
+                       input="ok", text=True, capture_output=True)
+    finally:
+        os.unlink(warm_path)
+    d = rulebook_dir(spec)
+    if d:
+        return d
+    sys.exit(
+        f"[{role}] 룰북을 받지 못했다: {spec.get('repo') or spec.get('path')}\n"
+        f"  비공개 레포면 git 자격증명이 필요하다. `gh auth status` 로 확인한다.")
+
+
 def role_settings(role: str) -> dict:
     """역할 설정 + 룰북 플러그인 펼침 + 전역 플러그인 차단을 합친 것."""
     f = ROOT / "roles" / f"{role}.json"
@@ -47,13 +105,10 @@ def role_settings(role: str) -> dict:
     #
     # 목록을 손으로 적지 않고 마켓플레이스에서 읽는 이유는 룰북에 플러그인이
     # 추가돼도 여기를 안 고치기 위해서다. env 번들 자체는 내용이 없으므로 제외한다.
-    mkt_file = Path(spec["path"]) / ".claude-plugin" / "marketplace.json"
-    if not mkt_file.exists():
-        sys.exit(f"[{role}] 룰북을 찾을 수 없다: {mkt_file}")
-    names = [p["name"] for p in json.loads(mkt_file.read_text())["plugins"]
+    names = [p["name"] for p in json.loads(_mkt(ensure_rulebook(role, spec)).read_text())["plugins"]
              if not p["name"].endswith("-agent-env")]
 
-    s = {k: v for k, v in spec.items() if k not in ("marketplace", "path")}
+    s = {k: v for k, v in spec.items() if k not in ("marketplace", "path", "repo")}
 
     # 역할 파일의 env 는 **기본값**이지 강제가 아니다. 이미 환경에 있으면 그쪽이 이긴다 —
     # 안 그러면 bench 처럼 격리된 워크스페이스를 넘기려는 호출이 조용히 무시되고,
@@ -79,7 +134,7 @@ def role_settings(role: str) -> dict:
                          f"{', '.join(unresolved)}")
 
     s["extraKnownMarketplaces"] = {
-        spec["marketplace"]: {"source": {"source": "directory", "path": spec["path"]}}}
+        spec["marketplace"]: {"source": rulebook_source(spec)}}
     s["enabledPlugins"] = {f"{n}@{spec['marketplace']}": True for n in names}
 
     # 역할이 켜지 않은 전역 플러그인은 전부 끈다. 켜야 할 것을 적는 게 아니라
@@ -107,18 +162,21 @@ def role_settings(role: str) -> dict:
 def rulebook_version(role: str) -> str:
     """역할이 실제로 물고 있는 룰북의 커밋. 못 읽으면 그렇다고 말한다.
 
-    역할 파일은 룰북을 로컬 **디렉터리**로 가리킨다(`source: directory`). 거기엔
-    ref 도 sha 도 없으므로 **그 순간 체크아웃된 것이 그대로 돈다** — 다른 브랜치든,
-    몇 커밋 뒤처졌든, 커밋 안 한 수정이 있든. 플러그인 레지스트리도 `lastUpdated`
-    타임스탬프만 남기고 커밋은 안 남긴다.
+    로컬 체크아웃이든 github 클론이든 ref 나 sha 로 고정되지 않는다 — **그 순간
+    거기 있는 것이 그대로 돈다.** 다른 브랜치든, 몇 커밋 뒤처졌든, 커밋 안 한 수정이
+    있든. 플러그인 레지스트리도 `lastUpdated` 타임스탬프만 남기고 커밋은 안 남기며,
+    github 클론은 자동 갱신되지도 않는다(실측: 클론 5faa9a7 / 로컬 6c6e358).
 
     핀을 박을 수는 없으니 **무엇이 돌았는지 기록한다.** 이게 없으면 ablation 이
     "룰북 켜고 끄고"를 쟀다고 하면서 어느 룰북인지 말하지 못한다. 실제로 로컬이
     8커밋 뒤처진 채로 반대 결론을 낸 적이 있다(2026-07-26).
     """
-    path = json.loads((ROOT / "roles" / f"{role}.json").read_text())["path"]
+    spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
+    d = rulebook_dir(spec)
+    if d is None:
+        return "버전 불명 (룰북이 아직 없다)"
     def git(*a: str) -> str:
-        p = subprocess.run(["git", "-C", path, *a], capture_output=True, text=True)
+        p = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True)
         return p.stdout.strip() if p.returncode == 0 else ""
     sha = git("rev-parse", "--short", "HEAD")
     if not sha:
@@ -350,7 +408,9 @@ def main() -> int:
     if not a.task:
         sys.exit("맡길 일이 없다. 사용법: spawn.py <역할> \"<맡길 일>\" [-C <경로>]")
 
-    require_contract(a.cwd, a.no_contract)
+    # --dry-run 은 세션을 안 태운다. 계약 검사는 버려질 세션을 막으려는 것이므로
+    # 아무것도 안 띄우는 호출까지 막을 이유가 없다.
+    require_contract(a.cwd, a.no_contract or a.dry_run)
     s = role_settings(a.role)
     on = [k for k, v in s.get("enabledPlugins", {}).items() if v]
     if a.dry_run:

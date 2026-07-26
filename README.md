@@ -53,6 +53,27 @@ success** — which contaminates an ablation outright.
 
 ## Using it
 
+### Installing
+
+```
+/plugin marketplace add tokenmaxxxer/muster
+/plugin install orchestrate@tokenmaxxxer-muster
+```
+
+That is the whole install. The rulebooks are **not** cloned by hand: each role file
+names its repo, and the first spawn of a role fetches that rulebook's marketplace
+if it is not already on the machine. Private repos work — the fetch uses the git
+credentials already in place.
+
+A local checkout still wins when one exists. `roles/<role>.json` keeps an optional
+`path`, and if that directory holds a `.claude-plugin/marketplace.json` it is used
+instead of the remote — so editing a rulebook and running it through muster does
+not require a commit and a push first.
+
+**A marketplace clone does not update itself.** `spawn.py` prints the rulebook's
+sha on every spawn, so a run against a stale clone is visible rather than assumed;
+`/plugin marketplace update <name>` refreshes it.
+
 ### Before the first run: the target repo needs the contract
 
 Every role reads and writes the shared board defined by

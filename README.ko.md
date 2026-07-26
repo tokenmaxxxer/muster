@@ -50,6 +50,25 @@ doctrine 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개
 
 ## 쓰기
 
+### 설치
+
+```
+/plugin marketplace add tokenmaxxxer/muster
+/plugin install orchestrate@tokenmaxxxer-muster
+```
+
+설치는 이게 전부다. 룰북을 손으로 clone 하지 **않는다** — 역할 파일이 자기 repo 를
+적고 있고, 그 역할을 처음 띄울 때 없으면 받아온다. 비공개 레포도 된다(이미 있는 git
+자격증명을 쓴다).
+
+로컬 체크아웃이 있으면 그쪽이 이긴다. `roles/<역할>.json` 의 `path` 는 선택이고,
+그 디렉터리에 `.claude-plugin/marketplace.json` 이 있으면 원격 대신 그걸 쓴다 —
+룰북을 고쳐가며 muster 로 돌려볼 때 커밋·푸시를 먼저 하지 않아도 된다.
+
+**마켓플레이스 클론은 스스로 갱신되지 않는다.** `spawn.py` 가 매 스폰마다 룰북의
+sha 를 찍으므로 낡은 클론으로 돈 실행이 짐작이 아니라 눈에 보인다. 갱신은
+`/plugin marketplace update <이름>` 이다.
+
 ### 첫 실행 전 — 표적 레포에 계약 파일이 있어야 한다
 
 모든 역할이 `docs/specs/role-handoff-contract.md` 가 정의한 공유 보드를 읽고 쓰며,
