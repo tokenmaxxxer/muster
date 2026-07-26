@@ -41,6 +41,9 @@ HUMAN_ONLY = {
                               "다시 깨어난다 (§15). 계약이 자동화를 금지한다",
     "라운드 종료 가치 게이트": "candidate-round-done 이 사람을 깨워 §18 의 게이트 "
                                "둘을 돌린다. 계약이 자동화를 금지한다",
+    "사전 승인 게이트": "front record 가 scope-proposed 에 닿으면 사람이 읽고 "
+                        "scope-approved 로 올린다 (§19). 그 상태로 가는 **유일한** "
+                        "경로이고, 어떤 역할도 자기 것이든 남의 것이든 승인하지 못한다",
 }
 UPSTREAM = re.compile(r"^\s*-\s*path:\s*(\S+)", re.M)
 UP_SHA = re.compile(r"^\s*sha:\s*(\S+)", re.M)
@@ -109,11 +112,29 @@ def _findings_to(root: Path, role: str) -> list[str]:
     return hits
 
 
-def evaluate(cwd: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """(깨어난 역할, 판정 불가한 줄). **아무것도 쓰지 않는다.**"""
+def _front(root: Path, subject: str, roles: dict) -> str | None:
+    """그 subject 의 front record — subject 를 처음 연 역할 (§19, §9).
+
+    §1 이 체인 루트를 `upstream: []` 로 정의하므로 그게 기계적 판별이다. 못 가리면
+    §19 가 적은 통상 순서(product, 아니면 feasibility)로 물러난다.
+    """
+    rootless = [r for r in roles
+                if not upstream(root / spawn.BOARD / subject / f"{r}.md")]
+    if len(rootless) == 1:
+        return rootless[0]
+    for r in ("product", "feasibility"):
+        if r in roles:
+            return r
+    return None
+
+
+def evaluate(cwd: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]],
+                                list[tuple[str, str]]]:
+    """(깨어난 역할, 판정 불가한 줄, §19 에 막힌 줄). **아무것도 쓰지 않는다.**"""
     root = Path(cwd).resolve()
     b = spawn.board(root)
     woken: list[tuple[str, str]] = []
+    blocked: list[tuple[str, str]] = []
 
     # ── feasibility: 새롭거나 바뀐 hypothesis 가 보드에 나타남
     feas_records = [(root / spawn.BOARD / s / "feasibility.md")
@@ -126,12 +147,31 @@ def evaluate(cwd: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
         elif acked[rel] and acked[rel] != _head_sha(root, rel):
             woken.append(("feasibility", f"hypothesis {rel} 가 기록된 sha 이후 바뀜"))
 
+    # ── §19 사전 승인 게이트. coding 의 **첫 빌드 진입**에만 붙는다.
+    #    네 갈래 전부에 얹히는 전제조건이지 다섯 번째 갈래가 아니다 — 병렬 간선으로
+    #    두면 기존 갈래들이 저 혼자 첫 빌드를 깨워 게이트가 무력해진다(§19 본문이
+    #    이 함정을 명시적으로 지목한다). 이미 빌드에 들어간 subject 의 재깨움은
+    #    게이트 밖이다.
+    def wake_coding(subject: str, why: str) -> None:
+        roles = b[subject]
+        if "coding" in roles:
+            woken.append(("coding", f"{subject}: {why}"))
+            return
+        f = _front(root, subject, roles)
+        state = roles.get(f, {}).get("loop_state") if f else None
+        if state == "scope-approved":
+            woken.append(("coding", f"{subject}: {why}"))
+        else:
+            blocked.append(("coding",
+                            f"{subject}: {why} — 그러나 첫 빌드다. front record"
+                            f"({f or '없음'}) 가 {state or '없음'} 이라 §19 가 막는다"))
+
     # ── coding: 세 갈래 중 하나만 서도 깨어난다
     for subject, roles in b.items():
         if roles.get("feasibility", {}).get("verdict") == "go":
-            woken.append(("coding", f"{subject}: feasibility verdict: go"))
+            wake_coding(subject, "feasibility verdict: go")
         if roles.get("qa", {}).get("loop_state") == "handed-off":
-            woken.append(("coding", f"{subject}: qa handed-off — 사람의 결함 판정이 끝났다"))
+            wake_coding(subject, "qa handed-off — 사람의 결함 판정이 끝났다")
 
     # ── ux-design: 새롭거나 바뀐 product-record (체인 루트면 hypothesis)
     for subject, roles in b.items():
@@ -141,7 +181,7 @@ def evaluate(cwd: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     # ── coding 의 네 번째 갈래: ux-design-record 가 reviewed 에 도달
     for subject, roles in b.items():
         if roles.get("ux-design", {}).get("loop_state") == "reviewed":
-            woken.append(("coding", f"{subject}: ux-design loop_state: reviewed"))
+            wake_coding(subject, "ux-design loop_state: reviewed")
 
     # ── verify: coding 과 qa 가 **둘 다** 산출물을 낸 subject (첫 깨움)
     for subject, roles in b.items():
@@ -168,21 +208,35 @@ def evaluate(cwd: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     #    역할이 자기 앞으로 온 finding 에 깨어난다고 말한다.
     for role in spawn.ROLES:
         for f in _findings_to(root, role):
+            if role == "coding":
+                # §19 는 finding 갈래도 똑같이 막는다 — 네 갈래 전부가 대상이다.
+                subject = Path(f).parent.name
+                if subject in b:
+                    wake_coding(subject, f"finding addressed_to: coding — {f}")
+                    continue
             woken.append((role, f"finding addressed_to: {role} — {f}"))
 
-    seen, uniq = set(), []
-    for item in woken:
-        if item not in seen:
-            seen.add(item)
-            uniq.append(item)
-    return uniq, sorted(JUDGEMENT.items())
+    def _uniq(items: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        seen, out = set(), []
+        for item in items:
+            if item not in seen:
+                seen.add(item)
+                out.append(item)
+        return out
+
+    return _uniq(woken), sorted(JUDGEMENT.items()), _uniq(blocked)
 
 
 def report(cwd: str) -> list[str]:
-    woken, judged = evaluate(cwd)
+    woken, judged, blocked = evaluate(cwd)
     out = ["깨어난 역할 (계약 §3):"] if woken else ["기계로 판정되는 일곱 줄 중 선 것 없음."]
     out += [f"  [{role}] {why}" for role, why in woken]
     out.append("")
+    if blocked:
+        # 막힌 것을 안 깨어난 것으로 보고하면 사람이 자기 차례인 줄 모른다.
+        out.append("갈래는 섰는데 §19 승인 게이트가 막고 있다 — **사람이 승인해야 열린다**:")
+        out += [f"  [{role}] {why}" for role, why in blocked]
+        out.append("")
     out.append("기계로 판정하지 않는 줄 — **안 깨어난 것이 아니라 못 재는 것이다**:")
     out += [f"  [{role}] {why}" for role, why in judged]
     out.append("")

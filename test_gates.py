@@ -78,6 +78,12 @@ def _woken(root: Path) -> dict[str, str]:
     return {r: why for r, why in wakes.evaluate(str(root))[0]}
 
 
+def _blocked(root: Path) -> dict[str, str]:
+    """§19 승인 게이트에 막힌 줄. **안 깨어난 것과 구분해야 한다** — 막힌 줄은
+    사람이 승인하면 열리고, 안 선 줄은 아무리 기다려도 안 열린다."""
+    return {r: why for r, why in wakes.evaluate(str(root))[2]}
+
+
 def t_wake_hypothesis_wakes_feasibility():
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
@@ -97,11 +103,35 @@ def t_wake_acknowledged_hypothesis_goes_quiet():
         assert "feasibility" not in _woken(root), _woken(root)
 
 
-def t_wake_verdict_go_wakes_coding():
+def t_wake_first_build_needs_scope_approval():
+    """§19: 네 갈래 중 무엇이 서든, subject 의 **첫 빌드**는 front record 가
+    scope-approved 여야 열린다. 승인은 사람만 준다.
+
+    막힌 것을 "안 깨어남"으로 보고하면 사람이 자기 차례인 줄 모르고, 보드는
+    영영 안 움직인다 — 그래서 blocked 로 따로 나온다."""
+    with tempfile.TemporaryDirectory() as td:
+        root = _wake_repo(td)
+        rec = root / spawn.BOARD / "s" / "feasibility.md"
+        rec.write_text("---\nkind: feasibility-record\nloop_state: verdict\n"
+                       "verdict: go\n---\n")
+        assert "coding" not in _woken(root), _woken(root)
+        assert "coding" in _blocked(root), _blocked(root)
+
+        rec.write_text("---\nkind: feasibility-record\nloop_state: scope-approved\n"
+                       "verdict: go\n---\n")
+        assert "coding" in _woken(root), _woken(root)
+        assert "coding" not in _blocked(root), _blocked(root)
+
+
+def t_wake_rebuild_is_not_gated():
+    """§19 는 첫 진입에만 붙는다. 이미 빌드에 들어간 subject 의 재깨움까지 막으면
+    finding 하나 고치는 데도 사람 승인이 필요해져 루프가 안 돈다."""
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
         (root / spawn.BOARD / "s" / "feasibility.md").write_text(
             "---\nkind: feasibility-record\nloop_state: verdict\nverdict: go\n---\n")
+        (root / spawn.BOARD / "s" / "coding.md").write_text(
+            "---\nkind: coding-record\nloop_state: landed\n---\n")
         assert "coding" in _woken(root), _woken(root)
 
 
@@ -112,9 +142,9 @@ def t_wake_finding_wakes_the_addressed_role():
         (root / spawn.BOARD / "s" / "review.md").write_text(
             "---\nkind: review-record\nloop_state: reported\n---\n\n"
             "## finding\nrequirement: R1\nverdict: Incorrect\n"
-            "addressed_to: coding\nseverity: blocking\n")
+            "addressed_to: qa\nseverity: blocking\n")
         w = _woken(root)
-        assert "coding" in w and "addressed_to" in w["coding"], w
+        assert "qa" in w and "addressed_to" in w["qa"], w
 
 
 def t_wake_never_reports_judgement_rows_as_unwoken():
@@ -122,7 +152,7 @@ def t_wake_never_reports_judgement_rows_as_unwoken():
     사람이 봐야 할 두 줄이 조용히 사라진다."""
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
-        _, judged = wakes.evaluate(str(root))
+        _, judged, _blocked_rows = wakes.evaluate(str(root))
         assert {r for r, _ in judged} == {"product", "ops"}, judged
         text = "\n".join(wakes.report(str(root)))
         assert "못 재는 것이다" in text, text
