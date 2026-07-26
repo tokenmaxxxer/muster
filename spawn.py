@@ -30,10 +30,19 @@ USER_SETTINGS = Path.home() / ".claude" / "settings.json"
 
 
 MARKETPLACES = Path.home() / ".claude" / "plugins" / "marketplaces"
+KNOWN = MARKETPLACES.parent / "known_marketplaces.json"
 
 
 def _mkt(d: Path) -> Path:
     return d / ".claude-plugin" / "marketplace.json"
+
+
+def registered(name: str) -> dict:
+    """등록부에 이미 있는 마켓플레이스 항목. 없으면 {}."""
+    try:
+        return json.loads(KNOWN.read_text()).get(name, {})
+    except (OSError, ValueError):
+        return {}
 
 
 def rulebook_source(spec: dict) -> dict:
@@ -51,10 +60,21 @@ def rulebook_source(spec: dict) -> dict:
 
 
 def rulebook_dir(spec: dict) -> Path | None:
-    """`marketplace.json` 을 실제로 읽을 수 있는 디렉터리. 아직 없으면 None."""
+    """`marketplace.json` 을 실제로 읽을 수 있는 디렉터리. 아직 없으면 None.
+
+    클론 자리를 짐작하기 전에 **등록부의 installLocation 을 먼저 본다.** 이름이
+    이미 등록돼 있으면 `--settings` 의 extraKnownMarketplaces 는 무시되고 등록된
+    쪽이 그대로 쓰인다 — muster 가 github 를 달라고 해도 등록부가 directory 면
+    클론은 영영 안 생긴다. 실측 2026-07-26: 룰북 9개 중 8개는 이름만으로 받아졌고
+    coding 만 실패했는데, 원인은 레포가 아니라 어제 로컬 경로로 등록해 둔
+    `tokenmaxxxer-coding` 항목이었다.
+    """
     p = spec.get("path")
     if p and _mkt(Path(p)).exists():
         return Path(p)
+    loc = registered(spec["marketplace"]).get("installLocation")
+    if loc and _mkt(Path(loc)).exists():
+        return Path(loc)
     clone = MARKETPLACES / spec["marketplace"]
     return clone if _mkt(clone).exists() else None
 
@@ -68,6 +88,15 @@ def ensure_rulebook(role: str, spec: dict) -> Path:
     """
     d = rulebook_dir(spec)
     if d:
+        # 등록부가 이미 다른 출처를 물고 있으면 그쪽이 이긴다. 조용히 넘어가면
+        # "github 에서 받은 룰북으로 돌렸다"고 믿으면서 실제로는 커밋 안 된
+        # 로컬 체크아웃으로 돈다 — ablation 이 어느 룰북을 쟀는지 말할 수 없게 된다.
+        want = rulebook_source(spec)
+        got = registered(spec["marketplace"]).get("source")
+        if got and got != want:
+            print(f"[{role}] 등록부가 이 마켓플레이스를 다르게 물고 있다: "
+                  f"{got} (역할 파일은 {want}). 등록된 쪽이 그대로 돈다: {d}",
+                  file=sys.stderr)
         return d
     print(f"[{role}] 룰북을 받는 중: {spec.get('repo')}", file=sys.stderr)
     warm = {"extraKnownMarketplaces": {spec["marketplace"]: {"source": rulebook_source(spec)}}}
@@ -75,16 +104,42 @@ def ensure_rulebook(role: str, spec: dict) -> Path:
         json.dump(warm, f)
         warm_path = f.name
     try:
-        subprocess.run(["claude", "-p", "--settings", warm_path],
-                       input="ok", text=True, capture_output=True)
+        # 두 번 돌린다. 한 번으로 받아지는 게 보통이지만 안 받아지고 끝나는 경우를
+        # 실측했다(2026-07-26, 같은 마켓플레이스가 한 번은 되고 한 번은 안 됨).
+        # 실패가 조용해서 다음 줄이 "룰북 없음"으로 멈춰 세우는 것 말고는 표시가 없다.
+        for _ in range(2):
+            subprocess.run(["claude", "-p", "--settings", warm_path],
+                           input="ok", text=True, capture_output=True)
+            d = rulebook_dir(spec)
+            if d:
+                return d
     finally:
         os.unlink(warm_path)
-    d = rulebook_dir(spec)
-    if d:
-        return d
     sys.exit(
         f"[{role}] 룰북을 받지 못했다: {spec.get('repo') or spec.get('path')}\n"
-        f"  비공개 레포면 git 자격증명이 필요하다. `gh auth status` 로 확인한다.")
+        + _fetch_hint(spec))
+
+
+def _fetch_hint(spec: dict) -> str:
+    """왜 못 받았는지 muster 가 실제로 알 수 있는 원인부터 말한다.
+
+    같은 이름이 사용자 전역 `~/.claude/settings.json` 의 extraKnownMarketplaces 에
+    이미 선언돼 있으면 **그쪽이 `--settings` 를 이긴다.** 그 선언이 망가져 있으면
+    (실측: `source: github` 인데 `path` 가 같이 들어 있던 항목) 클론은 몇 번을
+    돌려도 생기지 않고, 세션은 매번 정상 종료한다. 자격증명 문제로 오진하면
+    영영 못 찾는다 — 실제로 그렇게 한 시간을 썼다.
+    """
+    name = spec["marketplace"]
+    try:
+        declared = json.loads(USER_SETTINGS.read_text()).get("extraKnownMarketplaces", {})
+    except (OSError, ValueError):
+        declared = {}
+    if name in declared:
+        return (f"  전역 설정이 같은 이름을 이미 선언하고 있고, 그쪽이 이긴다:\n"
+                f"    {USER_SETTINGS} → extraKnownMarketplaces.{name}\n"
+                f"    {json.dumps(declared[name], ensure_ascii=False)}\n"
+                f"  이 항목을 지우거나 고친 뒤 다시 시도한다.")
+    return "  비공개 레포면 git 자격증명이 필요하다. `gh auth status` 로 확인한다."
 
 
 def role_settings(role: str) -> dict:
@@ -187,11 +242,27 @@ def rulebook_version(role: str) -> str:
 
 
 def _installed() -> set[str]:
+    """실제로 **디스크에 있는** 플러그인. 이름만 등록된 것은 세지 않는다.
+
+    세션은 마켓플레이스 클론이 아니라 `~/.claude/plugins/cache/<마켓>/<플러그인>/
+    <버전>/` 에서 플러그인을 읽는다. `installed_plugins.json` 은 그 installPath 를
+    적어 두는데, **디렉터리가 사라져도 항목은 남는다.** 실측 2026-07-26: 역할 9개
+    중 6개가 등록만 있고 캐시가 없었다.
+
+    이름만 세면 ensure_installed 가 "이미 설치됨"으로 통과시키고, 세션은 룰북
+    0개로 조용히 돈다 — muster 는 "플러그인 1개"라고 출력하고, 에이전트는 룰북
+    없이 그럴듯한 답을 내놓는다. 이 함수가 막으려던 실패가 한 겹 아래에서 그대로
+    일어난다. 그래서 기록이 아니라 **산출물**을 확인한다.
+    """
     try:
-        return set(json.loads(
-            (Path.home() / ".claude/plugins/installed_plugins.json").read_text())["plugins"])
+        d = json.loads(
+            (Path.home() / ".claude/plugins/installed_plugins.json").read_text())["plugins"]
     except (OSError, ValueError, KeyError):
         return set()
+    return {name for name, entries in d.items()
+            if isinstance(entries, list)
+            and any(Path(e.get("installPath", "")).is_dir()
+                    for e in entries if isinstance(e, dict))}
 
 
 def ensure_installed(role: str, want: list[str], settings: str) -> None:
@@ -219,8 +290,30 @@ def ensure_installed(role: str, want: list[str], settings: str) -> None:
             return
     sys.exit(
         f"[{role}] 룰북을 설치하지 못했다: {', '.join(missing)}\n"
-        f"  이대로 띄우면 룰북 0개로 돈다. `claude` 세션에서 /plugin 으로 설치한 뒤\n"
-        f"  다시 시도한다.")
+        f"  이대로 띄우면 룰북 0개로 돈다.\n" + _install_hint(missing))
+
+
+def _install_hint(missing: list[str]) -> str:
+    """설치가 왜 안 됐는지 muster 가 실제로 알 수 있는 원인부터 말한다.
+
+    `installed_plugins.json` 에 항목이 남아 있으면 이미 설치된 것으로 보고
+    **재설치를 건너뛴다.** 캐시 디렉터리가 사라져도 항목은 남으므로, 그 상태는
+    스스로 풀리지 않는다 — 몇 번을 돌려도 설치되지 않고, 항목이 있으니 아무도
+    이상하다고 말하지 않는다. 실측 2026-07-26: 유령 항목 6개를 지우자 같은
+    호출이 그대로 성공했다.
+    """
+    reg = Path.home() / ".claude/plugins/installed_plugins.json"
+    try:
+        entries = json.loads(reg.read_text())["plugins"]
+    except (OSError, ValueError, KeyError):
+        entries = {}
+    ghosts = [m for m in missing if m in entries]
+    if ghosts:
+        return (f"  등록부에는 이 항목들이 **설치된 것으로 남아 있다.** 그래서 재설치를\n"
+                f"  건너뛰고, 캐시가 없으니 세션에는 아무것도 안 붙는다:\n"
+                + "".join(f"    {g}\n" for g in ghosts)
+                + f"  {reg} 에서 그 항목을 지운 뒤 다시 시도한다.")
+    return "  `claude` 세션에서 /plugin 으로 설치한 뒤 다시 시도한다."
 
 
 # 계약 §3 의 WAKES-ON 표 순서. 보드를 읽을 때 이 순서로 보여준다.
