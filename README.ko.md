@@ -12,6 +12,7 @@ protocol.md   규약 — muster 가 하는 일 셋, 상태 노출 계약, 격리
 roles/        역할 하나 = 파일 하나. 룰북 번들 + 샌드박스 경계
 spawn.py      상태를 읽고, 역할 환경으로 세션을 띄운다
 orchestrate/  그걸 대화에서 부르는 플러그인 (/orchestrate:run)
+wakes.py      계약 §3 의 WAKES-ON 표를 평가한다 — 보드가 누구를 깨우는가
 bench/        ablation 러너 — 룰북 on/off 를 같은 표적에 돌린다
 gates/        결정론 검사. 세션이 끝나면 spawn.py 가 부른다. LLM 0회
 ledger/       성적표
@@ -63,7 +64,8 @@ doctrine 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개
 셸에서 직접:
 
 ```bash
-python3 spawn.py                              # 상태 조회 (읽기 전용)
+python3 spawn.py                              # 보드 조회 (읽기 전용)
+python3 spawn.py wake                         # 보드가 누구를 깨우나 (계약 §3)
 python3 spawn.py qa "/testrun:testrun smoke" -C ~/work/some-repo
 python3 spawn.py review "x" --dry-run         # 합쳐진 설정만 본다
 ```

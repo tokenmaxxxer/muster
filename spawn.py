@@ -256,9 +256,18 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="합쳐진 설정만 보고 안 띄운다")
     a = ap.parse_args()
 
+    if a.role == "wake":
+        # 계약 §3 의 표를 기계로 평가하고, **누구를 열지**를 말한다.
+        # 띄우지 않는다 — 무엇을 맡길지는 그 줄을 만족시킨 사건이 정하지 않는다.
+        import wakes
+        print("\n".join(status(a.cwd)))
+        print()
+        print("\n".join(wakes.report(a.cwd)))
+        return 0
     if not a.role:
         print("\n".join(status(a.cwd)))
         print("\n역할: " + ", ".join(sorted(p.stem for p in (ROOT / "roles").glob("*.json"))))
+        print("보드가 누구를 깨우는지: spawn.py wake")
         return 0
     if not a.task:
         sys.exit("맡길 일이 없다. 사용법: spawn.py <역할> \"<맡길 일>\" [-C <경로>]")

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent / "gates"))
 sys.path.insert(0, str(Path(__file__).parent))
 import gates
 import spawn
+import wakes
 
 
 def _board(td: str, subject: str, **roles: str) -> Path:
@@ -57,6 +58,74 @@ def t_board_tolerates_trailing_comment():
         fm = spawn.board(root)["s"]["coding"]
         assert fm["kind"] == "build-proposal", fm
         assert fm["loop_state"] == "approved", fm
+
+
+def _wake_repo(td: str) -> Path:
+    """hypothesis 하나를 커밋해 둔 레포. sha 비교가 필요하므로 진짜 git 이어야 한다."""
+    root = Path(td) / "repo"
+    (root / "docs" / "proposals").mkdir(parents=True)
+    (root / spawn.BOARD / "s").mkdir(parents=True)
+    (root / "docs/proposals/h.md").write_text(
+        "---\nkind: hypothesis\nsubject: s\nloop_state: hypothesis-registered\n---\n")
+    run = lambda *a: subprocess.run(["git", "-C", str(root), *a], capture_output=True, check=True)
+    run("init", "-q")
+    run("config", "user.email", "t@t"); run("config", "user.name", "t")
+    run("add", "-A"); run("commit", "-qm", "h")
+    return root
+
+
+def _woken(root: Path) -> dict[str, str]:
+    return {r: why for r, why in wakes.evaluate(str(root))[0]}
+
+
+def t_wake_hypothesis_wakes_feasibility():
+    with tempfile.TemporaryDirectory() as td:
+        root = _wake_repo(td)
+        assert "feasibility" in _woken(root), _woken(root)
+
+
+def t_wake_acknowledged_hypothesis_goes_quiet():
+    """계약 §6: 바뀌지 않은 보드는 아무도 깨우지 않는다. 이게 없으면 루프가 안 끝난다."""
+    with tempfile.TemporaryDirectory() as td:
+        root = _wake_repo(td)
+        sha = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%H",
+                              "--", "docs/proposals/h.md"],
+                             capture_output=True, text=True).stdout.strip()
+        (root / spawn.BOARD / "s" / "feasibility.md").write_text(
+            "---\nkind: feasibility-record\nloop_state: probing\n"
+            f"upstream:\n  - path: docs/proposals/h.md\n    sha: {sha}\n---\n")
+        assert "feasibility" not in _woken(root), _woken(root)
+
+
+def t_wake_verdict_go_wakes_coding():
+    with tempfile.TemporaryDirectory() as td:
+        root = _wake_repo(td)
+        (root / spawn.BOARD / "s" / "feasibility.md").write_text(
+            "---\nkind: feasibility-record\nloop_state: verdict\nverdict: go\n---\n")
+        assert "coding" in _woken(root), _woken(root)
+
+
+def t_wake_finding_wakes_the_addressed_role():
+    """§5 의 되돌이 간선. finding 은 frontmatter 가 아니라 **본문 안에** 산다."""
+    with tempfile.TemporaryDirectory() as td:
+        root = _wake_repo(td)
+        (root / spawn.BOARD / "s" / "review.md").write_text(
+            "---\nkind: review-record\nloop_state: reported\n---\n\n"
+            "## finding\nrequirement: R1\nverdict: Incorrect\n"
+            "addressed_to: coding\nseverity: blocking\n")
+        w = _woken(root)
+        assert "coding" in w and "addressed_to" in w["coding"], w
+
+
+def t_wake_never_reports_judgement_rows_as_unwoken():
+    """§14: 기계 검사는 실질 검사가 아니다. 못 재는 줄을 '안 깨어남'으로 보고하면
+    사람이 봐야 할 두 줄이 조용히 사라진다."""
+    with tempfile.TemporaryDirectory() as td:
+        root = _wake_repo(td)
+        _, judged = wakes.evaluate(str(root))
+        assert {r for r, _ in judged} == {"product", "ops"}, judged
+        text = "\n".join(wakes.report(str(root)))
+        assert "못 재는 것이다" in text, text
 
 
 def t_board_absent_names_the_v1_location():

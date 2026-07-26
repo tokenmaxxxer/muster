@@ -12,6 +12,7 @@ protocol.md   the contract — muster's three jobs, the state-exposure deal, iso
 roles/        one role is one file: rulebook bundle plus sandbox boundary
 spawn.py      reads state, brings up a session in a role's environment
 orchestrate/  the plugin that calls it from a conversation (/orchestrate:run)
+wakes.py      evaluates contract §3's WAKES-ON table: whom does the board wake
 bench/        ablation runner — same target, rulebook on and off
 gates/        deterministic checks, run by spawn.py after a session. Zero LLM calls
 ledger/       the scorecard
@@ -66,7 +67,8 @@ place where work gets handed over is already the conversation.
 From a shell:
 
 ```bash
-python3 spawn.py                              # read state (read-only)
+python3 spawn.py                              # read the board (read-only)
+python3 spawn.py wake                         # who does the board wake? (contract §3)
 python3 spawn.py qa "/testrun:testrun smoke" -C ~/work/some-repo
 python3 spawn.py review "x" --dry-run         # print the merged settings only
 ```
