@@ -46,6 +46,9 @@ doctrine 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개
 | coding | tokenmaxxxer-coding | 만든다 — `build-proposal`, `loop_state: proposed,approved,landed` |
 | review | tokenmaxxxer-review | 명세대로인지 (요구사항별 판정) |
 | qa | tokenmaxxxer-qa | 실제로 도는지 |
+| ux-design | tokenmaxxxer-ux-design | 쓰는 모습이 어때야 하는지 |
+| verify | tokenmaxxxer-verify | coding 과 qa 의 산출물이 서로 맞는지 |
+| reflect | tokenmaxxxer-reflect | 착지한 라운드가 무엇을 가르쳤는지 |
 | ops | tokenmaxxxer-ops | 내보내고 지킨다 |
 
 ## 쓰기
@@ -84,12 +87,21 @@ $ python3 spawn.py product "…" -C ~/work/new-app
 대상 레포에 docs/specs/role-handoff-contract.md 가 없다: …
 ```
 
-프로젝트당 한 번 복사해 넣는다:
+프로젝트당 한 번 심는다:
 
 ```bash
-cp <아무 룰북>/docs/specs/role-handoff-contract.md \
-   ~/work/new-app/docs/specs/
+python3 spawn.py init -C ~/work/new-app
 ```
+
+정본은 muster 의 `contract/` 에 있고, 이것이 **muster 가 남의 레포에 쓰는 유일한
+경우다** — 보드 기록은 여기서 절대 쓰지 않는다. 그건 역할의 것이고 밖에서 고치면
+전이 게이트를 우회한다. 계약 파일은 상태가 아니라 **전제조건**이다.
+
+정본과 다른 계약이 이미 있으면 덮어쓰지 않는다. 그 레포가 의도적으로 다른 판일 수
+있고, 조용히 갈아치우는 것은 갈라짐과 같은 종류의 손상이다. `spawn.py` 가 내용
+해시로 갈라짐을 알린다 — 계약 frontmatter 에 버전 필드가 없어서 그게 유일한
+판별 수단이다. `status: final` 두 개가 188줄 다를 수 있다. 2026-07-26 실측으로
+룰북 셋은 345줄판, 셋은 533줄판이었다.
 
 `--no-contract` 로 건너뛸 수 있다. 보드를 안 쓸 작업(코딩 역할에 단발 수정을
 맡기는 것 같은)에만 쓴다. 경고가 아니라 플래그인 이유는 이 검사가 막는 실패가

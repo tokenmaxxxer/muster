@@ -49,6 +49,9 @@ success** — which contaminates an ablation outright.
 | coding | tokenmaxxxer-coding | builds it — `build-proposal`, `loop_state: proposed,approved,landed` |
 | review | tokenmaxxxer-review | whether it matches the spec, requirement by requirement |
 | qa | tokenmaxxxer-qa | whether it actually runs |
+| ux-design | tokenmaxxxer-ux-design | what it should look like to use |
+| verify | tokenmaxxxer-verify | whether coding's and qa's artifacts agree |
+| reflect | tokenmaxxxer-reflect | what the round taught, once it landed |
 | ops | tokenmaxxxer-ops | ships it and keeps it up |
 
 ## Using it
@@ -90,12 +93,23 @@ $ python3 spawn.py product "…" -C ~/work/new-app
 대상 레포에 docs/specs/role-handoff-contract.md 가 없다: …
 ```
 
-Copy it in once per project:
+Seed it once per project:
 
 ```bash
-cp <any rulebook>/docs/specs/role-handoff-contract.md \
-   ~/work/new-app/docs/specs/
+python3 spawn.py init -C ~/work/new-app
 ```
+
+muster carries the canonical copy in `contract/`, and this is **the only thing it
+writes into someone else's repository** — board records are never written from
+here, because those belong to a role and editing them from outside routes around
+its gate. A contract file is a precondition, not state.
+
+It refuses to overwrite a contract that differs from canonical: a repo may be
+deliberately on another version, and replacing it silently would be the same
+damage as the fork. `spawn.py` reports drift by content hash, which is the only
+handle there is — the contract's frontmatter carries no version field, so two
+files can both say `status: final` and differ by 188 lines. Measured 2026-07-26:
+three rulebooks carried a 345-line contract and three a 533-line one.
 
 `--no-contract` skips the check, for work that is not going near the board (asking
 the coding role for a one-off change, say). It is a flag rather than a warning
