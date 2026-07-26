@@ -1,11 +1,13 @@
 {
   "name": "tokenmaxxxer-muster",
-  "owner": {"name": "Jung Jiwon & Lee Jongkwan"},
+  "owner": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  },
   "plugins": [
     {
       "name": "orchestrate",
       "source": "./orchestrate",
-      "description": "대화에서 역할별 에이전트를 띄운다. 각 역할의 상태를 읽어 무엇이 진행 중인지 보여주고, 그 역할의 룰북 플러그인만 깔린 샌드박스 세션으로 일을 맡긴다. 상태는 읽기만 한다 — 전이는 각 룰북의 게이트가 한다."
+      "description": "대화에서 역할별 에이전트를 띄운다. 대상 레포의 블랙보드(docs/reports/records/<subject>/<역할>.md)를 읽어 각 역할의 loop_state 와 계약 §3 이 누구를 깨웠는지 보여주고, 그 역할의 룰북 플러그인만 깔린 샌드박스 세션으로 일을 맡긴다. 보드는 읽기만 한다 — 전이는 각 룰북의 게이트가 한다."
     }
   ]
 }
