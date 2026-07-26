@@ -19,6 +19,7 @@
 import argparse
 import json
 import os
+import string
 import subprocess
 import sys
 import tempfile
@@ -60,6 +61,23 @@ def role_settings(role: str) -> dict:
     for k in list(s.get("env", {})):
         if k in os.environ:
             s["env"][k] = os.environ[k]
+
+    # 샌드박스 경로는 그 env 를 **참조**해야 한다. 같은 값을 두 곳에 적으면 위의
+    # 덮어쓰기가 조용히 무력화된다 — env 는 격리된 경로를 가리키는데 경계는 원래
+    # 경로만 허용하는 상태가 되고, 그건 "격리했다고 믿는 오염"이다.
+    # 해석된 env 를 기준으로 펼친다: 역할 파일이 선언했지만 os.environ 에 없는
+    # 값도 있고, 환경이 이긴 값도 여기 이미 반영돼 있다.
+    resolved = {**os.environ, **s.get("env", {})}
+    fs = s.get("sandbox", {}).get("filesystem", {})
+    for key in ("allowWrite", "denyWrite", "denyRead"):
+        if key in fs:
+            fs[key] = [string.Template(p).safe_substitute(resolved) for p in fs[key]]
+            unresolved = [p for p in fs[key] if "$" in p]
+            if unresolved:
+                # 안 풀린 변수를 그대로 넘기면 경계가 존재하지 않는 경로를 가리킨다.
+                sys.exit(f"[{role}] sandbox.filesystem.{key} 의 변수를 풀 수 없다: "
+                         f"{', '.join(unresolved)}")
+
     s["extraKnownMarketplaces"] = {
         spec["marketplace"]: {"source": {"source": "directory", "path": spec["path"]}}}
     s["enabledPlugins"] = {f"{n}@{spec['marketplace']}": True for n in names}

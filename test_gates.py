@@ -128,6 +128,27 @@ def t_wake_never_reports_judgement_rows_as_unwoken():
         assert "못 재는 것이다" in text, text
 
 
+def t_sandbox_boundary_follows_the_env():
+    """역할의 env 를 환경으로 덮으면 샌드박스 경계도 따라와야 한다.
+
+    안 따라오면 env 는 격리된 경로를 가리키는데 경계는 원래 경로만 허용한다 —
+    격리했다고 믿는 채로 원래 자리에 쓰거나, 아무 데도 못 쓴다. bench 가 실제
+    워크스페이스를 오염시킨 사고가 정확히 이 모양이었다.
+    """
+    import os
+    old = os.environ.get("QA_WORKSPACE")
+    os.environ["QA_WORKSPACE"] = "/tmp/isolated-ws"
+    try:
+        s = spawn.role_settings("qa")
+        assert s["env"]["QA_WORKSPACE"] == "/tmp/isolated-ws", s["env"]
+        assert s["sandbox"]["filesystem"]["allowWrite"] == ["/tmp/isolated-ws"], s["sandbox"]
+    finally:
+        if old is None:
+            del os.environ["QA_WORKSPACE"]
+        else:
+            os.environ["QA_WORKSPACE"] = old
+
+
 def t_board_absent_names_the_v1_location():
     """보드 없음과 v1 자리에 있음은 정반대 처분을 받아야 한다."""
     with tempfile.TemporaryDirectory() as td:
