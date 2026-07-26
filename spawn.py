@@ -143,6 +143,7 @@ def ensure_installed(role: str, want: list[str], settings: str) -> None:
 
 ROLES = ("product", "feasibility", "coding", "qa", "review", "ops")
 BOARD = "docs/reports/records"          # 계약 v2 §10. 전부 대상 레포 안에 있다
+CONTRACT = "docs/specs/role-handoff-contract.md"   # 레포-로컬 계약. 룰북 게이트가 찾는 자리
 # 계약 v1 이 쓰던 자리. 아직 v2 로 안 옮긴 레포를 **말해주기 위해서만** 본다
 LEGACY = {"review": "review-record.md", "feasibility": "feasibility-record.md",
           "ops": "state.md", "product": "product-record.md"}
@@ -156,6 +157,37 @@ def slug(cwd: str) -> str:
     깨지지 않는 것이 §9 가 이 규칙을 고른 이유다.
     """
     return Path(cwd).resolve().name
+
+
+def require_contract(cwd: str, override: bool) -> None:
+    """대상 레포에 레포-로컬 계약이 있는지 본다. 없으면 멈춘다.
+
+    실측 A/B (2026-07-26, 같은 프롬프트·같은 역할, 표적만 다름):
+
+      계약 없음  → product 가 `status: hypothesis-registered` 만 쓴다. 계약 §1 의
+                   공통 헤더(kind/subject/produced_by/upstream/loop_state)가
+                   **하나도 없어서** 보드에 아무것도 안 올라가고 다음 역할이
+                   영영 안 깨어난다.
+      계약 있음  → 프롬프트가 계약을 언급하지 않아도 전부 갖춰 쓴다. 감시자가
+                   다음 역할을 지목한다.
+
+    가르는 변수는 **파일 하나**다. 그리고 없을 때의 실패가 조용하다 — 세션은
+    종료 0 이고 산출물도 그럴듯해서, 파이프라인이 시작조차 안 했다는 것을
+    아무것도 말해주지 않는다. 한 세션을 통째로 버리는 값이다.
+
+    그래서 경고가 아니라 정지다. 계약을 안 쓰는 레포(그냥 코드만 짜게 하는
+    경우)는 --no-contract 로 **명시적으로** 빠져나간다 — 사고가 아니라 결정이 되게.
+    """
+    if override:
+        return
+    root = Path(cwd).resolve()
+    if (root / CONTRACT).is_file():
+        return
+    sys.exit(
+        f"대상 레포에 {CONTRACT} 가 없다: {root}\n"
+        f"  이대로 띄우면 역할이 계약 v2 헤더 없이 기록을 쓴다. 보드에 아무것도\n"
+        f"  올라가지 않고 다음 역할이 안 깨어나는데, 세션은 성공으로 끝난다(실측).\n"
+        f"  계약을 넣거나, 보드를 안 쓸 작업이면 --no-contract 로 명시한다.")
 
 
 def frontmatter(p: Path) -> dict[str, str]:
@@ -201,6 +233,8 @@ def status(cwd: str) -> list[str]:
     root = Path(cwd).resolve()
     out = [f"프로젝트: {slug(cwd)}   경로: {root}"]
 
+    if not (root / CONTRACT).is_file():
+        out.append(f"⚠ {CONTRACT} 없음 — 역할이 계약 헤더 없이 기록을 쓴다(실측).")
     b = board(root)
     if b:
         for subject, roles in b.items():
@@ -272,6 +306,8 @@ def main() -> int:
     ap.add_argument("task", nargs="?", help="맡길 일. 룰북 커맨드면 '/plugin:command 인자'")
     ap.add_argument("-C", "--cwd", default=".", help="작업 디렉터리")
     ap.add_argument("--dry-run", action="store_true", help="합쳐진 설정만 보고 안 띄운다")
+    ap.add_argument("--no-contract", action="store_true",
+                    help="대상 레포에 계약이 없어도 띄운다. 보드를 안 쓸 작업에만")
     a = ap.parse_args()
 
     if a.role == "wake":
@@ -290,6 +326,7 @@ def main() -> int:
     if not a.task:
         sys.exit("맡길 일이 없다. 사용법: spawn.py <역할> \"<맡길 일>\" [-C <경로>]")
 
+    require_contract(a.cwd, a.no_contract)
     s = role_settings(a.role)
     on = [k for k, v in s.get("enabledPlugins", {}).items() if v]
     if a.dry_run:

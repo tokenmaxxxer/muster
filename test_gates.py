@@ -149,6 +149,27 @@ def t_sandbox_boundary_follows_the_env():
             os.environ["QA_WORKSPACE"] = old
 
 
+def t_missing_contract_stops_the_spawn():
+    """실측 A/B: 레포에 계약이 없으면 역할이 계약 헤더 없이 기록을 쓰고, 보드에
+    아무것도 안 올라가고, 세션은 성공으로 끝난다. 경고로는 안 되는 이유가 그
+    조용함이다 — 한 세션을 통째로 버린다."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td) / "repo"
+        (root / "docs" / "specs").mkdir(parents=True)
+        try:
+            spawn.require_contract(str(root), override=False)
+        except SystemExit as e:
+            assert spawn.CONTRACT in str(e), e
+        else:
+            raise AssertionError("계약이 없는데 통과시켰다")
+
+        # 명시적 opt-out 은 통과. 사고가 아니라 결정이어야 한다.
+        spawn.require_contract(str(root), override=True)
+
+        (root / spawn.CONTRACT).write_text("# contract\n")
+        spawn.require_contract(str(root), override=False)
+
+
 def t_board_absent_names_the_v1_location():
     """보드 없음과 v1 자리에 있음은 정반대 처분을 받아야 한다."""
     with tempfile.TemporaryDirectory() as td:
