@@ -92,11 +92,12 @@ def ensure_rulebook(role: str, spec: dict) -> Path:
         # "github 에서 받은 룰북으로 돌렸다"고 믿으면서 실제로는 커밋 안 된
         # 로컬 체크아웃으로 돈다 — ablation 이 어느 룰북을 쟀는지 말할 수 없게 된다.
         want = rulebook_source(spec)
-        got = registered(spec["marketplace"]).get("source")
-        if got and got != want:
+        reg = registered(spec["marketplace"])
+        if reg.get("source") and reg["source"] != want:
             print(f"[{role}] 등록부가 이 마켓플레이스를 다르게 물고 있다: "
-                  f"{got} (역할 파일은 {want}). 등록된 쪽이 그대로 돈다: {d}",
-                  file=sys.stderr)
+                  f"{reg['source']} (역할 파일은 {want}). 이름이 이미 등록돼 있으면 "
+                  f"등록된 쪽이 이기므로 세션에 붙는 것은 "
+                  f"{reg.get('installLocation', '?')} 다.", file=sys.stderr)
         return d
     print(f"[{role}] 룰북을 받는 중: {spec.get('repo')}", file=sys.stderr)
     warm = {"extraKnownMarketplaces": {spec["marketplace"]: {"source": rulebook_source(spec)}}}
@@ -258,6 +259,14 @@ def update(roles: list[str]) -> int:
         for n in names:
             subprocess.run(["claude", "plugin", "uninstall", n], capture_output=True, text=True)
             subprocess.run(["claude", "plugin", "install", n], capture_output=True, text=True)
+            # `install` 은 전역 settings.json 의 enabledPlugins 에 그 플러그인을
+            # **켠 채로** 남긴다. 그대로 두면 사용자가 여는 보통 세션마다 룰북
+            # 아홉 개가 한꺼번에 붙는다 — muster 가 막으려는 그 오염을 muster 가
+            # 만드는 꼴이다(실측 2026-07-27: 갱신 한 번에 22개가 전역에 켜졌다).
+            # 필요한 것은 **설치**지 활성화가 아니다. 켜는 일은 역할 세션의
+            # `--settings` 가 한다.
+            subprocess.run(["claude", "plugin", "disable", n, "--scope", "user"],
+                           capture_output=True, text=True)
         for n in names:
             after = _installed_sha(n)
             if not after:
