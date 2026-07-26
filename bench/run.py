@@ -25,6 +25,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+import spawn as spawn_mod
 BARE = ("QA this app: run it, try the main flows and obvious failure paths, "
         "write findings to qa/runs/ with evidence.")
 
@@ -102,9 +104,19 @@ def main() -> int:
     if not key.exists():
         sys.exit(f"정답 키 없음: {key}  — 키 없이 돌리면 채점할 수 없다")
 
+    # 룰북 버전을 결과에 박는다. 역할 파일은 룰북을 로컬 디렉터리로 가리키므로
+    # 핀이 없다 — 그 순간 체크아웃된 것이 돈다. 어느 룰북을 쟀는지 안 남기면
+    # "룰북 켜고 끄고를 쟀다"는 문장이 검증 불가능한 주장이 된다.
+    version = spawn_mod.rulebook_version(a.role)
+    if "커밋안됨" in version:
+        sys.exit(f"[{a.role}] 룰북에 커밋 안 된 수정이 있다: {version}\n"
+                 f"  이대로 재면 결과가 어느 코드에서 나왔는지 아무도 재현할 수 없다.\n"
+                 f"  커밋하거나 되돌린 뒤 다시 돌린다.")
+
     out = Path(a.out) if a.out else Path(tempfile.mkdtemp(prefix=f"bench-{a.target}-"))
     out.mkdir(parents=True, exist_ok=True)
-    print(f"표적 {a.target}  팔 {a.arms}  반복 {a.reps}  →  {out}", file=sys.stderr)
+    print(f"표적 {a.target}  팔 {a.arms}  반복 {a.reps}  룰북 {version}  →  {out}",
+          file=sys.stderr)
 
     runs = []
     for arm in a.arms.split(","):
@@ -114,7 +126,8 @@ def main() -> int:
 
     # 채점표: 정답 키 × 실행. 사람이 채운다.
     seeded = json.loads(key.read_text())["seeded"]
-    sheet = {"target": a.target, "out": str(out), "runs": runs,
+    sheet = {"target": a.target, "out": str(out), "role": a.role,
+             "rulebook": version, "runs": runs,
              "score": [{"id": s["id"], "class": s["class"], "trigger": s["trigger"],
                         "detected": {f"{r['arm']}-{r['rep']}": None for r in runs}}
                        for s in seeded]}

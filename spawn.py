@@ -104,6 +104,30 @@ def role_settings(role: str) -> dict:
     return s
 
 
+def rulebook_version(role: str) -> str:
+    """역할이 실제로 물고 있는 룰북의 커밋. 못 읽으면 그렇다고 말한다.
+
+    역할 파일은 룰북을 로컬 **디렉터리**로 가리킨다(`source: directory`). 거기엔
+    ref 도 sha 도 없으므로 **그 순간 체크아웃된 것이 그대로 돈다** — 다른 브랜치든,
+    몇 커밋 뒤처졌든, 커밋 안 한 수정이 있든. 플러그인 레지스트리도 `lastUpdated`
+    타임스탬프만 남기고 커밋은 안 남긴다.
+
+    핀을 박을 수는 없으니 **무엇이 돌았는지 기록한다.** 이게 없으면 ablation 이
+    "룰북 켜고 끄고"를 쟀다고 하면서 어느 룰북인지 말하지 못한다. 실제로 로컬이
+    8커밋 뒤처진 채로 반대 결론을 낸 적이 있다(2026-07-26).
+    """
+    path = json.loads((ROOT / "roles" / f"{role}.json").read_text())["path"]
+    def git(*a: str) -> str:
+        p = subprocess.run(["git", "-C", path, *a], capture_output=True, text=True)
+        return p.stdout.strip() if p.returncode == 0 else ""
+    sha = git("rev-parse", "--short", "HEAD")
+    if not sha:
+        return "버전 불명 (git 레포가 아니다)"
+    branch = git("rev-parse", "--abbrev-ref", "HEAD") or "?"
+    dirty = "+커밋안됨" if git("status", "--porcelain") else ""
+    return f"{sha}{dirty} ({branch})"
+
+
 def _installed() -> set[str]:
     try:
         return set(json.loads(
@@ -339,7 +363,8 @@ def main() -> int:
     try:
         # 설정 파일이 있어야 워밍업이 그 마켓플레이스를 등록할 수 있다.
         ensure_installed(a.role, on, settings)
-        print(f"[{a.role}] 플러그인 {len(on)}개, 작업 디렉터리 {a.cwd}", file=sys.stderr)
+        print(f"[{a.role}] 플러그인 {len(on)}개, 룰북 {rulebook_version(a.role)}, "
+              f"작업 디렉터리 {a.cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
         rc = subprocess.run(

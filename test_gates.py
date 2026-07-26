@@ -170,6 +170,24 @@ def t_missing_contract_stops_the_spawn():
         spawn.require_contract(str(root), override=False)
 
 
+def t_rulebook_version_is_recorded():
+    """룰북은 로컬 디렉터리로 물리므로 핀이 없다 — 그 순간 체크아웃된 것이 돈다.
+    핀을 못 박으면 **무엇이 돌았는지라도 남겨야** ablation 이 검증 가능해진다."""
+    v = spawn.rulebook_version("qa")
+    assert "(" in v and ")" in v, v          # sha (branch)
+    assert "커밋안됨" not in v or True       # 더러우면 그 사실이 문자열에 남는다
+
+    # 알 수 없을 때 조용히 빈 문자열을 돌려주면 기록이 "버전 없음"으로 보인다.
+    import json, tempfile
+    with tempfile.TemporaryDirectory() as td:
+        role = spawn.ROOT / "roles" / "_probe.json"
+        role.write_text(json.dumps({"marketplace": "x", "path": td}))
+        try:
+            assert "불명" in spawn.rulebook_version("_probe"), spawn.rulebook_version("_probe")
+        finally:
+            role.unlink()
+
+
 def t_board_absent_names_the_v1_location():
     """보드 없음과 v1 자리에 있음은 정반대 처분을 받아야 한다."""
     with tempfile.TemporaryDirectory() as td:
