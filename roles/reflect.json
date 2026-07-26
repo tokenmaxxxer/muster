@@ -1,0 +1,13 @@
+{
+  "marketplace": "tokenmaxxxer-reflect",
+  "repo": "tokenmaxxxer/reflect-agent-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com"
+      ]
+    }
+  }
+}

@@ -223,7 +223,9 @@ def ensure_installed(role: str, want: list[str], settings: str) -> None:
         f"  다시 시도한다.")
 
 
-ROLES = ("product", "feasibility", "coding", "qa", "review", "ops")
+# 계약 §3 의 WAKES-ON 표 순서. 보드를 읽을 때 이 순서로 보여준다.
+ROLES = ("product", "ux-design", "feasibility", "coding", "qa",
+         "review", "verify", "reflect", "ops")
 BOARD = "docs/reports/records"          # 계약 v2 §10. 전부 대상 레포 안에 있다
 CONTRACT = "docs/specs/role-handoff-contract.md"   # 레포-로컬 계약. 룰북 게이트가 찾는 자리
 # 계약 v1 이 쓰던 자리. 아직 v2 로 안 옮긴 레포를 **말해주기 위해서만** 본다
@@ -239,6 +241,57 @@ def slug(cwd: str) -> str:
     깨지지 않는 것이 §9 가 이 규칙을 고른 이유다.
     """
     return Path(cwd).resolve().name
+
+
+CANONICAL = ROOT / "contract" / "role-handoff-contract.md"
+
+
+def _digest(p: Path) -> str:
+    import hashlib
+    try:
+        return hashlib.sha256(p.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return ""
+
+
+def contract_drift(cwd: str) -> str | None:
+    """대상 레포의 계약이 정본과 다르면 그 사실을 돌려준다.
+
+    계약은 authority 문서인데 frontmatter 가 `status: final` 뿐이고 **버전이 없다.**
+    그래서 두 판이 나란히 `final` 을 선언하면서 188줄 다를 수 있었고, 실제로 그랬다
+    (2026-07-26: 345줄판 3개 / 533줄판 3개). 버전이 없으면 내용 해시가 유일하게
+    남는 판별 수단이다 — 문서를 고치지 않고도 갈라짐을 볼 수 있다.
+    """
+    theirs = _digest(Path(cwd).resolve() / CONTRACT)
+    ours = _digest(CANONICAL)
+    if not theirs or not ours or theirs == ours:
+        return None
+    return f"{theirs} (정본 {ours})"
+
+
+def init_contract(cwd: str) -> int:
+    """대상 레포에 정본 계약을 심는다. **muster 가 남의 레포에 쓰는 유일한 경우다.**
+
+    보드 기록은 절대 쓰지 않는다(protocol.md §1) — 그건 역할의 것이고, 밖에서
+    고치면 전이 게이트를 우회한다. 계약 파일은 상태가 아니라 **전제조건**이고,
+    없으면 역할이 조용히 계약 밖에서 도는 것이 실측으로 확인됐다.
+    """
+    root = Path(cwd).resolve()
+    dest = root / CONTRACT
+    if dest.exists():
+        drift = contract_drift(cwd)
+        if drift is None:
+            print(f"이미 정본과 같다: {dest}")
+            return 0
+        print(f"이미 계약이 있는데 정본과 다르다: {drift}\n"
+              f"  {dest}\n"
+              f"  덮어쓰지 않는다 — 그 레포가 의도적으로 다른 판을 쓰는 중일 수 있다.",
+              file=sys.stderr)
+        return 1
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(CANONICAL.read_bytes())
+    print(f"계약을 심었다: {dest}  ({_digest(dest)})")
+    return 0
 
 
 def require_contract(cwd: str, override: bool) -> None:
@@ -269,7 +322,8 @@ def require_contract(cwd: str, override: bool) -> None:
         f"대상 레포에 {CONTRACT} 가 없다: {root}\n"
         f"  이대로 띄우면 역할이 계약 v2 헤더 없이 기록을 쓴다. 보드에 아무것도\n"
         f"  올라가지 않고 다음 역할이 안 깨어나는데, 세션은 성공으로 끝난다(실측).\n"
-        f"  계약을 넣거나, 보드를 안 쓸 작업이면 --no-contract 로 명시한다.")
+        f"  `python3 spawn.py init -C {cwd}` 로 정본을 심거나,\n"
+        f"  보드를 안 쓸 작업이면 --no-contract 로 명시한다.")
 
 
 def frontmatter(p: Path) -> dict[str, str]:
@@ -316,7 +370,11 @@ def status(cwd: str) -> list[str]:
     out = [f"프로젝트: {slug(cwd)}   경로: {root}"]
 
     if not (root / CONTRACT).is_file():
-        out.append(f"⚠ {CONTRACT} 없음 — 역할이 계약 헤더 없이 기록을 쓴다(실측).")
+        out.append(f"⚠ {CONTRACT} 없음 — 역할이 계약 헤더 없이 기록을 쓴다(실측). "
+                   f"`spawn.py init` 으로 심는다.")
+    elif (drift := contract_drift(cwd)):
+        # 계약에 버전 필드가 없어서 해시가 유일한 판별 수단이다.
+        out.append(f"⚠ 이 레포의 계약이 정본과 다르다: {drift}")
     b = board(root)
     if b:
         for subject, roles in b.items():
@@ -392,6 +450,9 @@ def main() -> int:
                     help="대상 레포에 계약이 없어도 띄운다. 보드를 안 쓸 작업에만")
     a = ap.parse_args()
 
+    if a.role == "init":
+        # 계약을 심는다. muster 가 남의 레포에 쓰는 유일한 경우.
+        return init_contract(a.cwd)
     if a.role == "wake":
         # 계약 §3 의 표를 기계로 평가하고, **누구를 열지**를 말한다.
         # 띄우지 않는다 — 무엇을 맡길지는 그 줄을 만족시킨 사건이 정하지 않는다.

@@ -211,6 +211,38 @@ def t_rulebook_falls_back_to_github():
         raise AssertionError("소스가 없는데 통과시켰다")
 
 
+def t_contract_drift_is_detected_by_content():
+    """계약 frontmatter 는 `status: final` 뿐이고 **버전이 없다.** 그래서 두 판이
+    나란히 final 을 선언하며 188줄 다를 수 있었다(2026-07-26 실측). 버전이 없으면
+    내용 해시가 유일한 판별 수단이다."""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td) / "repo"
+        (root / "docs" / "specs").mkdir(parents=True)
+        assert spawn.contract_drift(str(root)) is None, "계약이 없으면 갈라짐도 없다"
+
+        assert spawn.init_contract(str(root)) == 0
+        assert spawn.contract_drift(str(root)) is None, "심은 직후는 정본과 같다"
+
+        (root / spawn.CONTRACT).write_text("---\nstatus: final\n---\n다른 판\n")
+        drift = spawn.contract_drift(str(root))
+        assert drift and "정본" in drift, drift
+
+        # 다른 판을 **덮어쓰지 않는다** — 의도적으로 다를 수 있다.
+        assert spawn.init_contract(str(root)) == 1
+        assert "다른 판" in (root / spawn.CONTRACT).read_text()
+
+
+def t_new_roles_resolve_without_a_local_checkout():
+    """ux-design·verify·reflect 는 로컬 체크아웃이 없다. github 폴백이 실제로
+    필요한 첫 사례이고, 없으면 muster 가 계약 §3 의 아홉 줄 중 셋을 못 띄운다."""
+    import json as _json
+    for role in ("ux-design", "verify", "reflect"):
+        spec = _json.loads((spawn.ROOT / "roles" / f"{role}.json").read_text())
+        assert "path" not in spec, f"{role}: 로컬 경로를 박으면 다른 기계에서 깨진다"
+        assert spawn.rulebook_source(spec)["source"] == "github", role
+    assert len(spawn.ROLES) == 9, spawn.ROLES
+
+
 def t_board_absent_names_the_v1_location():
     """보드 없음과 v1 자리에 있음은 정반대 처분을 받아야 한다."""
     with tempfile.TemporaryDirectory() as td:

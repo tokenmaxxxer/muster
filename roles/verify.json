@@ -1,0 +1,13 @@
+{
+  "marketplace": "tokenmaxxxer-verify",
+  "repo": "tokenmaxxxer/verify-agent-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com"
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "marketplace": "tokenmaxxxer-ux-design",
+  "repo": "tokenmaxxxer/ux-design-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com"
+      ]
+    }
+  }
+}
