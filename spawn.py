@@ -37,6 +37,24 @@ def _mkt(d: Path) -> Path:
     return d / ".claude-plugin" / "marketplace.json"
 
 
+def _path(spec: dict) -> str:
+    """역할 파일의 `path` 를 푼다. `~` 와 `$VAR` 를 편다. 못 풀면 빈 문자열.
+
+    절대경로를 그대로 적으면 그 레포는 **한 사람의 홈 디렉터리를 담은 채로**
+    공개된다. 그리고 남의 기계에는 그 경로가 없으니 조용히 github 로 떨어지는데,
+    왜 로컬 체크아웃이 안 잡히는지는 아무 데도 안 나온다.
+
+    안 풀린 변수를 남기지 않고 빈 문자열로 돌려주는 것이 중요하다 —
+    `$TOKENMAXXXER_RULEBOOKS/...` 같은 문자열이 그대로 경로로 쓰이면 없는
+    디렉터리를 가리키고, 그건 "설정 안 함"이 아니라 "잘못 설정함"이 된다.
+    """
+    p = spec.get("path")
+    if not p:
+        return ""
+    p = os.path.expanduser(os.path.expandvars(p))
+    return "" if "$" in p else p
+
+
 def registered(name: str) -> dict:
     """등록부에 이미 있는 마켓플레이스 항목. 없으면 {}."""
     try:
@@ -51,7 +69,7 @@ def rulebook_source(spec: dict) -> dict:
     로컬 우선인 이유는 개발이다 — 룰북을 고치면서 muster 로 돌려볼 때 커밋·푸시를
     거치게 하면 아무도 안 쓴다. 없으면 github 에서 받는다. 비공개 레포도 된다(실측).
     """
-    p = spec.get("path")
+    p = _path(spec)
     if p and _mkt(Path(p)).exists():
         return {"source": "directory", "path": p}
     if spec.get("repo"):
@@ -69,7 +87,7 @@ def rulebook_dir(spec: dict) -> Path | None:
     coding 만 실패했는데, 원인은 레포가 아니라 어제 로컬 경로로 등록해 둔
     `tokenmaxxxer-coding` 항목이었다.
     """
-    p = spec.get("path")
+    p = _path(spec)
     if p and _mkt(Path(p)).exists():
         return Path(p)
     loc = registered(spec["marketplace"]).get("installLocation")

@@ -1,7 +1,7 @@
 {
   "marketplace": "tokenmaxxxer-qa",
   "repo": "tokenmaxxxer/qa-agent-rulebook",
-  "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/qa-agent-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/qa-agent-rulebook",
   "sandbox": {
     "enabled": true,
     "network": {
@@ -17,6 +17,6 @@
     }
   },
   "env": {
-    "QA_WORKSPACE": "/Users/jk/workspace/10_WORK/tokenmaxxxer/qa-workspace"
+    "QA_WORKSPACE": "$HOME/workspace/10_WORK/tokenmaxxxer/qa-workspace"
   }
 }

@@ -68,6 +68,16 @@ doctrine 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개
 그 디렉터리에 `.claude-plugin/marketplace.json` 이 있으면 원격 대신 그걸 쓴다 —
 룰북을 고쳐가며 muster 로 돌려볼 때 커밋·푸시를 먼저 하지 않아도 된다.
 
+그 경로는 `$TOKENMAXXXER_RULEBOOKS/<레포>` 로 적혀 있고 `~` 와 `$VAR` 를 펴서
+푼다. 룰북 체크아웃들이 모여 있는 디렉터리를 이 변수에 넣으면 된다:
+
+    export TOKENMAXXXER_RULEBOOKS=~/src/tokenmaxxxer
+
+안 넣으면 모든 역할이 github 에서 풀린다 — 룰북을 고치지 않는 사람에게는 그게
+맞는 기본값이다. 안 풀린 변수는 리터럴 디렉터리 이름이 아니라 **경로 없음**으로
+취급한다. 없는 경로를 가리키는 것은 "설정 안 함"이 아니라 "잘못 설정함"이고,
+둘은 정반대 처분을 받아야 한다.
+
 **아무것도 스스로 갱신되지 않고, 클론만 갱신해서는 안 된다.** 세션은 마켓플레이스
 클론이 아니라 `~/.claude/plugins/cache/` 의 설치본을 읽고, 이 둘은 갈라진다.
 `claude plugin update` 는 plugin.json 의 `version` **문자열**만 보는데 룰북 아홉 개가
