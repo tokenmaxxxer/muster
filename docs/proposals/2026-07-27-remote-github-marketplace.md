@@ -1,5 +1,5 @@
 ---
-status: approved
+status: landed
 files:
   - .claude-plugin/marketplace.json
   - README.md
