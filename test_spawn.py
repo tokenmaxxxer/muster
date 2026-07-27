@@ -125,8 +125,29 @@ class Classify(unittest.TestCase):
         blocked = [("coding", "…§19 가 막는다")]
         self.assertEqual(spawn.classify(0, {}, [], blocked), "waiting-on-human")
 
+    def test_refused_is_not_silent_failure(self):
+        # 실측 2026-07-27, reflect 를 실제로 띄운 run: 룰북의 record-fields-gate
+        # 가 §20 필수 섹션이 없다며 쓰기를 거부했고, 세션은 이유를 또렷이 말하고
+        # 끝났다. 그건 아무 일도 안 일어났는데 이유를 모르는 것과 **정반대
+        # 처분**을 받아야 한다 — 게이트가 막은 것은 시스템이 작동한 것이다.
+        refused = {"permission_denials": [{"tool_name": "Write"}]}
+        self.assertEqual(spawn.classify(0, refused, [], []), "refused")
+
+    def test_progress_outranks_refusal(self):
+        # 일부가 막혔어도 보드가 움직였으면 그 run 의 처분은 progressed 다.
+        # 거부 건수는 따로 찍히므로 사라지지 않는다.
+        refused = {"permission_denials": [{"tool_name": "Write"}]}
+        self.assertEqual(spawn.classify(0, refused, ["records/a/qa.md"], []),
+                         "progressed")
+
+    def test_human_gate_outranks_refusal(self):
+        refused = {"permission_denials": [{"tool_name": "Write"}]}
+        self.assertEqual(spawn.classify(0, refused, [], [("coding", "§19")]),
+                         "waiting-on-human")
+
     def test_silent_failure_is_loud(self):
-        # 실측된 침묵-사망 모드: exit 0, 보드 무변화, 막힌 줄도 없음.
+        # 실측된 침묵-사망 모드: exit 0, 보드 무변화, 막힌 줄도 없고,
+        # **거부당한 것도 없다** — 그래서 아무도 이유를 모른다.
         self.assertEqual(spawn.classify(0, {}, [], []), "silent-failure")
 
 
