@@ -273,6 +273,22 @@ judges' consensus; every HIGH is security- or correctness-critical.
 
 ## 6. Revised roadmap
 
+**Status, 2026-07-27 (end of day): items 1–9 are landed and merged.** What is
+left is item 10, the per-role migration, plus the two decisions in §4 that only
+the human can make. Three things were learned by shipping the rest:
+
+- The judge's CLI contract had never been executed; running it found a
+  `judge-log.md` test that could not fail (it asserted on constants, and the
+  log was accumulating in the shared system temp dir across runs).
+- `spawn.py`'s own path had never been run end to end; running it found a
+  gate-blocked session being reported as `silent-failure`, which is the
+  opposite disposition from a gate doing its job. `refused` is now its own
+  outcome.
+- The driver, on its first real run, dispatched a `qa` session carrying a
+  rulebook commit that predated a security fix merged hours earlier. That
+  moved M10 from cleanup to correctness — sessions now load rulebooks by
+  path, with no cache in between.
+
 Order matters; each item names what it supersedes in the 2026-07-27 plan.
 
 1. **core Task 3 review completes** (in flight, unchanged).
