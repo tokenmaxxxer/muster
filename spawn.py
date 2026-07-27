@@ -187,9 +187,17 @@ def role_settings(role: str) -> dict:
     # 역할 파일의 env 는 **기본값**이지 강제가 아니다. 이미 환경에 있으면 그쪽이 이긴다 —
     # 안 그러면 bench 처럼 격리된 워크스페이스를 넘기려는 호출이 조용히 무시되고,
     # 실행이 실제 워크스페이스에 쓰게 된다(실제로 그렇게 오염시켰다).
+    # 역할 파일이 기본값으로 적은 값 자체에도 `~` 와 `$VAR` 가 들어갈 수 있다 —
+    # 절대경로를 박지 않으려면 그래야 한다. 여기서 먼저 펴지 않으면 아래의
+    # safe_substitute 는 한 번만 도므로 `$QA_WORKSPACE` → `$HOME/...` 로 끝나고,
+    # 안 풀린 `$` 때문에 역할이 아예 안 뜬다(실측 2026-07-27: qa 가 그랬다).
     for k in list(s.get("env", {})):
         if k in os.environ:
             s["env"][k] = os.environ[k]
+        else:
+            v = s["env"][k]
+            if isinstance(v, str):
+                s["env"][k] = os.path.expanduser(os.path.expandvars(v))
 
     # 샌드박스 경로는 그 env 를 **참조**해야 한다. 같은 값을 두 곳에 적으면 위의
     # 덮어쓰기가 조용히 무력화된다 — env 는 격리된 경로를 가리키는데 경계는 원래
@@ -375,7 +383,7 @@ def _installed() -> set[str]:
                     for e in entries if isinstance(e, dict))}
 
 
-def ensure_installed(role: str, want: list[str], settings: str) -> None:
+def ensure_installed(role: str, want: list[str], settings: str, cwd: str) -> None:
     """역할의 룰북이 실제로 설치되게 만든다. 안 되면 멈춘다.
 
     첫 스폰은 마켓플레이스를 **등록만** 하고 플러그인은 다음 실행부터 붙는다(실측).
@@ -393,7 +401,9 @@ def ensure_installed(role: str, want: list[str], settings: str) -> None:
     # 처음 보는 마켓플레이스는 **두 번** 걸린다 — 1회차가 등록하고 2회차가 설치한다
     # (실측). 한 번만 돌리고 포기하면 사용자가 같은 명령을 두 번 쳐야 한다.
     for _ in range(2):
-        subprocess.run(["claude", "-p", "--settings", settings],
+        # 워밍업도 대상 레포에서 돈다. cwd 를 안 넘기면 muster 자신의 디렉터리에서
+        # 돌아 노출이 역할 세션과 달라진다 — 같은 경계로 재현되어야 실측이 뜻을 갖는다.
+        subprocess.run(["claude", "-p", "--settings", settings], cwd=cwd,
                        input="ok", text=True, capture_output=True)
         missing = [p for p in want if p not in _installed()]
         if not missing:
@@ -529,6 +539,40 @@ def require_contract(cwd: str, override: bool) -> None:
         f"  보드를 안 쓸 작업이면 --no-contract 로 명시한다.")
 
 
+REPO_CONFIG = (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks")
+
+
+def require_no_repo_config(cwd: str, override: bool) -> None:
+    """대상 레포가 자기 Claude 설정을 들고 있으면 멈춘다.
+
+    **muster 의 샌드박스는 이걸 못 막는다.** 설정 우선순위는
+    `--settings` > `<레포>/.claude/settings.json` > `~/.claude/settings.json` 인데,
+    muster 는 양 끝만 읽고 가운데를 안 본다. 그리고 `hooks` 는 덮어쓰기가 아니라
+    **더해지고**, 훅 명령은 선언한 `sandbox.filesystem` 정책을 받지 않는다.
+
+    실측 2026-07-27. `denyWrite` 와 `denyRead` 를 선언한 역할 설정으로 띄웠는데,
+    레포가 커밋해 둔 SessionStart 훅이 **denyWrite 경로에 쓰고 denyRead 인
+    `~/.claude/settings.json` 을 읽어냈다.** 사용자 권한 그대로, 프롬프트 없이,
+    `env={**os.environ}` 을 통째로 들고. 레포를 클론해서 muster 를 겨눈 것만으로
+    성립한다.
+
+    계약 파일과 같은 처분을 한다 — 경고가 아니라 정지, 그리고 명시적 opt-out.
+    사고가 아니라 결정이 되게.
+    """
+    if override:
+        return
+    root = Path(cwd).resolve()
+    rogue = [p for p in REPO_CONFIG if (root / p).exists()]
+    if not rogue:
+        return
+    sys.exit(
+        f"대상 레포가 자기 Claude 설정을 들고 있다: {', '.join(rogue)}\n"
+        f"  {root}\n"
+        f"  그 훅들은 muster 가 선언한 샌드박스 경계를 **받지 않는다**. 띄우면\n"
+        f"  denyRead 로 막은 경로까지 읽힌다(실측). 내용을 직접 읽어보고,\n"
+        f"  믿을 수 있으면 --trust-repo-config 로 명시한다.")
+
+
 def frontmatter(p: Path) -> dict[str, str]:
     """맨 앞 `---` 블록만 얕게 읽는다. 값의 트레일링 주석은 떼어낸다 —
     계약 §2: 주석을 허용하지 않는 파서는 **게이트 결함이지 기록의 위반이 아니다**."""
@@ -651,6 +695,8 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="합쳐진 설정만 보고 안 띄운다")
     ap.add_argument("--no-contract", action="store_true",
                     help="대상 레포에 계약이 없어도 띄운다. 보드를 안 쓸 작업에만")
+    ap.add_argument("--trust-repo-config", action="store_true",
+                    help="대상 레포의 .claude/ 설정·훅을 신뢰한다. 읽어본 뒤에만")
     a = ap.parse_args()
 
     if a.role == "init":
@@ -678,6 +724,9 @@ def main() -> int:
     # --dry-run 은 세션을 안 태운다. 계약 검사는 버려질 세션을 막으려는 것이므로
     # 아무것도 안 띄우는 호출까지 막을 이유가 없다.
     require_contract(a.cwd, a.no_contract or a.dry_run)
+    # 드라이런도 막는다 — ensure_installed 의 워밍업이 실제 세션을 띄우고,
+    # 그 세션도 레포의 훅을 그대로 실행한다.
+    require_no_repo_config(a.cwd, a.trust_repo_config)
     s = role_settings(a.role)
     on = [k for k, v in s.get("enabledPlugins", {}).items() if v]
     if a.dry_run:
@@ -689,7 +738,7 @@ def main() -> int:
         settings = f.name
     try:
         # 설정 파일이 있어야 워밍업이 그 마켓플레이스를 등록할 수 있다.
-        ensure_installed(a.role, on, settings)
+        ensure_installed(a.role, on, settings, a.cwd)
         print(f"[{a.role}] 플러그인 {len(on)}개, 룰북 {rulebook_version(a.role)}, "
               f"작업 디렉터리 {a.cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
