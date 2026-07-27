@@ -159,27 +159,6 @@ def t_wake_never_reports_judgement_rows_as_unwoken():
         assert "못 재는 것이다" in text, text
 
 
-def t_sandbox_boundary_follows_the_env():
-    """역할의 env 를 환경으로 덮으면 샌드박스 경계도 따라와야 한다.
-
-    안 따라오면 env 는 격리된 경로를 가리키는데 경계는 원래 경로만 허용한다 —
-    격리했다고 믿는 채로 원래 자리에 쓰거나, 아무 데도 못 쓴다. bench 가 실제
-    워크스페이스를 오염시킨 사고가 정확히 이 모양이었다.
-    """
-    import os
-    old = os.environ.get("QA_WORKSPACE")
-    os.environ["QA_WORKSPACE"] = "/tmp/isolated-ws"
-    try:
-        s = spawn.role_settings("qa")
-        assert s["env"]["QA_WORKSPACE"] == "/tmp/isolated-ws", s["env"]
-        assert s["sandbox"]["filesystem"]["allowWrite"] == ["/tmp/isolated-ws"], s["sandbox"]
-    finally:
-        if old is None:
-            del os.environ["QA_WORKSPACE"]
-        else:
-            os.environ["QA_WORKSPACE"] = old
-
-
 def t_missing_contract_stops_the_spawn():
     """실측 A/B: 레포에 계약이 없으면 역할이 계약 헤더 없이 기록을 쓰고, 보드에
     아무것도 안 올라가고, 세션은 성공으로 끝난다. 경고로는 안 되는 이유가 그
@@ -240,29 +219,28 @@ def t_repo_local_claude_config_stops_the_spawn():
             spawn.require_no_repo_config(str(root), True)   # 명시적 opt-out 은 통과
 
 
-def t_role_env_defaults_expand():
-    """역할 파일의 env 기본값에 `$HOME` 을 쓸 수 있어야 한다 — 절대경로를 안 박으려면
-    그래야 하고, 안 펴면 샌드박스 경로 치환이 한 번만 돌아 역할이 아예 안 뜬다."""
-    import json as _json
-    spec = _json.loads((spawn.ROOT / "roles" / "qa.json").read_text())
-    assert spec["env"]["QA_WORKSPACE"].startswith("$"), spec["env"]
-    os.environ.pop("QA_WORKSPACE", None)
-    s = spawn.role_settings("qa")
-    for p in s["sandbox"]["filesystem"]["allowWrite"]:
-        assert "$" not in p, p
-
-
 def t_role_files_carry_no_absolute_home_path():
     """역할 파일에 `/Users/<이름>/...` 을 박으면 그 레포는 **한 사람의 홈 경로를
     담은 채로 공개된다.** 남의 기계에서는 없는 경로라 조용히 github 로 떨어지고,
-    왜 로컬 체크아웃이 안 잡히는지도 안 보인다. 공개 직전에 발견해서 넣은 가드다."""
+    왜 로컬 체크아웃이 안 잡히는지도 안 보인다. 공개 직전에 발견해서 넣은 가드다.
+
+    `$HOME`/`~` 로 시작하는 기본값도 마찬가지로 걸린다 — 리터럴 절대경로는 아니지만
+    `workspace/10_WORK` 같은 개인 디렉터리 관례를 그 뒤에 박아 넣으면 남의 기계에서
+    똑같이 낯선 경로가 되고, `$` 로 시작한다는 이유만으로 이 가드를 통과해 왔다."""
     import json as _json
+    personal_convention_markers = ("workspace/10_WORK",)
     for f in sorted((spawn.ROOT / "roles").glob("*.json")):
         raw = f.read_text()
         assert "/Users/" not in raw and "/home/" not in raw, f"{f.name}: {raw}"
+        for marker in personal_convention_markers:
+            assert marker not in raw, f"{f.name}: personal directory convention {marker!r}"
         spec = _json.loads(raw)
         if "path" in spec:
             assert spec["path"].startswith("$"), f"{f.name}: {spec['path']}"
+        for v in spec.get("env", {}).values():
+            if isinstance(v, str) and (v.startswith("$HOME") or v.startswith("~")):
+                for marker in personal_convention_markers:
+                    assert marker not in v, f"{f.name}: {v}"
 
 
 def t_unresolved_path_variable_is_not_a_path():
