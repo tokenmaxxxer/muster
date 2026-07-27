@@ -9,14 +9,6 @@
         "api.anthropic.com",
         "*.github.com"
       ]
-    },
-    "filesystem": {
-      "allowWrite": [
-        "$QA_WORKSPACE"
-      ]
     }
-  },
-  "env": {
-    "QA_WORKSPACE": "$HOME/workspace/10_WORK/tokenmaxxxer/qa-workspace"
   }
 }
