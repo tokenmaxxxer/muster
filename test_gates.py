@@ -148,6 +148,98 @@ def t_wake_finding_wakes_the_addressed_role():
         assert "qa" in w and "addressed_to" in w["qa"], w
 
 
+def _isolated_store(td: str):
+    """관찰 기록을 테스트 임시 디렉터리로 옮긴다. muster 의 진짜 runs/ 를
+    건드리면 테스트가 서로의 상태를 물려받는다."""
+    old = spawn.ROOT
+    spawn.ROOT = Path(td) / "muster"
+    (spawn.ROOT).mkdir(parents=True, exist_ok=True)
+    return old
+
+
+def t_wake_answered_row_does_not_fire_again():
+    """§6: 바뀌지 않은 보드는 아무도 깨우지 않는다.
+
+    실측 2026-07-27 — qa 줄은 src/ 를 건드린 커밋이 하나라도 있으면 무조건
+    섰다. 소비 추적이 없으면 드라이버가 같은 줄을 영원히 다시 띄운다.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        root = _wake_repo(td)
+        old = _isolated_store(td)
+        try:
+            (root / "src").mkdir()
+            (root / "src" / "a.py").write_text("x = 1\n")
+            run = lambda *a: subprocess.run(["git", "-C", str(root), *a],
+                                            capture_output=True, check=True)
+            run("add", "-A"); run("commit", "-qm", "src")
+
+            new, answered = wakes.fresh(str(root))
+            assert "qa" in {r.role for r in new}, new
+            assert answered == [], answered
+
+            wakes.consume(str(root), [r for r in new if r.role == "qa"])
+            new2, answered2 = wakes.fresh(str(root))
+            assert "qa" not in {r.role for r in new2}, new2
+            assert "qa" in {r.role for r in answered2}, answered2
+        finally:
+            spawn.ROOT = old
+
+
+def t_wake_refires_when_its_evidence_changes():
+    """소비는 영구 침묵이 아니다. 그 줄이 근거로 든 상태가 다시 움직이면
+    다시 깨어나야 한다 — 안 그러면 §6 이 루프를 끝내는 게 아니라 죽인다."""
+    with tempfile.TemporaryDirectory() as td:
+        root = _wake_repo(td)
+        old = _isolated_store(td)
+        try:
+            run = lambda *a: subprocess.run(["git", "-C", str(root), *a],
+                                            capture_output=True, check=True)
+            (root / "src").mkdir()
+            (root / "src" / "a.py").write_text("x = 1\n")
+            run("add", "-A"); run("commit", "-qm", "src")
+            wakes.consume(str(root), [r for r in wakes.fresh(str(root))[0]
+                                      if r.role == "qa"])
+            assert "qa" not in {r.role for r in wakes.fresh(str(root))[0]}
+
+            (root / "src" / "a.py").write_text("x = 2\n")
+            run("add", "-A"); run("commit", "-qm", "src again")
+            assert "qa" in {r.role for r in wakes.fresh(str(root))[0]}, \
+                "소스가 다시 움직였는데 qa 가 안 깨어난다"
+        finally:
+            spawn.ROOT = old
+
+
+def t_wake_report_never_hides_a_suppressed_row():
+    """억제된 줄을 조용히 지우면 '왜 안 뜨지'가 된다. 세어서 보여준다."""
+    with tempfile.TemporaryDirectory() as td:
+        root = _wake_repo(td)
+        old = _isolated_store(td)
+        try:
+            run = lambda *a: subprocess.run(["git", "-C", str(root), *a],
+                                            capture_output=True, check=True)
+            (root / "src").mkdir(); (root / "src" / "a.py").write_text("x = 1\n")
+            run("add", "-A"); run("commit", "-qm", "src")
+            wakes.consume(str(root), [r for r in wakes.fresh(str(root))[0]
+                                      if r.role == "qa"])
+            text = "\n".join(wakes.report(str(root)))
+            assert "다시 안 깨운다" in text, text
+            assert "qa" in "\n".join(wakes.report(str(root), show_answered=True))
+        finally:
+            spawn.ROOT = old
+
+
+def t_wake_store_is_per_repo():
+    """이름이 같은 두 레포가 서로의 소비 기록을 지우면 안 된다."""
+    with tempfile.TemporaryDirectory() as td:
+        old = _isolated_store(td)
+        try:
+            a = Path(td) / "x" / "repo"; b = Path(td) / "y" / "repo"
+            a.mkdir(parents=True); b.mkdir(parents=True)
+            assert wakes.observed_path(str(a)) != wakes.observed_path(str(b))
+        finally:
+            spawn.ROOT = old
+
+
 def t_wake_never_reports_judgement_rows_as_unwoken():
     """§14: 기계 검사는 실질 검사가 아니다. 못 재는 줄을 '안 깨어남'으로 보고하면
     사람이 봐야 할 두 줄이 조용히 사라진다."""

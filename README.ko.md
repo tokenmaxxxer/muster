@@ -199,6 +199,9 @@ python3 spawn.py <역할> "x" --dry-run          # 합쳐진 설정만 본다
 python3 spawn.py <역할> "x" --no-contract      # 계약 전제조건을 건너뛴다
 python3 spawn.py <역할> "x" --unattended       # 사람 부재: mint 없음, 휴먼 게이트는 선다
 python3 spawn.py doctor                       # 이 CLI 에서 훅 발화를 실측 (버전마다 한 번)
+python3 spawn.py drive -C <레포>               # 보드가 지목하는 역할을 하나씩, 멈출 때까지
+python3 spawn.py approve <kind> --subject <s>  # 사람이 직접 승인 토큰을 발행 (TTY 필요)
+python3 spawn.py wake --all                   # 이미 답해진 줄까지 전부 본다
 ```
 
 인증은 로그인된 것을 그대로 쓴다. 토큰도 시크릿도 필요 없다.
@@ -279,14 +282,13 @@ python3 test_gates.py
 
 ## 미해결
 
-- **WAKES-ON 감시자를 실제로 돌리는 것.** `wake` 는 누구를 열지 말해줄 뿐 여는 것은
-  사람이다. 계약 §3 이 "만들어진다면 미래의 자동 감시자"에게 그 자리를 남겨뒀다.
-  다만 subject 하나를 손으로 끝까지 몰아본 다음에 만드는 게 맞다 — 지금까지 매
-  단계마다 루프였으면 삼켰을 것이 하나씩 나왔다.
-- **`feasibility-agent-rulebook` 게이트 스위트의 기존 9건 실패.** v1 경로인
-  `feasibility-record.md` 에 대고 게이트를 때리는데, 소유 경로 규칙이 그 경로를 더는
-  안 덮는다. 게이트가 그걸 계속 관할해야 하는지, 케이스를 옮겨야 하는지는 그 룰북의
-  판단이다.
+- **드라이버로 subject 하나를 끝까지 몰아보기.** `spawn.py drive` 가 생겼지만
+  아직 한 역할씩만 실측했다. 여러 역할이 이어지는 라운드를 손으로 한 번 완주해
+  본 다음에 길게 돌리는 게 맞다 — 지금까지 매 단계마다 루프였으면 삼켰을 것이
+  하나씩 나왔다.
+- **게이트 여섯 종이 아직 룰북마다 따로 산다.** `state-gate.sh` 는 일곱 벌이고
+  일곱이 전부 다르다. core 가 지금 들고 있는 것은 승인과 보드 게이트뿐이고,
+  전이 표를 데이터로 받는 형태로 올리는 일은 시작 전이다.
 - **계약 §3 표와 §5 가 어긋난다.** §5 는 모든 역할이 자기 앞 finding 에 깨어난다고
   하는데, 표는 coding 줄에만 finding 을 적었다. `wakes.py` 는 §5 를 따랐다 — 표만
   따르면 coding 외 역할에게 온 finding 을 아무도 안 본다.
