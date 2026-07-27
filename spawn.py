@@ -688,6 +688,30 @@ def gate_report(cwd: str) -> list[str]:
            ["[게이트] 확인 필요:"] + [f"  - {b}" for b in bad]
 
 
+def spawn_cmd(settings_path: str, role: str,
+              unattended: bool) -> tuple[list[str], dict[str, str]]:
+    """세션 argv 와 env **추가분**. 호출자가 os.environ 위에 얹는다.
+
+    --permission-mode acceptEdits: 실측 2026-07-27 — 권한 설정 없는 headless 는
+    Write 를 조용히 거부한다(permission_denials 에만 남는다). acceptEdits 는
+    대답할 사람이 없는 프롬프트를 없앨 뿐이고, 거부는 계속 게이트의 몫이다 —
+    PreToolUse exit 2 가 acceptEdits 아래서도 막는 것을 같은 날 실측했다.
+    샌드박스 Bash 는 원래 자동 허용이고, 비샌드박스 재실행은 이미
+    allowUnsandboxedCommands:false 가 막는다.
+
+    TOKENMAXXXER_SPAWNED: 스폰된 세션의 프롬프트는 오케스트레이터가 쓴
+    텍스트이지 사람 턴이 아니다. core 의 mint 훅이 이 도장을 보고 발행을
+    거른다. UNATTENDED 와 별개다 — 그쪽은 "사람이 없다"는 사실이고, 겹쳐
+    쓰면 attended 스폰이 깨진다.
+    """
+    cmd = ["claude", "-p", "--settings", settings_path,
+           "--permission-mode", "acceptEdits", "--output-format", "json"]
+    env = {"CLAUDE_ROLE": role, "TOKENMAXXXER_SPAWNED": "1"}
+    if unattended:
+        env["TOKENMAXXXER_UNATTENDED"] = "1"
+    return cmd, env
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("role", nargs="?", help="역할. 생략하면 상태만 보여준다")
@@ -698,6 +722,8 @@ def main() -> int:
                     help="대상 레포에 계약이 없어도 띄운다. 보드를 안 쓸 작업에만")
     ap.add_argument("--trust-repo-config", action="store_true",
                     help="대상 레포의 .claude/ 설정·훅을 신뢰한다. 읽어본 뒤에만")
+    ap.add_argument("--unattended", action="store_true",
+                    help="사람이 없는 실행. mint 는 안 되고, 휴먼 게이트는 선다")
     a = ap.parse_args()
 
     if a.role == "init":
