@@ -377,19 +377,82 @@ that only checked for the file let the same approving write pass four times."
 
 ---
 
-### Task 3: `mint.sh` — the user's turn becomes a token
+### Task 3: `mint.sh` — an exact challenge line becomes a token
 
 **Files:**
-- Create: `core/hooks/mint.sh`
-- Create: `core/hooks/hooks.json`
-- Test: `core/hooks/tests/run-mint-tests.sh`
+- Rewrite: `core/hooks/mint.sh` (replaces the sentence-scoped version at `703ef33`)
+- Rewrite: `core/hooks/tests/run-mint-tests.sh`
+- Modify: `core/hooks/hooks.json` (unchanged in shape; verify it still points at `mint.sh`)
 
 **Interfaces:**
 - Consumes: `consent.KIND_RE` and the token format from Task 2.
-- Produces: a `UserPromptSubmit` hook that writes `<tokens_dir>/<kind>.token` and prints nothing. Never blocks: exits 0 on every path.
-- Environment read: `CORE_OFF` (kill switch), `TOKENMAXXXER_UNATTENDED` (Task 4), `CLAUDE_PROJECT_DIR`.
+- Produces: a `UserPromptSubmit` hook that writes `<tokens_dir>/<kind>.token` and
+  prints nothing. Never blocks: exits 0 on every path.
+- Environment read: `CORE_OFF` (kill switch), `TOKENMAXXXER_UNATTENDED`,
+  `CLAUDE_PROJECT_DIR`.
+- Produces, for Task 4: the challenge-line grammar `APPROVE <kind> <subject>`
+  and the fact that `actor: user` marks a token minted from a human turn.
 
-- [ ] **Step 1: Write the failing test**
+#### Why this task is a rewrite and not a fix
+
+Three designs tried to read approval out of natural language. Each leaked, and
+each leaked differently:
+
+1. The NAME of the target state read as an approval — quoting the contract, or
+   refusing in a sentence that named `scope-approved`, minted a token.
+2. A negation denylist scanned in a character window. It carried `\brefus\b`,
+   which cannot match "refuse" (word boundaries make it seek the literal word
+   `refus`), and omitted `won't` / `will not` / `should not` outright.
+3. A sentence-scoped rewrite with an open-suffix denylist. Measured 2026-07-27,
+   still minting from all of:
+
+   ```
+   "The reviewer asked me to approve the scope for subject X."
+   "Once CI is green, approve the scope for subject X."
+   "Last week I approved the scope for subject X."
+   "Do not approve. Actually, approve the scope for subject X."
+   "Tell me how to approve the scope for subject X."
+   "Cancel that. I approve the scope for subject X was a mistake."
+   ```
+
+   plus seven Korean refusals (`승인 못 한다`, `아냐`, `아녜요`, `아니지`, …) and an
+   unclosed code fence that silently swallowed every approval after it.
+
+Deciding what a sentence MEANS is a language problem; a regex is the wrong tool
+and no amount of denylist grows into the right one. Deciding whether two strings
+are EQUAL is not a language problem.
+
+The split this task locks in:
+
+| job | who |
+|---|---|
+| ask the human clearly, print the exact line to send | the model — it is good at this |
+| check whether the turn IS that line | this hook — 15 lines, no interpretation |
+
+The hook must stay a hook rather than becoming the model's own judgment for two
+reasons. The model is the thing being gated, and an entity cannot authorize
+itself — that is exactly the `warrant/hooks/scope-gate.sh` defect measured on
+2026-07-27, where the model wrote its own `status: approved` proposal and the
+gate honored it. And the input here is adversarial text: an LLM reading
+adversarial text to decide authorization is injectable, while string equality is
+not.
+
+#### The challenge line
+
+```
+APPROVE <kind> <subject>
+```
+
+- The user's WHOLE turn, after stripping leading and trailing whitespace, must
+  equal this line. A turn that merely *contains* it does not mint. This is the
+  single rule that closes every bypass above, and relaxing it to "contains"
+  reopens all of them.
+- `<kind>` is present because the token's meaning lives in its `kind`, not its
+  filename. Without it, approving one transition would satisfy a gate waiting on
+  a different one.
+- Both fields must satisfy `consent.KIND_RE` — `^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`.
+
+- [ ] **Step 1: Replace the test suite**
 
 `core/hooks/tests/run-mint-tests.sh`:
 
@@ -398,26 +461,19 @@ that only checked for the file let the same approving write pass four times."
 # Runs mint.sh as a real subprocess against real prompts and asserts on what it
 # left behind — the token's `kind` and `subject`, never its filename alone.
 #
-# Every rejected case here minted a valid, consumable token in at least one
-# rulebook on 2026-07-27. Three separate attempts at this logic leaked before
-# it became sentence-scoped:
-#
-#   - the NAME of the target state read as an approval, so quoting the
-#     contract, or refusing in a sentence that named the state, minted one
-#   - a negation denylist scanned in a character window: it carried
-#     `\brefus\b`, which cannot match "refuse", and omitted won't/will not/
-#     should not entirely
-#   - subject and approval matched independently over the whole prompt, so a
-#     turn discussing two subjects approved the wrong one
+# The rejected cases are not hypothetical. Every one of them minted a valid,
+# consumable token against some earlier version of this hook, measured
+# 2026-07-27. They are kept as the record of what "contains an approval" costs.
 set -uo pipefail
 
 HOOK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../mint.sh"
 KIND="scope-proposed--scope-approved"
 SUB="2026-07-27-laundry-drying-time"
+LINE="APPROVE $KIND $SUB"
 pass=0
 fail=0
 
-# want: "reject" | "mint:<subject>"
+# want: "reject" | "mint:<kind>/<subject>"
 check() {
   want="$1"; name="$2"; prompt="$3"
   td="$(mktemp -d)"
@@ -426,412 +482,505 @@ check() {
 import json, sys
 print(json.dumps({"prompt": sys.argv[1], "cwd": sys.argv[2]}))' "$prompt" "$td")"
   printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$td" /bin/bash "$HOOK" >/dev/null 2>&1
-  tok="$(find "$td" -name "$KIND.token" -type f | head -1)"
+  tok="$(find "$td" -name '*.token' -type f | head -1)"
   if [ -n "$tok" ]; then
     got="mint:$(python3 -c '
 import re, sys
 t = open(sys.argv[1], encoding="utf-8").read()
-m = re.search(r"^subject:\s*(.*)$", t, re.M)
-print(m.group(1).strip() if m else "?")' "$tok")"
+def f(k):
+    m = re.search(r"^" + k + r":\s*(.*)$", t, re.M)
+    return m.group(1).strip() if m else "?"
+print(f("kind") + "/" + f("subject"))' "$tok")"
   else
     got=reject
   fi
   rm -rf "$td"
   if [ "$got" = "$want" ]; then
-    pass=$((pass + 1)); printf 'ok     %-24s %s\n' "$name" "$got"
+    pass=$((pass + 1)); printf 'ok     %-26s %s\n' "$name" "$got"
   else
-    fail=$((fail + 1)); printf 'FAIL   %-24s want=%s got=%s\n' "$name" "$want" "$got"
+    fail=$((fail + 1)); printf 'FAIL   %-26s want=%s got=%s\n' "$name" "$want" "$got"
   fi
 }
 
-check "mint:$SUB" approve-en        "I approve the scope for subject $SUB."
-check "mint:$SUB" approve-ko        "subject $SUB 의 scope 를 승인한다."
-check "mint:$SUB" approve-ko-range  "subject $SUB 의 범위를 승인한다."
-check "mint:$SUB" same-sentence     "subject beta is blocked and stays where it is. Separately, I approve the scope for subject $SUB."
+# --- the one thing that mints ------------------------------------------
+check "mint:$KIND/$SUB" exact              "$LINE"
+check "mint:$KIND/$SUB" exact-trailing-nl  "$LINE
+"
+check "mint:$KIND/$SUB" exact-leading-ws   "   $LINE   "
 
-check reject state-mention     "subject $SUB 는 아직 scope-approved 가 아니다."
-check reject contract-quote    "Section 19 makes subject $SUB reaching scope-approved a human-owned edge."
-check reject agent-explains    "subject $SUB: I cannot write scope-approved myself."
-check reject refuse-verb       "subject $SUB: I refuse to approve the scope."
-check reject wont-contraction  "For subject $SUB I won't approve the scope."
-check reject will-not          "For subject $SUB I will not approve the scope."
-check reject should-not        "subject $SUB: you should not approve the scope on my behalf."
-check reject wouldnt           "subject $SUB: I wouldn't approve the scope as written."
-check reject question-anyone   "subject $SUB - did anyone approve the scope yet?"
-check reject third-party       "subject $SUB: the PR comment says QA approved the scope last week."
-check reject hedged            "subject $SUB: this might be ready to approve, I think."
-check reject bare-assent       "ok"
-check reject no-subject        "I approve the scope."
+# --- prose approvals: the entire class that leaked before ---------------
+check reject prose-en           "I approve the scope for subject $SUB."
+check reject prose-ko           "subject $SUB 의 scope 를 승인한다."
+check reject reported-speech    "The reviewer asked me to approve the scope for subject $SUB."
+check reject conditional        "Once CI is green, approve the scope for subject $SUB."
+check reject past-tense         "Last week I approved the scope for subject $SUB."
+check reject negation-then-yes  "Do not approve. Actually, approve the scope for subject $SUB."
+check reject asking-how         "Tell me how to approve the scope for subject $SUB."
+check reject retraction         "Cancel that. I approve the scope for subject $SUB was a mistake."
+check reject refusal-ko         "subject $SUB 승인 못 한다."
+check reject state-mention      "subject $SUB 는 아직 scope-approved 가 아니다."
+check reject contract-quote     "Section 19 makes subject $SUB reaching scope-approved a human-owned edge."
+
+# --- the line, but not alone: containment is not equality ---------------
+check reject line-with-preamble  "Send this to approve: $LINE"
+check reject line-with-suffix    "$LINE -- but only after the review lands."
+check reject line-in-fence       "To approve, reply:
+
+\`\`\`
+$LINE
+\`\`\`"
+check reject line-quoted         "You wrote \"$LINE\" but I have not decided yet."
+check reject two-lines           "I am not approving this.
+$LINE"
+
+# --- malformed lines ----------------------------------------------------
+check reject lowercase          "approve $KIND $SUB"
+check reject no-subject         "APPROVE $KIND"
+check reject no-kind            "APPROVE $SUB"
+check reject extra-field        "APPROVE $KIND $SUB now"
+check reject bad-subject-chars  "APPROVE $KIND ../../etc/passwd"
+check reject bad-kind-chars     "APPROVE ../$KIND $SUB"
+check reject empty              ""
+check reject bare-assent        "ok"
+
+# --- environment --------------------------------------------------------
+check_env() {
+  want="$1"; name="$2"; shift 2
+  td="$(mktemp -d)"
+  git init -q "$td"
+  payload="$(python3 -c '
+import json, sys
+print(json.dumps({"prompt": sys.argv[1], "cwd": sys.argv[2]}))' "$LINE" "$td")"
+  printf '%s' "$payload" | env "$@" CLAUDE_PROJECT_DIR="$td" /bin/bash "$HOOK" >/dev/null 2>&1
+  tok="$(find "$td" -name '*.token' -type f | head -1)"
+  [ -n "$tok" ] && got=mint || got=reject
+  rm -rf "$td"
+  if [ "$got" = "$want" ]; then
+    pass=$((pass + 1)); printf 'ok     %-26s %s\n' "$name" "$got"
+  else
+    fail=$((fail + 1)); printf 'FAIL   %-26s want=%s got=%s\n' "$name" "$want" "$got"
+  fi
+}
+
+check_env reject kill-switch  CORE_OFF=1
+check_env reject unattended   TOKENMAXXXER_UNATTENDED=1
 
 printf '\n== %d passed, %d failed ==\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run it against the current hook and watch it fail**
 
-```bash
-chmod +x core/hooks/tests/run-mint-tests.sh
-/bin/bash core/hooks/tests/run-mint-tests.sh
-```
+Run: `bash core/hooks/tests/run-mint-tests.sh`
 
-Expected: every case reports `got=reject`; the four `mint:` cases FAIL. Summary `== 13 passed, 4 failed ==`.
+Expected: the `exact*` cases FAIL (the current hook does not recognise the
+challenge line at all), and `prose-en` / `prose-ko` FAIL (the current hook mints
+from them). This is the point of the rewrite — the old contract and the new one
+are opposites on those rows.
 
-- [ ] **Step 3: Write the hook**
-
-`core/hooks/mint.sh`:
+- [ ] **Step 3: Rewrite `core/hooks/mint.sh`**
 
 ```bash
 #!/usr/bin/env bash
-# UserPromptSubmit hook: mints a single-use approval token from an assertion in
-# the user's OWN turn — never from a file, record, PR comment, or tool result.
-# A role's gate consumes it via hooks/lib/consent.py.
+# UserPromptSubmit: mints a consent token when the user's whole turn is exactly
 #
-# This hook NEVER blocks. Malformed input, no root, no subject, or an absent or
-# ambiguous approval all mean: write nothing, exit 0. The gate — not this hook
-# — is what refuses an unsignaled transition.
+#     APPROVE <kind> <subject>
 #
-# Kill switch: export CORE_OFF=1
-set -uo pipefail
+# and never otherwise. Not a sentence containing that line, not a paraphrase,
+# not an approval written in prose.
+#
+# Three earlier designs read approval out of natural language and all three
+# leaked (see tests/run-mint-tests.sh for the measured cases). Deciding what a
+# sentence means is a language problem and a regex is the wrong tool for it;
+# deciding whether two strings are equal is not a language problem. The model
+# asks the human clearly and prints the exact line to send — that half IS a
+# language problem, and the model is good at it. This hook only checks equality.
+#
+# Why a hook and not the model's own judgment: the model is the thing being
+# gated, and the input is adversarial text. An entity cannot authorize itself,
+# and an LLM reading adversarial text to decide authorization is injectable.
+# String equality is neither.
+#
+# Never blocks: exit 0 on every path. The GATE refuses; this hook only records.
+# Kill switch: CORE_OFF=1
+# Unattended: mints nothing. There is no human turn to read, and an approval in
+# an unattended run comes from the judge (see lib/judge.py), not from here.
+set -euo pipefail
 
-case "${CORE_OFF:-}" in
-  ""|0|false|no|off) ;;
-  *) exit 0 ;;
-esac
+case "${CORE_OFF:-}" in ""|0|false|no|off) ;; *) exit 0 ;; esac
+case "${TOKENMAXXXER_UNATTENDED:-}" in ""|0|false|no|off) ;; *) exit 0 ;; esac
 
 command -v python3 >/dev/null 2>&1 || exit 0
 
 payload="$(cat 2>/dev/null || true)"
 [ -n "$payload" ] || exit 0
 
-# The parser is read into a variable at TOP LEVEL and passed to `python3 -c`.
-# Written as `$(python3 <<'PY' … PY)` it would not parse under bash 3.2 — a
-# quoted-delimiter heredoc nested in a command substitution is not literal
-# there, so one apostrophe in a comment ("the gate's own sentinel") breaks the
-# whole file. Measured 2026-07-27: that made a UserPromptSubmit hook fail to
-# parse, and every prompt for that role came back blocked.
-IFS='' read -r -d '' MINT_PY <<'PY' || true
+# Read the program at top level. bash 3.2 tracks quotes and parens inside a
+# heredoc body while scanning for a closing `)`, so a quoted heredoc nested in
+# $( … ) is NOT literal and one apostrophe in a comment breaks the file.
+IFS='' read -r -d '' CORE_MINT <<'PY' || true
 import json, os, posixpath, re, subprocess, sys, tempfile
 
 def bail():
     sys.exit(0)
 
-raw = os.environ.get("CORE_PAYLOAD", "")
 try:
-    event = json.loads(raw)
+    event = json.loads(os.environ.get("CORE_PAYLOAD", ""))
 except ValueError:
     bail()
 if not isinstance(event, dict):
     bail()
 
 prompt = event.get("prompt")
-if not isinstance(prompt, str) or not prompt.strip():
+if not isinstance(prompt, str):
     bail()
 
-# An unattended run receives its prompts from the orchestrator, not from a
-# human. Reading those as human speech is exactly the self-certification the
-# token exists to prevent, so unattended mints nothing at all.
-if os.environ.get("TOKENMAXXXER_UNATTENDED", "") not in ("", "0", "false", "no", "off"):
+# The WHOLE turn, or nothing. `re.match` alone would accept a trailing
+# remainder, and `contains` would accept every quoted, fenced and negated case
+# in the test suite. `\Z` with no `re.M` is what makes this equality.
+ID = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}"
+m = re.match(r"\AAPPROVE (%s) (%s)\Z" % (ID, ID), prompt.strip())
+if not m:
     bail()
+kind, subject = m.group(1), m.group(2)
 
-# --- the approving sentence, and the subject named inside it -----------
-#
-# Subject and approval come from ONE sentence. Two independent searches over
-# the whole prompt is what leaked on 2026-07-27:
-#
-#   "subject beta is blocked and stays where it is. Separately, I approve the
-#    scope for subject alpha."   -> minted a token for BETA.
-#
-# The state name is an identifier, never a speech act. Blank it first, or
-# `\bscope\b[^.\n]*\bapproved\b` spans the literal `scope-approved` (the hyphen
-# is a word boundary) and "this subject is not yet scope-approved" reads as an
-# approval.
-speech = re.sub(r"(?i)\bscope[-_ ]?approved\b", " <state> ", prompt)
-speech = speech.replace("’", "'")
-
-# A sentence disqualifies itself by being a question, a hedge, a negation, or a
-# report of someone else's words. Verb suffixes are open (`refus\w*`) — the
-# closed form `\brefus\b` shipped once and could not match "refuse" at all.
-DISQUALIFY = re.compile(
-    r"(?i)\?\s*$"
-    r"|\b(not|never|cannot|shall not|will not|would not|should not|must not"
-    r"|can't|won't|wont|shan't|shouldn't|wouldn't|couldn't|didn't|doesn't"
-    r"|don't|isn't|aren't|wasn't|weren't|hasn't|haven't"
-    r"|refus\w*|declin\w*|without|instead of|unsure|maybe|might"
-    r"|i think|i wonder|did anyone|has anyone|do you|should we|shall we)\b"
-    r"|\b(says?|said|according to|comment|quoted?|per the)\b"
-    r"|하지\s*마|하지\s*말|말고|말라|않|없이|금지|아니|못\s*"
-    r"|확실치|확실하지|모르겠|인가요|일까요|라고\s*(?:한다|했다|합니다)")
-
-APPROVES = re.compile(
-    r"(?i)\b(approve|approved|approving)\b[^.\n]*\bscope\b"
-    r"|\bscope\b[^.\n]*\b(approve|approved)\b"
-    r"|(?:scope|스코프|범위)[^.\n]*승인")
-SUBJECT = re.compile(r"(?i)\bsubject[\s:]+([A-Za-z0-9][A-Za-z0-9_-]{0,127})")
-
-subject = None
-approving_sentence = None
-for sentence in re.split(r"(?<=[.!?\n])\s+", speech):
-    s = sentence.strip()
-    if not s or DISQUALIFY.search(s) or not APPROVES.search(s):
-        continue
-    sub = SUBJECT.search(s)
-    if not sub:
-        # An approval naming no subject in its own sentence names nothing.
-        # Which subject it meant is not this hook's guess to make.
-        continue
-    subject = sub.group(1)
-    approving_sentence = s
-    break
-
-if subject is None:
-    bail()
-# Reject bare assent even if a keyword coincidentally appears.
-if re.match(r"^\s*(ok|okay|sure|sounds good|yep|yes|k|fine)\s*[.!]?\s*$", prompt, re.I):
-    bail()
-
-KIND = "scope-proposed--scope-approved"
-
-# --- resolve the project root ------------------------------------------
+# --- resolve project root (no root -> nothing to do) -------------------
 def git_top(p):
     try:
         out = subprocess.run(["git", "-C", p, "rev-parse", "--show-toplevel"],
                              capture_output=True, text=True)
         if out.returncode == 0 and out.stdout.strip():
-            return posixpath.normpath(
-                os.path.realpath(out.stdout.strip()).replace("\\", "/"))
+            return posixpath.normpath(os.path.realpath(out.stdout.strip()).replace("\\", "/"))
     except Exception:
         return None
     return None
 
-root = os.environ.get("CLAUDE_PROJECT_DIR", "") or event.get("cwd", "") or ""
-root = git_top(root) or (posixpath.normpath(os.path.realpath(root).replace("\\", "/"))
-                         if root else "")
-if not root or not os.path.isdir(root):
+def plausible(r):
+    return bool(r) and os.path.isdir(r) and os.path.exists(os.path.join(r, ".git"))
+
+cpd = os.environ.get("CLAUDE_PROJECT_DIR")
+root = None
+if cpd and plausible(cpd):
+    root = posixpath.normpath(os.path.realpath(cpd).replace("\\", "/"))
+if root is None:
+    root = git_top(os.getcwd())
+if not root:
     bail()
 
+# Token dir under the subject's record area. Resolve, then containment-check —
+# KIND_RE already excludes `/` and `..`, and this is the second lock.
 records_root = posixpath.join(root, "docs", "reports", "records")
 tokens_dir = posixpath.join(records_root, subject, "tokens")
 try:
     os.makedirs(tokens_dir, exist_ok=True)
 except OSError:
     bail()
-
 tokens_real = posixpath.normpath(os.path.realpath(tokens_dir).replace("\\", "/"))
 records_real = posixpath.normpath(os.path.realpath(records_root).replace("\\", "/"))
 if not tokens_real.startswith(records_real + "/"):
     bail()
 
-token_file = posixpath.join(tokens_real, KIND + ".token")
+token_file = posixpath.join(tokens_real, kind + ".token")
 if posixpath.dirname(token_file) != tokens_real:
     bail()
 
-phrase = approving_sentence[:300]
-# The phrase is the user's own words, kept so a human can audit what minted
-# this. Redact anything credential-SHAPED rather than anything merely spelled
-# like the word "secret" — the previous scan matched English nouns and let
-# ghp_/sk-/AKIA/xoxb- prefixes through untouched.
-if re.search(r"(?i)(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
-             r"|sk-[A-Za-z0-9-]{20,}|AKIA[A-Z0-9]{16}|ASIA[A-Z0-9]{16}"
-             r"|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{35}"
-             r"|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\."
-             r"|-----BEGIN |https?://[^ ]*:[^ ]*@"
-             r"|api[_-]?key|secret|password|passwd|bearer |authorization:)",
-             phrase):
-    phrase = "(approval wording redacted: looked credential-shaped)"
-phrase = phrase.replace("\n", " ").replace("\r", " ")
-
-fd, tmp = tempfile.mkstemp(dir=tokens_real, prefix=".mint-")
+# `phrase` is the challenge line itself. It cannot carry a secret, so the
+# credential-redaction pass the prose version needed is gone with the prose.
 try:
+    fd, tmp = tempfile.mkstemp(dir=tokens_real, prefix=".token.")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write("kind: %s\n" % KIND)
+        fh.write("kind: %s\n" % kind)
         fh.write("subject: %s\n" % subject)
         fh.write("actor: user\n")
-        fh.write("phrase: %s\n" % phrase)
+        fh.write("phrase: APPROVE %s %s\n" % (kind, subject))
     os.replace(tmp, token_file)
 except OSError:
-    try:
-        os.unlink(tmp)
-    except OSError:
-        pass
     bail()
+
+sys.exit(0)
 PY
 
-CORE_PAYLOAD="$payload" python3 -c "$MINT_PY" >/dev/null 2>&1 || true
+CORE_PAYLOAD="$payload" python3 -c "$CORE_MINT" || true
 exit 0
 ```
 
-`core/hooks/hooks.json`:
+- [ ] **Step 4: Run the suite until green**
 
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/mint.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+Run: `bash core/hooks/tests/run-mint-tests.sh`
+Expected: `== 28 passed, 0 failed ==`
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [ ] **Step 5: Run the Task 2 suite to confirm nothing regressed**
 
-```bash
-chmod +x core/hooks/mint.sh
-/bin/bash -n core/hooks/mint.sh && echo "PARSE-OK under $(/bin/bash --version | head -1)"
-/bin/bash core/hooks/tests/run-mint-tests.sh
-```
+Run: `python3 core/hooks/tests/test_consent_lib.py`
+Expected: all pass. The token format did not change; only who writes it and why.
 
-Expected: `PARSE-OK under GNU bash, version 3.2.57…` then `== 17 passed, 0 failed ==`
+- [ ] **Step 6: Confirm the deleted surface is really gone**
 
-- [ ] **Step 5: Commit**
+Run: `grep -nE 'refus|declin|승인|아니|DISQUALIFY|APPROVES|sentence' core/hooks/mint.sh`
+Expected: no matches outside the comment header. If a denylist survives anywhere
+in the executable path, this task is not done.
+
+Run: `wc -l core/hooks/mint.sh`
+Expected: well under 120 lines (the version being replaced is 239).
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add core/hooks/mint.sh core/hooks/hooks.json core/hooks/tests/run-mint-tests.sh
-git commit -m "feat: mint an approval token from an assertion in the user's turn
-
-Sentence-scoped: one sentence must read as an assertion of approval AND name
-the subject. Questions, hedges, negations and reports of someone else's words
-disqualify a sentence. Every rejected case in the suite minted a valid token
-in at least one rulebook on 2026-07-27."
+git add core/hooks/mint.sh core/hooks/tests/run-mint-tests.sh
+git commit -m "feat: mint from an exact challenge line, not from prose"
 ```
 
 ---
 
-### Task 4: Unattended mode is observable, not just silent
+### Task 4: Unattended mode — an independent judge, not a silent stop
 
 **Files:**
-- Modify: `core/hooks/lib/consent.py` (add `unattended()`)
-- Modify: `core/hooks/tests/test_consent_lib.py` (add `UnattendedTests`)
-- Test: `core/hooks/tests/run-mint-tests.sh` (add one case)
+- Create: `core/hooks/lib/judge.py`
+- Create: `core/hooks/tests/test_judge_lib.py`
+- Modify: `README.md` (document the two modes)
 
 **Interfaces:**
-- Consumes: `consent.ConsentError` from Task 2.
-- Produces: `consent.unattended() -> bool` — true when `TOKENMAXXXER_UNATTENDED` is set to anything other than `""`, `0`, `false`, `no`, `off`. A gate calls it to phrase its refusal, never to skip one.
+- Consumes: the token format and `KIND_RE` from Task 2; the `actor` field
+  convention from Task 3 (`user` from a human turn, `judge` from this module).
+- Produces:
+  ```python
+  judge.maybe_mint(tokens_dir, kind, subject, material, facts, cmd=None, timeout=120)
+      -> bool     # True only if it wrote a token
+  ```
+  A gate calls this BEFORE `consent.find`. Returns `False` on every failure, so a
+  gate that ignores the return value and simply calls `find` afterwards still
+  behaves correctly.
 
-- [ ] **Step 1: Write the failing tests**
+#### What changes and why
 
-Append to `core/hooks/tests/test_consent_lib.py`, above the `if __name__` block:
+The design document closed unattended mode: gates refuse, with a message naming
+the mode. That makes an unattended run stop at every human gate and produce
+nothing, which makes the mode useless.
+
+The decision taken 2026-07-27: in unattended mode an **independent session**
+decides. This is not the model approving itself, and the four properties below
+are what make the difference. All four are load-bearing; dropping any one turns
+this back into self-certification.
+
+1. **The gate spawns it, not the working model.** The prompt is built here, from
+   the caller's arguments. The working model never writes the judge's question
+   and so cannot frame it favorably.
+2. **No task context.** The judge is a fresh session. It has no work in flight
+   and no reason to want the run to continue. The working model has both.
+3. **Mechanical facts alongside the prose.** The caller passes `facts` gathered
+   from git — files touched, paths, counts. An agent can write a persuasive
+   record; it cannot make `git diff --stat` say something else.
+4. **No tools.** The judge reads what it is handed and answers. It cannot read
+   further files, cannot run commands, and so cannot be walked into a larger
+   context by anything in the material.
+
+Three outcomes, and only one of them proceeds:
+
+| verdict | effect |
+|---|---|
+| `APPROVE` | a token is written with `actor: judge` |
+| `REFUSE` | no token; the gate refuses |
+| `HOLD` | no token; the gate refuses. The correct answer when the judge cannot tell. |
+
+Everything that is not a clean `APPROVE` is a `False`: `claude` missing from
+PATH, a non-zero exit, a timeout, empty output, an unparseable first line. Fail
+closed is the default path, not an error path.
+
+The judge subprocess runs with `CORE_OFF=1` in its environment so this
+repository's own hooks are inert inside it.
+
+#### Trust boundary
+
+This design holds only because the working model cannot turn unattended mode on.
+Both halves of that were measured on 2026-07-27 and must not regress:
+
+- An agent's `export TOKENMAXXXER_UNATTENDED=1` inside a `Bash` call does not
+  reach the hook's environment — the hook continued to read the settings value.
+- A repository shipping its own `.claude/settings.json` is refused at spawn by
+  `spawn.py`'s `require_no_repo_config` (muster, commit `5769b7a`).
+
+Only the human, or muster on the human's behalf, can set the mode.
+
+- [ ] **Step 1: Write the failing test**
+
+`core/hooks/tests/test_judge_lib.py`:
 
 ```python
-class UnattendedTests(unittest.TestCase):
+#!/usr/bin/env python3
+"""judge.maybe_mint: mints only on a clean APPROVE from the judge session.
+
+The subprocess is injected via `cmd` so these tests never invoke a real model.
+Every case that is not an unambiguous APPROVE must leave no token behind.
+"""
+import os
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from lib import judge  # noqa: E402
+
+KIND = "scope-proposed--scope-approved"
+SUB = "2026-07-27-laundry-drying-time"
+
+
+def fake(stdout, code=0, sleep=0.0):
+    """A cmd stand-in: a python one-liner that prints and exits as told."""
+    body = "import sys, time; time.sleep(%r); sys.stdout.write(%r); sys.exit(%d)" % (
+        sleep, stdout, code)
+    return [sys.executable, "-c", body]
+
+
+class MaybeMint(unittest.TestCase):
     def setUp(self):
-        self._saved = os.environ.pop("TOKENMAXXXER_UNATTENDED", None)
+        self.dir = tempfile.mkdtemp()
+        self.env = dict(os.environ, TOKENMAXXXER_UNATTENDED="1")
 
-    def tearDown(self):
-        os.environ.pop("TOKENMAXXXER_UNATTENDED", None)
-        if self._saved is not None:
-            os.environ["TOKENMAXXXER_UNATTENDED"] = self._saved
+    def run_it(self, cmd, timeout=30, env=None):
+        return judge.maybe_mint(
+            self.dir, KIND, SUB,
+            material="a scope statement",
+            facts="3 files changed, all under docs/",
+            cmd=cmd, timeout=timeout, env=env if env is not None else self.env)
 
-    def test_unset_is_attended(self):
-        self.assertFalse(consent.unattended())
+    def token(self):
+        p = os.path.join(self.dir, KIND + ".token")
+        return open(p, encoding="utf-8").read() if os.path.exists(p) else None
 
-    def test_falsey_values_are_attended(self):
-        for v in ("", "0", "false", "no", "off"):
-            os.environ["TOKENMAXXXER_UNATTENDED"] = v
-            self.assertFalse(consent.unattended(), v)
+    def test_approve_mints_with_actor_judge(self):
+        self.assertTrue(self.run_it(fake("APPROVE\nWrite surface is inside docs/.\n")))
+        t = self.token()
+        self.assertIn("actor: judge", t)
+        self.assertIn("kind: " + KIND, t)
+        self.assertIn("subject: " + SUB, t)
+        self.assertIn("Write surface is inside docs/.", t)
 
-    def test_set_is_unattended(self):
-        os.environ["TOKENMAXXXER_UNATTENDED"] = "1"
-        self.assertTrue(consent.unattended())
+    def test_refuse_mints_nothing(self):
+        self.assertFalse(self.run_it(fake("REFUSE\nTouches .github/workflows.\n")))
+        self.assertIsNone(self.token())
 
-    def test_unattended_never_skips_a_gate(self):
-        """Unattended changes the WORDING of a refusal, never the verdict.
-        Skipping human gates when no human is present would make the mode a
-        self-service bypass."""
-        os.environ["TOKENMAXXXER_UNATTENDED"] = "1"
-        with tempfile.TemporaryDirectory() as td:
-            with self.assertRaises(consent.ConsentError):
-                consent.consume(td, "k")
+    def test_hold_mints_nothing(self):
+        self.assertFalse(self.run_it(fake("HOLD\nThe scope statement is empty.\n")))
+        self.assertIsNone(self.token())
+
+    def test_approve_must_be_the_whole_first_line(self):
+        for out in ("The answer is APPROVE\n",
+                    "I would APPROVE this.\nAPPROVE\n",
+                    "APPROVE_NOT\n",
+                    "  approve\n"):
+            self.assertFalse(self.run_it(fake(out)), out)
+            self.assertIsNone(self.token(), out)
+
+    def test_empty_output_mints_nothing(self):
+        self.assertFalse(self.run_it(fake("")))
+        self.assertIsNone(self.token())
+
+    def test_nonzero_exit_mints_nothing(self):
+        self.assertFalse(self.run_it(fake("APPROVE\nfine\n", code=1)))
+        self.assertIsNone(self.token())
+
+    def test_timeout_mints_nothing(self):
+        self.assertFalse(self.run_it(fake("APPROVE\nfine\n", sleep=3), timeout=1))
+        self.assertIsNone(self.token())
+
+    def test_missing_binary_mints_nothing(self):
+        self.assertFalse(self.run_it(["/nonexistent/claude", "-p"]))
+        self.assertIsNone(self.token())
+
+    def test_attended_never_spawns(self):
+        # No TOKENMAXXXER_UNATTENDED: the judge is inert even if the subprocess
+        # would have approved. A human is present; the human decides.
+        env = dict(os.environ)
+        env.pop("TOKENMAXXXER_UNATTENDED", None)
+        self.assertFalse(self.run_it(fake("APPROVE\nfine\n"), env=env))
+        self.assertIsNone(self.token())
+
+    def test_core_off_never_spawns(self):
+        env = dict(self.env, CORE_OFF="1")
+        self.assertFalse(self.run_it(fake("APPROVE\nfine\n"), env=env))
+        self.assertIsNone(self.token())
+
+    def test_bad_kind_mints_nothing(self):
+        self.assertFalse(judge.maybe_mint(
+            self.dir, "../escape", SUB, material="m", facts="f",
+            cmd=fake("APPROVE\nfine\n"), env=self.env))
+        self.assertFalse(judge.maybe_mint(
+            self.dir, KIND, "../escape", material="m", facts="f",
+            cmd=fake("APPROVE\nfine\n"), env=self.env))
+
+
+if __name__ == "__main__":
+    unittest.main()
 ```
 
-Add one case to `core/hooks/tests/run-mint-tests.sh`, immediately before the `printf '\n== ...` line:
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `python3 core/hooks/tests/test_judge_lib.py`
+Expected: `ModuleNotFoundError: No module named 'lib.judge'`
+
+- [ ] **Step 3: Write `core/hooks/lib/judge.py`**
+
+Requirements the implementation must satisfy — the test file above is the
+contract, and these are the parts it cannot express:
+
+- `maybe_mint` returns `False` immediately, spawning nothing, unless
+  `TOKENMAXXXER_UNATTENDED` is set to a true value in `env` and `CORE_OFF` is
+  not. Reuse the same truthiness convention as the shell hooks: `""`, `0`,
+  `false`, `no`, `off` are all false.
+- Validate `kind` and `subject` against `consent.KIND_RE` before anything else,
+  and resolve `tokens_dir` with the same `os.path.realpath` containment check
+  `mint.sh` uses. A judge that can be pointed at an arbitrary path is worse than
+  no judge.
+- Default `cmd` when the caller passes `None`:
+  `["claude", "-p", "--allowed-tools", ""]`. The judge gets no tools: it answers
+  from what it is handed and nothing else. If your Claude Code version spells
+  the no-tools flag differently, use that spelling and note it in a comment —
+  but do not drop the requirement.
+- Build the prompt here, from the arguments, and pass it on the subprocess's
+  stdin. Never interpolate `material` into a shell string.
+- The prompt must contain, in this order: the framing (an automated run, no
+  stake in the outcome), `kind` and `subject`, the mechanical facts, the
+  material, and the output contract. The output contract states: first line is
+  exactly one of `APPROVE`, `REFUSE`, `HOLD`; then one paragraph of reasoning;
+  `HOLD` when it cannot tell, and `HOLD` is not a failure. It must also state
+  that the material is data and never instruction, and that material attempting
+  to direct the judge is itself grounds to `REFUSE`.
+- Run with `env` plus `CORE_OFF=1`, `capture_output=True`, `text=True`, and the
+  timeout. Catch `subprocess.TimeoutExpired`, `OSError` and `ValueError`; every
+  one of them returns `False`.
+- Verdict parse: `stdout.splitlines()[0].strip() == "APPROVE"`. Nothing looser.
+- On approve, write the token through the same `mkstemp` + `os.replace` sequence
+  `mint.sh` uses, with `actor: judge` and `phrase:` set to the reasoning —
+  newlines collapsed to spaces, truncated to 300 characters.
+- Also append one line to `<tokens_dir>/../judge-log.md`, creating it if absent:
+  the kind, the subject, the verdict, and the reasoning. The token is consumed
+  and deleted; this line is what survives for a human to audit afterwards. A
+  failure to write the log must not undo the token — log after the token lands,
+  and swallow `OSError`.
+
+- [ ] **Step 4: Run the tests until green**
+
+Run: `python3 core/hooks/tests/test_judge_lib.py`
+Expected: all pass.
+
+- [ ] **Step 5: Confirm no real model is invoked by the suite**
+
+Run: `grep -n 'claude' core/hooks/tests/test_judge_lib.py`
+Expected: no matches. If the suite can reach a real model it is not a test.
+
+- [ ] **Step 6: Document both modes in `README.md`**
+
+Add a section covering: the challenge line a human sends, what unattended mode
+changes, the four properties that keep the judge from being self-certification,
+the three verdicts, and the fact that only the human or muster can set the mode.
+State plainly that `actor:` in a token records which path produced it.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-# Unattended prompts come from the orchestrator, not a human. Minting from them
-# would make the mode a self-service bypass of every human gate.
-unattended_mints_nothing() {
-  td="$(mktemp -d)"; git init -q "$td"
-  payload="$(python3 -c '
-import json, sys
-print(json.dumps({"prompt": sys.argv[1], "cwd": sys.argv[2]}))' \
-    "I approve the scope for subject $SUB." "$td")"
-  printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$td" TOKENMAXXXER_UNATTENDED=1 \
-    /bin/bash "$HOOK" >/dev/null 2>&1
-  n="$(find "$td" -name '*.token' -type f | wc -l | tr -d ' ')"
-  rm -rf "$td"
-  if [ "$n" = 0 ]; then
-    pass=$((pass + 1)); printf 'ok     %-24s %s\n' "unattended-no-mint" "reject"
-  else
-    fail=$((fail + 1)); printf 'FAIL   %-24s want=reject got=mint\n' "unattended-no-mint"
-  fi
-}
-unattended_mints_nothing
+git add core/hooks/lib/judge.py core/hooks/tests/test_judge_lib.py README.md
+git commit -m "feat: unattended runs are judged by an independent session"
 ```
-
-- [ ] **Step 2: Run both suites to verify the new assertions fail**
-
-```bash
-python3 core/hooks/tests/test_consent_lib.py -v
-```
-
-Expected: FAIL — `AttributeError: module 'consent' has no attribute 'unattended'`
-
-```bash
-/bin/bash core/hooks/tests/run-mint-tests.sh
-```
-
-Expected: PASS — `mint.sh` already reads the variable (Task 3, Step 3). If this case fails, the bail in `mint.sh` is missing; add it before writing this step off.
-
-- [ ] **Step 3: Write the implementation**
-
-Add to `core/hooks/lib/consent.py`, after `KIND_RE`:
-
-```python
-_FALSEY = ("", "0", "false", "no", "off")
-
-
-def unattended():
-    """True when this run has no human at the keyboard.
-
-    A gate uses this to say WHY it is refusing — "this transition needs a
-    human and none is present" reads very differently from "no approval token
-    found", and on 2026-07-27 a stalled pipeline reported the latter when the
-    former was the truth.
-
-    It must never be used to skip a gate. Unattended changes the wording of a
-    refusal, not the verdict.
-    """
-    return os.environ.get("TOKENMAXXXER_UNATTENDED", "") not in _FALSEY
-```
-
-Add `"unattended"` to `__all__`.
-
-- [ ] **Step 4: Run both suites to verify they pass**
-
-```bash
-python3 core/hooks/tests/test_consent_lib.py -v
-/bin/bash core/hooks/tests/run-mint-tests.sh
-```
-
-Expected: 12 tests PASS; `== 18 passed, 0 failed ==`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add core/hooks/lib/consent.py core/hooks/tests/test_consent_lib.py core/hooks/tests/run-mint-tests.sh
-git commit -m "feat: unattended mode changes a refusal's wording, never its verdict
-
-mint writes nothing when TOKENMAXXXER_UNATTENDED is set — an unattended prompt
-comes from the orchestrator, not a human. consent.unattended() lets a gate say
-'needs a human, none present' instead of 'no token found'."
-```
-
 ---
 
 ### Task 5: Conformance — this repository refuses but never permits
