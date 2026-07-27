@@ -1,6 +1,6 @@
 ---
 kind: proposal
-status: approved
+status: landed
 date: 2026-07-27
 files:
   - roles/qa.json
