@@ -60,9 +60,26 @@ doctrine 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개
 /plugin install orchestrate@tokenmaxxxer-muster
 ```
 
-설치는 이게 전부다. 룰북을 손으로 clone 하지 **않는다** — 역할 파일이 자기 repo 를
-적고 있고, 그 역할을 처음 띄울 때 없으면 받아온다. 비공개 레포도 된다(이미 있는 git
-자격증명을 쓴다).
+`orchestrate` 는 이게 설치의 전부다. muster 자체 마켓플레이스에는 아홉 개 역할
+룰북의 플러그인도 전부 올라 있고, 각각 자기 github repo 에서 바로 소스된다
+(`{"source": "github", "repo": "tokenmaxxxer/<repo>"}`) — 그래서 `claude plugin
+install <플러그인>@tokenmaxxxer-muster` 로 아무거나(예: `coding-cycle`,
+`freelunch`, `qa-cycle`) 바로 설치된다. 아홉 개 룰북 레포를 하나씩 마켓플레이스로
+추가할 필요가 없다. 여기에도 룰북 로컬 clone 은 필요 없다 — 룰북을 손으로 clone
+하지 **않는다**: 역할 파일이 자기 repo 를 적고 있고, 그 역할을 처음 띄울 때 없으면
+받아온다. 비공개 레포도 된다(이미 있는 git 자격증명을 쓴다).
+
+muster 마켓플레이스로 설치하는 이 경로는 위의 `spawn.py` 자체 역할별 fetch 와는
+별개의, 선택적인 경로다 — `spawn.py` 는 첫 스폰에서 자기 마켓플레이스 등록을
+알아서 하므로 마켓플레이스 add 가 아예 필요 없다. `claude plugin install
+<플러그인>@tokenmaxxxer-muster` 는 `spawn.py` 밖에서 룰북 플러그인을 설치하고
+둘러보고 싶을 때만 쓴다.
+
+**이 목록은 설치를 풀어줄 뿐, 계속되는 갱신을 풀어주지 않는다.** 아래 실측대로
+`claude plugin update` 는 고정된 `version` 문자열만 비교하고 룰북 아홉 개가 전부
+0.1.0 에 머물러 있으므로, `tokenmaxxxer-muster` 로 설치해도 `claude plugin
+update` 가 github 원격 최신으로 갱신해주지 않는다. 설치된 룰북을 갱신하려면
+여전히 `spawn.py update <역할>` (또는 재설치)을 거쳐야 한다.
 
 로컬 체크아웃이 있으면 그쪽이 이긴다. `roles/<역할>.json` 의 `path` 는 선택이고,
 그 디렉터리에 `.claude-plugin/marketplace.json` 이 있으면 원격 대신 그걸 쓴다 —
@@ -77,6 +94,11 @@ doctrine 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개
 맞는 기본값이다. 안 풀린 변수는 리터럴 디렉터리 이름이 아니라 **경로 없음**으로
 취급한다. 없는 경로를 가리키는 것은 "설정 안 함"이 아니라 "잘못 설정함"이고,
 둘은 정반대 처분을 받아야 한다.
+
+`TOKENMAXXXER_RULEBOOKS` 는 **선택적 개발용 override** 이지 스폰 시점의 필수
+조건이 아니다: `spawn.py` 의 역할 스폰은 로컬 체크아웃이 없으면 이미 github 에서
+룰북을 풀어오고, 위의 `claude plugin install <플러그인>@tokenmaxxxer-muster` 도
+마찬가지다. github 왕복 없이 룰북 소스를 직접 고칠 때만 이 변수를 넣는다.
 
 **아무것도 스스로 갱신되지 않고, 클론만 갱신해서는 안 된다.** 세션은 마켓플레이스
 클론이 아니라 `~/.claude/plugins/cache/` 의 설치본을 읽고, 이 둘은 갈라진다.

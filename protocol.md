@@ -116,6 +116,17 @@ repository, so the coding agent ends up reading the QA rulebook too. A
 per-role environment can only be drawn at the session boundary — which is why
 each role gets its own session.
 
+`muster`'s own marketplace (`.claude-plugin/marketplace.json`) also lists every
+rulebook plugin from all nine role rulebooks, each with a GitHub `source`
+(`{"source": "github", "repo": "tokenmaxxxer/<repo>"}`), alongside the local
+`orchestrate` entry. This is a second install path for consumers who want
+`claude plugin install <plugin>@tokenmaxxxer-muster` to resolve a rulebook
+plugin directly — it does not change how `spawn.py` locates a role's rulebook
+above, and it does not make `claude plugin update` refresh a GitHub-sourced
+plugin from remote HEAD (that still goes through `spawn.py update <role>`, or
+a reinstall). No local clone of any rulebook, and no `TOKENMAXXXER_RULEBOOKS`,
+is required for either path.
+
 ### Three traps, each one measured
 
 **① `--settings` merges, it does not replace.** A role file naming only the qa

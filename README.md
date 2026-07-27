@@ -63,10 +63,29 @@ success** — which contaminates an ablation outright.
 /plugin install orchestrate@tokenmaxxxer-muster
 ```
 
-That is the whole install. The rulebooks are **not** cloned by hand: each role file
-names its repo, and the first spawn of a role fetches that rulebook's marketplace
-if it is not already on the machine. Private repos work — the fetch uses the git
-credentials already in place.
+That is the whole install for `orchestrate`. `muster`'s own marketplace also lists
+every rulebook plugin from all nine role rulebooks, each sourced straight from its
+own GitHub repo (`{"source": "github", "repo": "tokenmaxxxer/<repo>"}`) — so
+`claude plugin install <plugin>@tokenmaxxxer-muster` resolves any of them (say
+`coding-cycle`, `freelunch`, `qa-cycle`) directly, without adding all nine
+rulebook repos as separate marketplaces one at a time. No local clone of any
+rulebook is required for this: the rulebooks are **not** cloned by hand — each
+role file names its repo, and the first spawn of a role fetches that rulebook's
+marketplace if it is not already on the machine. Private repos work — the fetch
+uses the git credentials already in place.
+
+This install-from-`muster`'s-marketplace path is a separate, optional route from
+`spawn.py`'s own per-role fetch above — `spawn.py` warms its own marketplace
+registration on first spawn and needs no marketplace add at all. Use `claude
+plugin install <plugin>@tokenmaxxxer-muster` only when you want a rulebook
+plugin installed and browsable outside of `spawn.py`.
+
+**This listing resolves the install, not ongoing updates.** Per the measured
+behavior below (`claude plugin update` compares only the pinned `version`
+string and every rulebook sits at 0.1.0 forever), installing through
+`tokenmaxxxer-muster` does not make `claude plugin update` refresh a
+GitHub-sourced rulebook from remote HEAD either. Refreshing an installed
+rulebook still goes through `spawn.py update <role>` (or a reinstall).
 
 A local checkout still wins when one exists. `roles/<role>.json` keeps an optional
 `path`, and if that directory holds a `.claude-plugin/marketplace.json` it is used
@@ -83,6 +102,12 @@ Leave it unset and every role resolves from GitHub, which is the right default f
 anyone who is not editing the rulebooks. An unexpanded variable is treated as *no
 path* rather than as a literal directory name — a path that does not exist is
 "misconfigured", not "unconfigured", and the two deserve opposite handling.
+
+`TOKENMAXXXER_RULEBOOKS` is an **optional dev override**, not a spawn-time
+requirement: `spawn.py` role-spawning already resolves each role's rulebook
+from GitHub when no local checkout exists, and so does `claude plugin install
+<plugin>@tokenmaxxxer-muster` above. Set it only to work on a rulebook's own
+source locally without round-tripping through GitHub.
 
 **Nothing updates itself, and updating the clone is not enough.** A session loads
 plugins from `~/.claude/plugins/cache/`, not from the marketplace clone, and the two
