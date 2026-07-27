@@ -1,7 +1,7 @@
 {
   "marketplace": "tokenmaxxxer-product",
   "repo": "tokenmaxxxer/product-agent-rulebook",
-  "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/product-agent-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/product-agent-rulebook",
   "sandbox": {
     "enabled": true,
     "network": {

@@ -1,7 +1,7 @@
 {
   "marketplace": "tokenmaxxxer-review",
   "repo": "tokenmaxxxer/review-agent-rulebook",
-  "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/review-agent-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/review-agent-rulebook",
   "sandbox": {
     "enabled": true,
     "network": {

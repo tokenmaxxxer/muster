@@ -1,7 +1,7 @@
 {
   "marketplace": "tokenmaxxxer-feasibility",
   "repo": "tokenmaxxxer/feasibility-agent-rulebook",
-  "path": "/Users/jk/workspace/10_WORK/tokenmaxxxer/feasibility-agent-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/feasibility-agent-rulebook",
   "sandbox": {
     "enabled": true,
     "network": {

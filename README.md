@@ -73,6 +73,17 @@ A local checkout still wins when one exists. `roles/<role>.json` keeps an option
 instead of the remote — so editing a rulebook and running it through muster does
 not require a commit and a push first.
 
+That path is written as `$TOKENMAXXXER_RULEBOOKS/<repo>` and is resolved through
+`~` and `$VAR` expansion. Set the variable to the directory holding your rulebook
+checkouts:
+
+    export TOKENMAXXXER_RULEBOOKS=~/src/tokenmaxxxer
+
+Leave it unset and every role resolves from GitHub, which is the right default for
+anyone who is not editing the rulebooks. An unexpanded variable is treated as *no
+path* rather than as a literal directory name — a path that does not exist is
+"misconfigured", not "unconfigured", and the two deserve opposite handling.
+
 **Nothing updates itself, and updating the clone is not enough.** A session loads
 plugins from `~/.claude/plugins/cache/`, not from the marketplace clone, and the two
 drift apart: `claude plugin update` compares the `version` *string* in plugin.json,

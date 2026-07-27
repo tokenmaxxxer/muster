@@ -4,6 +4,7 @@
   python3 test_gates.py
 """
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -218,15 +219,50 @@ def t_rulebook_version_is_recorded():
             role.unlink()
 
 
+def t_role_files_carry_no_absolute_home_path():
+    """역할 파일에 `/Users/<이름>/...` 을 박으면 그 레포는 **한 사람의 홈 경로를
+    담은 채로 공개된다.** 남의 기계에서는 없는 경로라 조용히 github 로 떨어지고,
+    왜 로컬 체크아웃이 안 잡히는지도 안 보인다. 공개 직전에 발견해서 넣은 가드다."""
+    import json as _json
+    for f in sorted((spawn.ROOT / "roles").glob("*.json")):
+        raw = f.read_text()
+        assert "/Users/" not in raw and "/home/" not in raw, f"{f.name}: {raw}"
+        spec = _json.loads(raw)
+        if "path" in spec:
+            assert spec["path"].startswith("$"), f"{f.name}: {spec['path']}"
+
+
+def t_unresolved_path_variable_is_not_a_path():
+    """안 풀린 `$VAR` 를 경로로 넘기면 없는 디렉터리를 가리킨다 — 그건 '설정 안 함'
+    이 아니라 '잘못 설정함'이고, 로컬이 이겨야 할 자리에서 조용히 진다."""
+    assert spawn._path({"path": "$DEFINITELY_UNSET_XYZ/foo"}) == ""
+    assert spawn._path({}) == ""
+    os.environ["MUSTER_TEST_RB"] = "/tmp/rb"
+    try:
+        assert spawn._path({"path": "$MUSTER_TEST_RB/x"}) == "/tmp/rb/x"
+    finally:
+        del os.environ["MUSTER_TEST_RB"]
+
+
 def t_rulebook_falls_back_to_github():
-    """로컬 체크아웃이 있으면 그쪽, 없으면 github. 절대경로 하나 때문에 다른 기계에서
-    아예 안 도는 상태였다 — 역할 파일이 제작자의 홈 경로를 박고 있었다."""
+    """로컬 체크아웃이 있으면 그쪽, 없으면 github."""
     import json as _json
     spec = _json.loads((spawn.ROOT / "roles" / "qa.json").read_text())
     assert spec.get("repo"), "역할 파일에 repo 가 없으면 github 로 떨어질 수 없다"
 
-    local = spawn.rulebook_source(spec)
-    assert local["source"] == "directory", local        # 개발용 로컬이 이긴다
+    with tempfile.TemporaryDirectory() as td:
+        checkout = Path(td) / "qa-agent-rulebook"
+        (checkout / ".claude-plugin").mkdir(parents=True)
+        (checkout / ".claude-plugin" / "marketplace.json").write_text('{"plugins": []}')
+        os.environ["TOKENMAXXXER_RULEBOOKS"] = td
+        try:
+            local = spawn.rulebook_source(spec)
+        finally:
+            del os.environ["TOKENMAXXXER_RULEBOOKS"]
+    assert local == {"source": "directory", "path": str(checkout)}, local   # 로컬이 이긴다
+
+    # 변수가 안 잡히면 github 로 떨어진다 — 이게 남의 기계의 기본 상태다
+    assert spawn.rulebook_source(spec) == {"source": "github", "repo": spec["repo"]}
 
     spec["path"] = "/nonexistent-checkout"
     remote = spawn.rulebook_source(spec)
