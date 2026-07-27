@@ -720,8 +720,17 @@ def session_result(stdout: str) -> dict:
 def classify(rc: int, result: dict, delta: list, blocked: list) -> str:
     """세션 하나의 처분. 판정하지 않는다 — 이름만 붙인다 (보고 전용).
 
-    silent-failure 가 넷째 값인 이유: exit 0 에 보드 무변화가 실측된
-    침묵-사망 모드다. 조용히 넘어가지 않는 것이 이 함수의 존재 이유다.
+    순서가 곧 의미다. 보드가 움직였으면 일부가 막혔어도 그 run 은
+    progressed 이고(거부 건수는 따로 찍힌다), 사람 게이트가 서 있으면 그게
+    가장 행동 가능한 사실이다.
+
+    refused 와 silent-failure 를 가르는 이유: 게이트가 막아서 아무것도 안
+    바뀐 것은 **시스템이 작동한 것**이고, 아무것도 안 바뀌었는데 막힌 것도
+    없는 것은 아무도 이유를 모르는 것이다. 실측 2026-07-27 — reflect 를
+    띄웠더니 룰북 게이트가 §20 필수 섹션 없음을 이유로 쓰기를 거부했고,
+    세션은 그 이유를 또렷이 말하고 끝났는데 분류는 '침묵-사망'이라고 했다.
+    이 레포의 원칙("검사 불가와 이상 없음은 정반대 처분을 받아야 한다")이
+    여기에도 그대로 적용된다.
     """
     if rc != 0 or result.get("is_error"):
         return "errored"
@@ -729,6 +738,8 @@ def classify(rc: int, result: dict, delta: list, blocked: list) -> str:
         return "progressed"
     if blocked:
         return "waiting-on-human"
+    if result.get("permission_denials"):
+        return "refused"
     return "silent-failure"
 
 
@@ -982,13 +993,18 @@ def main() -> int:
           + (f", 비용 ${result.get('total_cost_usd'):.2f}"
              if isinstance(result.get("total_cost_usd"), (int, float)) else ""),
           file=sys.stderr)
+    sid = f" (session {result.get('session_id')})" if result.get("session_id") else ""
     if denials:
-        print(f"[{a.role}] 권한 거부 {len(denials)}건 — 세션이 요청했지만 답할 사람이 "
-              f"없어 거부된 도구 호출이다. runs/ledger.jsonl 과 대조하라", file=sys.stderr)
+        print(f"[{a.role}] 거부된 도구 호출 {len(denials)}건 — 게이트가 막았거나 "
+              f"답할 사람이 없어 거부됐다. 무엇을 막았는지는 세션 출력에 있다",
+              file=sys.stderr)
+    if outcome == "refused":
+        print(f"[{a.role}] 게이트가 막아서 보드가 안 바뀌었다 — 이건 실패가 아니라 "
+              f"규칙이 지켜진 것일 수 있다. 위 거부 사유를 읽고 맡길 일을 "
+              f"고쳐서 다시 띄워라{sid}", file=sys.stderr)
     if outcome == "silent-failure":
-        print(f"[{a.role}] exit 0 인데 보드가 안 바뀌었다 — 성공이 아니라 "
-              f"실측된 침묵-사망 모드다. 세션 로그를 확인하라"
-              + (f" (session {result.get('session_id')})" if result.get("session_id") else ""),
+        print(f"[{a.role}] exit 0 인데 보드도 안 바뀌고 막힌 것도 없다 — 성공이 "
+              f"아니라 실측된 침묵-사망 모드다. 세션 로그를 확인하라{sid}",
               file=sys.stderr)
     return rc
 
