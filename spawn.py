@@ -99,6 +99,84 @@ def rulebook_dir(spec: dict) -> Path | None:
     return clone if _mkt(clone).exists() else None
 
 
+def rulebook_checkout(role: str, spec: dict) -> Path:
+    """세션에 **실제로 붙일** 룰북 체크아웃. 로컬이 있으면 그것, 없으면
+    muster 가 자기 밑에 클론해 둔다.
+
+    설치를 거치지 않는다. 설치 경로에는 실측된 함정이 셋 있고 전부 조용하다:
+    캐시와 클론이 갈라지고(`claude plugin update` 는 버전 문자열만 본다),
+    캐시를 지워도 등록부에 유령 항목이 남고, 이름이 이미 등록돼 있으면
+    `--settings` 의 extraKnownMarketplaces 가 무시된다. 셋 다 결과는 같다 —
+    **의도한 것과 다른 커밋이 세션에 붙는데 아무도 모른다.** 실측
+    2026-07-27: drive 가 띄운 qa 세션이 방금 고친 보안 결함이 그대로 있는
+    e940cbe 로 돌았다(머지된 main 은 1195ace).
+
+    muster 소유 클론이라 무엇이 돌았는지 sha 로 말할 수 있고, 나중에 특정
+    sha 로 고정하는 것도 여기서만 하면 된다.
+    """
+    p = _path(spec)
+    if p and _mkt(Path(p)).exists():
+        return Path(p)
+
+    repo = spec.get("repo")
+    if not repo:
+        sys.exit(f"[{role}] 로컬 체크아웃도 repo 도 없다: roles/{role}.json")
+    d = ROOT / "runs" / "rulebooks" / spec["marketplace"]
+    if _mkt(d).exists():
+        subprocess.run(["git", "-C", str(d), "pull", "-q", "--ff-only"],
+                       capture_output=True)
+        return d
+    d.parent.mkdir(parents=True, exist_ok=True)
+    print(f"[{role}] 룰북을 받는 중: {repo}", file=sys.stderr)
+    r = subprocess.run(["git", "clone", "-q", f"https://github.com/{repo}.git", str(d)],
+                       capture_output=True, text=True)
+    if not _mkt(d).exists():
+        sys.exit(f"[{role}] 룰북을 받지 못했다: {repo}\n  {r.stderr.strip()[:200]}")
+    return d
+
+
+def checkout_version(role: str, spec: dict) -> str:
+    """세션에 붙는 체크아웃이 **실제로 무엇인지**. 설치본이 없으니 갈라질 것도
+    없다 — 이 문자열이 그 run 이 잰 룰북이다."""
+    d = rulebook_checkout(role, spec)
+
+    def git(*a: str) -> str:
+        p = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True)
+        return p.stdout.strip() if p.returncode == 0 else ""
+
+    sha = git("rev-parse", "--short", "HEAD") or "?"
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    dirty = " (커밋 안 된 변경 있음)" if git("status", "--porcelain") else ""
+    where = "로컬" if _path(spec) and _mkt(Path(_path(spec))).exists() else "muster 클론"
+    return f"{sha} ({branch}, {where}){dirty}"
+
+
+def plugin_dirs(role: str, spec: dict) -> list[Path]:
+    """세션에 붙일 플러그인 디렉터리들.
+
+    `<role>-agent-env` 번들은 뺀다 — 번들의 dependencies 는 이 경로로도
+    해결되지 않고, 번들 자체에는 내용이 없다. 개별로 붙이는 이유가 그거다
+    (A/B 실측: 번들만 켠 세션은 doctrine 의 SessionStart 훅이 안 돌았다).
+    """
+    d = rulebook_checkout(role, spec)
+    out = []
+    for p in json.loads(_mkt(d).read_text())["plugins"]:
+        if p["name"].endswith("-agent-env"):
+            continue
+        src = (p.get("source") or f"./{p['name']}")
+        if not isinstance(src, str):
+            continue                      # {source: github, ...} 같은 원격 지정
+        sub = (d / src.lstrip("./")).resolve()
+        if (sub / ".claude-plugin" / "plugin.json").is_file():
+            out.append(sub)
+        else:
+            print(f"[{role}] 플러그인 디렉터리가 없다: {src} — 건너뛴다",
+                  file=sys.stderr)
+    if not out:
+        sys.exit(f"[{role}] 붙일 플러그인이 없다: {_mkt(d)}")
+    return out
+
+
 def ensure_rulebook(role: str, spec: dict) -> Path:
     """룰북을 손에 넣는다. github 소스면 한 번 받아와야 목록을 읽을 수 있다.
 
@@ -164,25 +242,23 @@ def _fetch_hint(spec: dict) -> str:
 
 
 def role_settings(role: str) -> dict:
-    """역할 설정 + 룰북 플러그인 펼침 + 전역 플러그인 차단을 합친 것."""
+    """역할의 샌드박스 경계 + 전역 플러그인 차단.
+
+    **룰북을 켜는 일은 여기서 하지 않는다.** 그건 `--plugin-dir` 이 한다
+    (plugin_dirs 참고). 설정으로 켜려면 마켓플레이스를 등록하고 설치해야
+    하는데, 그 경로에는 조용한 함정이 셋 있고 전부 "의도한 것과 다른 커밋이
+    붙는다"로 끝난다.
+
+    남는 일은 두 가지다: 역할이 선언한 샌드박스를 펼치는 것, 그리고 사용자
+    전역 플러그인을 빠짐없이 끄는 것. 후자는 `--settings` 가 교체가 아니라
+    **병합**이라 필요하다 — 안 끄면 qa 룰북만 적은 세션에 전역 17개가 딸려
+    온다.
+    """
     f = ROOT / "roles" / f"{role}.json"
     if not f.exists():
         have = ", ".join(sorted(p.stem for p in (ROOT / "roles").glob("*.json")))
         sys.exit(f"모르는 역할: {role}  (있는 것: {have})")
     spec = json.loads(f.read_text())
-
-    # 룰북의 marketplace.json 을 읽어 플러그인을 **하나씩** 켠다.
-    #
-    # `<role>-agent-env` 번들만 켜는 방식은 안 된다 — 번들의 dependencies 는
-    # `--settings` 의 enabledPlugins 로는 해결되지 않는다(A/B 실측: 번들만 켠 세션은
-    # doctrine 의 SessionStart 훅이 안 돌아 docs/ 버킷이 안 생겼고, 개별로 켠 세션은
-    # 생겼다). 번들이 켜졌다는 사실만 보고 넘어가면 룰북 0개로 도는 세션을
-    # "성공"으로 착각한다.
-    #
-    # 목록을 손으로 적지 않고 마켓플레이스에서 읽는 이유는 룰북에 플러그인이
-    # 추가돼도 여기를 안 고치기 위해서다. env 번들 자체는 내용이 없으므로 제외한다.
-    names = [p["name"] for p in json.loads(_mkt(ensure_rulebook(role, spec)).read_text())["plugins"]
-             if not p["name"].endswith("-agent-env")]
 
     s = {k: v for k, v in spec.items() if k not in ("marketplace", "path", "repo")}
 
@@ -217,12 +293,9 @@ def role_settings(role: str) -> dict:
                 sys.exit(f"[{role}] sandbox.filesystem.{key} 의 변수를 풀 수 없다: "
                          f"{', '.join(unresolved)}")
 
-    s["extraKnownMarketplaces"] = {
-        spec["marketplace"]: {"source": rulebook_source(spec)}}
-    s["enabledPlugins"] = {f"{n}@{spec['marketplace']}": True for n in names}
-
-    # 역할이 켜지 않은 전역 플러그인은 전부 끈다. 켜야 할 것을 적는 게 아니라
-    # 꺼야 할 것을 빠짐없이 적는 쪽이라, 전역에 플러그인이 새로 깔려도 새지 않는다.
+    # 전역 플러그인은 전부 끈다. 켜야 할 것을 적는 게 아니라 꺼야 할 것을
+    # 빠짐없이 적는 쪽이라, 전역에 플러그인이 새로 깔려도 새지 않는다.
+    s["enabledPlugins"] = {}
     try:
         globals_ = json.loads(USER_SETTINGS.read_text()).get("enabledPlugins", {})
     except (OSError, ValueError):
@@ -386,6 +459,9 @@ def _installed() -> set[str]:
 
 
 def ensure_installed(role: str, want: list[str], settings: str, cwd: str) -> None:
+    # 스폰 경로에서는 더 이상 쓰지 않는다 — 세션은 `--plugin-dir` 로 체크아웃을
+    # 직접 붙는다(plugin_dirs 참고). 마켓플레이스 설치를 여전히 쓰는 사람을
+    # 위해 `update` 쪽에 남겨 둔다.
     """역할의 룰북이 실제로 설치되게 만든다. 안 되면 멈춘다.
 
     첫 스폰은 마켓플레이스를 **등록만** 하고 플러그인은 다음 실행부터 붙는다(실측).
@@ -690,6 +766,35 @@ def gate_report(cwd: str) -> list[str]:
            ["[게이트] 확인 필요:"] + [f"  - {b}" for b in bad]
 
 
+def ownership_report(cwd: str, role: str, delta: list) -> list[str]:
+    """이 세션이 **자기 것이 아닌** 보드 경로를 건드렸는지 사후로 본다.
+
+    세션 안에서는 룰북과 core 의 게이트가 막는다. 이건 그 게이트가 어떤
+    이유로든 안 돌았을 때 흔적이라도 남기려는 것이다 — 새 훅이 trap 을
+    빠뜨려 fail-open 이 되거나, 룰북 하나가 아직 마이그레이션 안 됐거나.
+    막지는 않는다(이미 쓴 뒤다). 대신 조용히 넘어가지도 않는다.
+    """
+    prefix = BOARD + "/"
+    bad = []
+    for p in delta:
+        if not p.startswith(prefix):
+            continue
+        tail = p[len(prefix):].split("/", 1)
+        if len(tail) < 2:
+            continue
+        subject, rest = tail
+        if rest == f"{role}.md" or rest.startswith(f"{role}/"):
+            continue
+        why = "다른 역할의 기록"
+        if rest.split("/")[0] == "tokens" or rest.endswith(".token"):
+            why = "**승인 토큰** — 도구가 쓴 토큰은 위조된 사람 승인이다"
+        bad.append(f"  - {p} ({why})")
+    if not bad:
+        return []
+    return [f"[소유권] {role} 이 자기 것이 아닌 보드 경로를 건드렸다 — "
+            f"세션 안의 게이트가 안 돌았다는 뜻이다 (계약 §11):"] + bad
+
+
 def board_snapshot(cwd: str) -> dict[str, str]:
     """보드 파일들의 내용 해시. 세션 전후를 비교해 §6 의 '바뀐 보드'를 잰다.
 
@@ -783,6 +888,131 @@ def core_dir() -> Path:
         "  체크아웃을 두고 $TOKENMAXXXER_CORE 로 가리켜라.")
 
 
+def approve(cwd: str, kind: str, subject: str) -> int:
+    """사람이 터미널에서 직접 승인 토큰을 발행한다.
+
+    headless 로 오케스트레이션하는 흐름에는 사람이 챌린지 라인을 칠 자리가
+    없다. 역할 세션의 프롬프트는 오케스트레이터가 쓴 텍스트라 core 의 mint
+    훅이 거기서는 발행하지 않고(그게 자기승인 구멍을 막는 도장이다), 그렇다고
+    오케스트레이터가 사람의 승인을 **전달**하면 모델을 한 번 통과한 텍스트가
+    되어 사람의 턴과 구별할 수 없어진다 (계약 §19).
+
+    가드는 **TTY** 다. Claude 의 Bash 도구에는 터미널이 없어서(실측
+    2026-07-27: stdin isatty False) 모델이 이 명령을 부르면 실패한다.
+    run.md 가 `Bash(python3:*)` 를 사전 승인하고 있으므로, 이 가드가 없으면
+    오케스트레이터가 자기 승인을 찍을 수 있다.
+
+    토큰 형식은 core 소유다 — core 의 consent 를 그대로 import 해서 손으로
+    베낀 두 번째 구현이 생기지 않게 한다. muster 가 대상 레포에 쓰는 두 번째
+    이자 마지막 경우이고, 계약 파일과 마찬가지로 **보드 기록이 아니다** —
+    사람의 행위이지 역할이 소유한 상태가 아니다.
+    """
+    if not sys.stdin.isatty():
+        sys.exit(
+            "spawn.py approve 는 터미널에서만 된다. 지금 stdin 이 TTY 가 아니다.\n"
+            "  사람의 승인은 사람이 직접 쳐야 한다 — 도구를 거쳐 전달된 승인은\n"
+            "  사람의 턴과 구별할 수 없다 (계약 §19).")
+
+    core = core_dir()
+    sys.path.insert(0, str(core / "hooks" / "lib"))
+    try:
+        import consent
+    except ImportError as e:
+        sys.exit(f"core 의 consent 를 읽지 못했다: {e}")
+
+    for name, val in (("kind", kind), ("subject", subject)):
+        if not val or not consent.KIND_RE.fullmatch(val) or val in (".", ".."):
+            sys.exit(f"{name} 이 안전하지 않다: {val!r}  "
+                     f"(허용 형식: {consent.KIND_RE.pattern})")
+
+    root = Path(cwd).resolve()
+    require_contract(str(root), False)
+    tokens = root / BOARD / subject / "tokens"
+    try:
+        tokens.mkdir(parents=True, exist_ok=True)
+        # mint.sh 와 같은 이유로 자기를 git 에서 제외한다: 커밋된 토큰은
+        # `git checkout` 으로 부활해 같은 승인이 다시 통과한다(실측).
+        ignore = tokens / ".gitignore"
+        if not ignore.exists():
+            ignore.write_text("*\n")
+    except OSError as e:
+        sys.exit(f"토큰 디렉터리를 만들지 못했다: {e}")
+
+    line = f"APPROVE {kind} {subject}"
+    print(f"승인하려는 것\n  kind:    {kind}\n  subject: {subject}\n"
+          f"  경로:    {BOARD}/{subject}/tokens/{kind}.token\n")
+    print(f"확인하려면 이 줄을 **그대로** 입력한다 (다르면 전부 취소):\n  {line}")
+    try:
+        typed = input("> ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\n취소했다. 발행하지 않았다.", file=sys.stderr)
+        return 1
+    if typed != line:
+        print("입력이 그 줄과 다르다. 발행하지 않았다.", file=sys.stderr)
+        return 1
+
+    p = tokens / f"{kind}.token"
+    tmp = tokens / f".token.{os.getpid()}"
+    try:
+        tmp.write_text(f"kind: {kind}\nsubject: {subject}\nactor: user\n"
+                       f"phrase: {line}\n", encoding="utf-8")
+        os.replace(tmp, p)
+    except OSError as e:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        sys.exit(f"토큰을 쓰지 못했다: {e}")
+    print(f"발행했다: {p.relative_to(root)}   (한 번만 쓰인다)")
+    return 0
+
+
+def drive(cwd: str, unattended: bool, limit: int = 12) -> int:
+    """보드가 지목하는 역할을 한 번에 하나씩, 멈출 때까지 띄운다.
+
+    감시자가 아니라 **직렬 루프**다. 동시에 둘을 띄우지 않는다 — 보드는 공유
+    상태이고, 계약 §3 은 동시 깨움을 정상으로 보지만 muster 가 그걸 중재하지는
+    않는다.
+
+    멈추는 자리 넷, 전부 정상 종료다:
+      - 기계로 판정되는 줄이 더 없다
+      - 띄웠는데 보드가 안 바뀌었다 (§6 — 안 바뀐 보드는 아무도 안 깨운다)
+      - 세션이 실패했다
+      - limit 에 닿았다 (폭주 방지지 정책이 아니다)
+
+    **자동으로 안 띄우는 것**은 wakes.py 가 이미 전부 열거하고 있다: JUDGEMENT
+    두 줄(product·ops 의 내용 판단), §19 에 막힌 줄, HUMAN_ONLY 세 간선.
+    여기서 다시 판정하지 않는다 — 판정하는 순간 계약이 사람에게 유보한 자리를
+    기계가 가져간다.
+    """
+    import wakes
+    for turn in range(1, limit + 1):
+        new, _answered = wakes.fresh(cwd)
+        if not new:
+            print(f"[drive] 선 줄이 없다. {turn - 1}번 띄우고 멈춘다.", file=sys.stderr)
+            return 0
+        row = new[0]
+        print(f"[drive] {turn}/{limit}  [{row.role}] {row.why}", file=sys.stderr)
+        # 보드 요약을 같이 넘긴다 — 안 주면 세션이 탐색으로 보드를 다시
+        # 발견하느라 토큰을 쓰고, 그 탐색이 매번 다르게 끝난다.
+        rc = _spawn_one(cwd, row.role,
+                        f"보드가 너를 깨웠다: {row.why}\n\n"
+                        f"지금 보드:\n" + "\n".join(status(cwd)) + "\n\n"
+                        f"계약과 네 룰북이 요구하는 대로 네 기록을 쓴다.", unattended)
+        if rc != 0:
+            print(f"[drive] {row.role} 이 실패했다 (rc={rc}). 멈춘다.", file=sys.stderr)
+            return rc
+        if wakes.observed(cwd).get(row.key) != row.sig:
+            # consume 은 progressed 일 때만 찍힌다. 안 찍혔다는 것은 보드가 안
+            # 바뀌었다는 뜻이고, §6 이 여기서 루프를 끝낸다.
+            print(f"[drive] {row.role} 이 보드를 바꾸지 않았다 — §6 으로 멈춘다. "
+                  f"위 처분이 사람이 볼 자리를 말해준다.", file=sys.stderr)
+            return 0
+    print(f"[drive] {limit}번 돌았다. 폭주 방지로 멈춘다 — 더 돌리려면 다시 부른다.",
+          file=sys.stderr)
+    return 0
+
+
 def _claude_version() -> str:
     try:
         out = subprocess.run(["claude", "--version"], capture_output=True,
@@ -855,7 +1085,8 @@ def doctor() -> int:
 
 
 def spawn_cmd(settings_path: str, role: str, unattended: bool,
-              core: str | None = None) -> tuple[list[str], dict[str, str]]:
+              core: str | None = None,
+              plugins: list | None = None) -> tuple[list[str], dict[str, str]]:
     """세션 argv 와 env **추가분**. 호출자가 os.environ 위에 얹는다.
 
     --permission-mode acceptEdits: 실측 2026-07-27 — 권한 설정 없는 headless 는
@@ -872,6 +1103,11 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
     """
     cmd = ["claude", "-p", "--settings", settings_path,
            "--permission-mode", "acceptEdits", "--output-format", "json"]
+    # 룰북도 core 와 같은 길로 붙는다 — 디렉터리로 넘긴 플러그인의 훅은
+    # headless 에서 그대로 발화하고(실측 2026-07-27, CLI 2.1.220), 설치를
+    # 안 거치므로 캐시-클론 갈라짐도 유령 등록 항목도 이 경로엔 없다.
+    for p in (plugins or []):
+        cmd += ["--plugin-dir", str(p)]
     if core:
         cmd += ["--plugin-dir", core]
     env = {"CLAUDE_ROLE": role, "TOKENMAXXXER_SPAWNED": "1"}
@@ -892,6 +1128,11 @@ def main() -> int:
                     help="대상 레포의 .claude/ 설정·훅을 신뢰한다. 읽어본 뒤에만")
     ap.add_argument("--unattended", action="store_true",
                     help="사람이 없는 실행. mint 는 안 되고, 휴먼 게이트는 선다")
+    ap.add_argument("--all", action="store_true",
+                    help="wake: 이미 답해진 줄까지 보여준다 (계약 §6 억제를 푼다)")
+    ap.add_argument("--subject", help="approve: 승인할 subject")
+    ap.add_argument("--limit", type=int, default=12,
+                    help="drive: 한 번에 띄울 최대 횟수 (기본 12, 폭주 방지)")
     a = ap.parse_args()
 
     if a.role == "init":
@@ -909,8 +1150,19 @@ def main() -> int:
         import wakes
         print("\n".join(status(a.cwd)))
         print()
-        print("\n".join(wakes.report(a.cwd)))
+        print("\n".join(wakes.report(a.cwd, show_answered=a.all)))
         return 0
+    if a.role == "approve":
+        # 사람이 직접 승인 토큰을 발행한다. TTY 가 없으면 실패한다.
+        if not a.task or not a.subject:
+            sys.exit("사용법: spawn.py approve <kind> --subject <subject> -C <레포>")
+        return approve(a.cwd, a.task, a.subject)
+    if a.role == "drive":
+        # 보드가 지목하는 역할을 하나씩, 멈출 때까지.
+        require_contract(a.cwd, a.no_contract)
+        require_no_repo_config(a.cwd, a.trust_repo_config)
+        require_doctor()
+        return drive(a.cwd, a.unattended, a.limit)
     if not a.role:
         print("\n".join(status(a.cwd)))
         print("\n역할: " + ", ".join(sorted(p.stem for p in (ROOT / "roles").glob("*.json"))))
@@ -922,34 +1174,48 @@ def main() -> int:
     # --dry-run 은 세션을 안 태운다. 계약 검사는 버려질 세션을 막으려는 것이므로
     # 아무것도 안 띄우는 호출까지 막을 이유가 없다.
     require_contract(a.cwd, a.no_contract or a.dry_run)
-    # 드라이런도 막는다 — ensure_installed 의 워밍업이 실제 세션을 띄우고,
-    # 그 세션도 레포의 훅을 그대로 실행한다.
+    # 드라이런도 막는다 — 레포가 자기 훅을 들고 있으면 그건 세션을 띄우기
+    # 전에 알아야 할 사실이지, 띄우고 나서 알 일이 아니다.
     require_no_repo_config(a.cwd, a.trust_repo_config)
-    if not a.dry_run:
-        require_doctor()
-    s = role_settings(a.role)
-    on = [k for k, v in s.get("enabledPlugins", {}).items() if v]
     if a.dry_run:
-        print(json.dumps(s, indent=2, ensure_ascii=False))
+        print(json.dumps(role_settings(a.role), indent=2, ensure_ascii=False))
         return 0
+    require_doctor()
+    return _spawn_one(a.cwd, a.role, a.task, a.unattended)
 
+
+def _spawn_one(cwd: str, role: str, task: str, unattended: bool) -> int:
+    """역할 하나를 띄우고, 무슨 일이 있었는지 원장에 남기고, 처분을 말한다.
+
+    main() 과 drive() 가 같은 몸통을 쓴다 — 드라이버가 따로 스폰 경로를 들고
+    있으면 둘이 갈라지고, 갈라진 쪽이 조용히 게이트 하나를 빠뜨린다.
+    """
+    import wakes          # wakes 가 spawn 을 import 한다 — 여기서만 끌어온다
+    spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
+    plugins = plugin_dirs(role, spec)
+    s = role_settings(role)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(s, f)
         settings = f.name
     try:
-        # 설정 파일이 있어야 워밍업이 그 마켓플레이스를 등록할 수 있다.
-        ensure_installed(a.role, on, settings, a.cwd)
-        print(f"[{a.role}] 플러그인 {len(on)}개, 룰북 {rulebook_version(a.role)}, "
-              f"작업 디렉터리 {a.cwd}", file=sys.stderr)
+        print(f"[{role}] 플러그인 {len(plugins)}개, 룰북 {checkout_version(role, spec)}, "
+              f"작업 디렉터리 {cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
-        cmd, extra_env = spawn_cmd(settings, a.role, a.unattended, str(core_dir()))
-        before = board_snapshot(a.cwd)
+        cmd, extra_env = spawn_cmd(settings, role, unattended, str(core_dir()),
+                                   plugins)
+        before = board_snapshot(cwd)
+        # 이 세션이 답하러 가는 줄들. 세션이 보드를 실제로 바꾼 뒤에만 소비로
+        # 적는다 — §6 은 wake 가 **결과 기록**으로 소비된다고 말한다.
+        try:
+            answering = [r for r in wakes.fresh(cwd)[0] if r.role == role]
+        except Exception:
+            answering = []
         t0 = time.monotonic()
         # stdout 만 잡는다 — --output-format json 의 결과 오브젝트가 거기 온다.
         # stderr 는 그대로 흘린다: 진행 로그는 사람 것이다.
         proc = subprocess.run(
-            cmd, cwd=a.cwd, input=a.task, text=True,
+            cmd, cwd=cwd, input=task, text=True,
             stdout=subprocess.PIPE,
             env={**os.environ, **extra_env},
         )
@@ -963,47 +1229,50 @@ def main() -> int:
     elif proc.stdout.strip():
         print(proc.stdout, end="")               # JSON 이 아니면 그대로 — 숨기지 않는다
 
-    after = board_snapshot(a.cwd)
+    after = board_snapshot(cwd)
     delta = sorted(p for p in set(before) | set(after)
                    if before.get(p) != after.get(p))
-    import wakes
     try:
-        _, _, blocked = wakes.evaluate(a.cwd)
+        _, _, blocked = wakes.evaluate(cwd)
     except Exception:
         blocked = []       # 분류 보조일 뿐, 평가 실패로 스폰 결과를 잃지 않는다
 
-    gates = gate_report(a.cwd)
+    gates = gate_report(cwd) + ownership_report(cwd, role, delta)
     outcome = classify(rc, result, delta, blocked)
     denials = result.get("permission_denials") or []
+    if outcome == "progressed":
+        # 계약 §6: wake 는 그 결과 기록이 쓰여야 소비된다. 아무것도 안 썼으면
+        # 그 줄은 답해지지 않은 채로 남아 다음 평가에 다시 선다.
+        wakes.consume(cwd, answering)
     ledger_write({
-        "ts": int(time.time()), "role": a.role, "cwd": str(Path(a.cwd).resolve()),
+        "ts": int(time.time()), "role": role, "cwd": str(Path(cwd).resolve()),
         "session_id": result.get("session_id"),
         "cost_usd": result.get("total_cost_usd"),
         "turns": result.get("num_turns"), "rc": rc, "outcome": outcome,
         "board_delta": delta, "denials": len(denials),
         "duration_s": round(time.monotonic() - t0, 1),
-        "rulebook": rulebook_version(a.role),
+        "rulebook": checkout_version(role, spec),
         "gates": gates,
     })
 
     for line in gates:
         print(line, file=sys.stderr)
-    print(f"[{a.role}] {outcome}"
+    print(f"[{role}] {outcome}"
           + (f", 보드 변화 {len(delta)}건" if delta else ", 보드 무변화")
           + (f", 비용 ${result.get('total_cost_usd'):.2f}"
              if isinstance(result.get("total_cost_usd"), (int, float)) else ""),
           file=sys.stderr)
     sid = f" (session {result.get('session_id')})" if result.get("session_id") else ""
     if denials:
-        print(f"[{a.role}] 거부된 도구 호출 {len(denials)}건 — 게이트가 막았거나 "
+        print(f"[{role}] 거부된 도구 호출 {len(denials)}건 — 게이트가 막았거나 "
               f"답할 사람이 없어 거부됐다. 무엇을 막았는지는 세션 출력에 있다",
               file=sys.stderr)
     if outcome == "refused":
-        print(f"[{a.role}] 게이트가 막아서 보드가 안 바뀌었다 — 이건 실패가 아니라 "
+        print(f"[{role}] 게이트가 막아서 보드가 안 바뀌었다 — 이건 실패가 아니라 "
               f"규칙이 지켜진 것일 수 있다. 위 거부 사유를 읽고 맡길 일을 "
               f"고쳐서 다시 띄워라{sid}", file=sys.stderr)
     if outcome == "silent-failure":
-        print(f"[{a.role}] exit 0 인데 보드도 안 바뀌고 막힌 것도 없다 — 성공이 "
+        print(f"[{role}] exit 0 인데 보드도 안 바뀌고 막힌 것도 없다 — 성공이 "
               f"아니라 실측된 침묵-사망 모드다. 세션 로그를 확인하라{sid}",
               file=sys.stderr)
     return rc

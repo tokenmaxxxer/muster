@@ -215,6 +215,9 @@ python3 spawn.py <role> "x" --dry-run         # print the merged settings only
 python3 spawn.py <role> "x" --no-contract     # skip the contract precondition
 python3 spawn.py <role> "x" --unattended      # human absent: mint off, human gates stand
 python3 spawn.py doctor                       # measure hook firing on this CLI (once per version)
+python3 spawn.py drive -C <repo>              # run whoever the board names, one at a time, until it stops
+python3 spawn.py approve <kind> --subject <s> # mint an approval token yourself (needs a TTY)
+python3 spawn.py wake --all                   # include the rows already answered
 ```
 
 Authentication uses whatever is already logged in. No token, no secret.
@@ -302,14 +305,13 @@ python3 test_gates.py
 
 ## Open
 
-- **A WAKES-ON watcher that also runs.** `wake` names whom to open; a person still
-  opens them. Contract §3 leaves that seat for "a future automated watcher, if one
-  is built". Worth building only once a subject has been carried end to end by
-  hand — every step so far has surfaced something a loop would have swallowed.
-- **The nine pre-existing failures in `feasibility-agent-rulebook`'s gate suite.**
-  They drive the gate at the v1 `feasibility-record.md` path, which its owned-path
-  rule no longer covers. Whether the gate should still govern it, or the cases
-  should move, is that rulebook's call.
+- **Carrying one subject end to end with the driver.** `spawn.py drive` exists, but
+  only single-role turns have been measured. Walk a full multi-role round by hand
+  before letting it run long — every step so far has surfaced something a loop
+  would have swallowed.
+- **Six gate families still live once per rulebook.** `state-gate.sh` exists seven
+  times and all seven differ. core holds consent and the board gate today; lifting
+  the rest in, with their transition tables as data, has not started.
 - **Contract §3's table disagrees with §5.** §5 says every role wakes on a finding
   addressed to it; the table names findings only in coding's row. `wakes.py`
   follows §5 — the table alone would leave findings addressed to anyone else unseen.
