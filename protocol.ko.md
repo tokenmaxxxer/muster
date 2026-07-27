@@ -108,6 +108,16 @@ muster 의 리더가 반드시 지켜야 할 것 둘, 둘 다 계약이 직접 �
 을 고치면 그 레포에서 일하는 **모든** 에이전트에 적용되어, 코딩 에이전트가 QA 룰북
 까지 읽는다. 역할별 환경은 세션 단위로만 갈린다 — 그래서 역할마다 세션을 따로 띄운다.
 
+muster 자체 마켓플레이스(`.claude-plugin/marketplace.json`)에도 아홉 개 역할
+룰북의 플러그인이 전부 올라 있고, 각각 github `source`
+(`{"source": "github", "repo": "tokenmaxxxer/<repo>"}`)를 달고 있다 — 로컬
+`orchestrate` 항목과 나란히. 이건 `claude plugin install
+<플러그인>@tokenmaxxxer-muster` 로 룰북 플러그인을 바로 풀고 싶은 소비자를 위한
+두 번째 설치 경로다. 위에서 `spawn.py` 가 역할의 룰북을 찾는 방식을 바꾸지 않고,
+`claude plugin update` 가 github 소스 플러그인을 원격 최신으로 갱신해주게 만들지도
+않는다(그건 여전히 `spawn.py update <역할>` 이나 재설치를 거친다). 두 경로 모두
+룰북 로컬 clone 도, `TOKENMAXXXER_RULEBOOKS` 도 필요 없다.
+
 ### 실측으로 확인한 함정 셋
 
 **① `--settings` 는 병합이지 교체가 아니다.** 역할 파일에 qa 룰북만 적어도 사용자
