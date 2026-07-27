@@ -197,9 +197,25 @@ python3 spawn.py wake                         # 보드가 누구를 깨우나 (�
 python3 spawn.py <역할> "<맡길 일>" -C <레포>   # 그 역할을 띄운다
 python3 spawn.py <역할> "x" --dry-run          # 합쳐진 설정만 본다
 python3 spawn.py <역할> "x" --no-contract      # 계약 전제조건을 건너뛴다
+python3 spawn.py <역할> "x" --unattended       # 사람 부재: mint 없음, 휴먼 게이트는 선다
+python3 spawn.py doctor                       # 이 CLI 에서 훅 발화를 실측 (버전마다 한 번)
 ```
 
 인증은 로그인된 것을 그대로 쓴다. 토큰도 시크릿도 필요 없다.
+
+### 세션이 끝나면
+
+스폰마다 결과 JSON 을 받아 muster 의 `runs/ledger.jsonl` 에 한 줄을 남기고
+(세션 id, 비용, 턴 수, 보드 변화, 게이트 보고) 처분을 말한다 — `errored` /
+`progressed`(보드 변화) / `waiting-on-human`(§19 대기) / `silent-failure`
+(exit 0 인데 보드 무변화 — 실측된 침묵-사망 모드가 이제 소리를 낸다).
+
+모든 스폰 세션에는 `TOKENMAXXXER_SPAWNED=1` 도장이 찍힌다: 그 세션의
+프롬프트는 오케스트레이터가 쓴 텍스트이지 사람 턴이 아니므로, core 의 mint
+훅은 거기서 승인을 발행하면 안 된다. 사람의 승인은 사람의 세션에서만
+발행된다. 그리고 룰북 집행은 훅이 headless 세션에서 돈다는 — 문서가 아니라
+실측이 보증하는 — 사실 위에 서 있으므로, `spawn.py doctor` 가 CLI 버전마다
+한 번 그 실측을 다시 해야 스폰이 열린다.
 
 ### 일부러 멈추는 자리
 
