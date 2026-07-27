@@ -743,6 +743,35 @@ def ledger_write(entry: dict) -> Path:
     return p
 
 
+def core_dir() -> Path:
+    """tokenmaxxxer-core 플러그인 루트. 없으면 멈춘다.
+
+    core 는 승인 토큰과 보드 게이트를 들고 있다. 없이 띄우면 역할은 그대로
+    돌지만 토큰 위조도, 계약이 갈라진 보드에 쓰는 것도 아무도 안 막는다 —
+    조용히 보호가 사라지는 쪽이라 경고가 아니라 정지다.
+
+    마켓플레이스 설치가 아니라 `--plugin-dir` 로 붙인다(실측 2026-07-27,
+    CLI 2.1.220: 디렉터리로 넘긴 플러그인의 UserPromptSubmit·PreToolUse 훅이
+    headless 에서 그대로 발화한다). 설치를 거치지 않으므로 캐시·클론 갈라짐도,
+    유령 등록 항목도, 이름이 이미 등록됐을 때 --settings 가 무시되는 함정도
+    이 경로에는 없다.
+    """
+    for cand in (os.environ.get("TOKENMAXXXER_CORE"),
+                 "$TOKENMAXXXER_RULEBOOKS/tokenmaxxxer-core",
+                 str(ROOT.parent / "tokenmaxxxer-core")):
+        if not cand:
+            continue
+        p = Path(os.path.expanduser(os.path.expandvars(cand)))
+        if "$" in str(p):
+            continue
+        if (p / "core" / ".claude-plugin" / "plugin.json").is_file():
+            return p / "core"
+    sys.exit(
+        "tokenmaxxxer-core 를 찾지 못했다. 역할 세션은 core 없이 뜨지 않는다 —\n"
+        "  승인 토큰과 보드 게이트가 거기 있고, 없으면 보호가 조용히 사라진다.\n"
+        "  체크아웃을 두고 $TOKENMAXXXER_CORE 로 가리켜라.")
+
+
 def _claude_version() -> str:
     try:
         out = subprocess.run(["claude", "--version"], capture_output=True,
@@ -814,8 +843,8 @@ def doctor() -> int:
     return 1
 
 
-def spawn_cmd(settings_path: str, role: str,
-              unattended: bool) -> tuple[list[str], dict[str, str]]:
+def spawn_cmd(settings_path: str, role: str, unattended: bool,
+              core: str | None = None) -> tuple[list[str], dict[str, str]]:
     """세션 argv 와 env **추가분**. 호출자가 os.environ 위에 얹는다.
 
     --permission-mode acceptEdits: 실측 2026-07-27 — 권한 설정 없는 headless 는
@@ -832,6 +861,8 @@ def spawn_cmd(settings_path: str, role: str,
     """
     cmd = ["claude", "-p", "--settings", settings_path,
            "--permission-mode", "acceptEdits", "--output-format", "json"]
+    if core:
+        cmd += ["--plugin-dir", core]
     env = {"CLAUDE_ROLE": role, "TOKENMAXXXER_SPAWNED": "1"}
     if unattended:
         env["TOKENMAXXXER_UNATTENDED"] = "1"
@@ -901,7 +932,7 @@ def main() -> int:
               f"작업 디렉터리 {a.cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
-        cmd, extra_env = spawn_cmd(settings, a.role, a.unattended)
+        cmd, extra_env = spawn_cmd(settings, a.role, a.unattended, str(core_dir()))
         before = board_snapshot(a.cwd)
         t0 = time.monotonic()
         # stdout 만 잡는다 — --output-format json 의 결과 오브젝트가 거기 온다.

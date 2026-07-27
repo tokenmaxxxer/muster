@@ -38,6 +38,34 @@ class SpawnCmd(unittest.TestCase):
         # 결과 포착 없이는 세션이 "아무것도 안 하고 exit 0" 해도 모른다.
         self.assertEqual(cmd[cmd.index("--output-format") + 1], "json")
 
+    def test_core_is_attached_by_path(self):
+        # core carries the consent token format and the board gate. It rides
+        # in as --plugin-dir, not as a second marketplace: a directory-loaded
+        # plugin's hooks fire headless (measured 2026-07-27, CLI 2.1.220) and
+        # nothing is installed, so the cache-vs-clone divergence and the
+        # registry-name-wins trap never enter this path.
+        cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False,
+                                 core="/x/tokenmaxxxer-core/core")
+        self.assertEqual(cmd[cmd.index("--plugin-dir") + 1],
+                         "/x/tokenmaxxxer-core/core")
+
+    def test_core_dir_resolves_or_halts(self):
+        # A role session without core loses token forgery protection and the
+        # contract-drift check silently. That is a halt, not a warning.
+        old = os.environ.pop("TOKENMAXXXER_CORE", None)
+        try:
+            os.environ["TOKENMAXXXER_CORE"] = "/nonexistent/core"
+            saved_root, spawn.ROOT = spawn.ROOT, Path("/nonexistent/muster")
+            try:
+                with self.assertRaises(SystemExit):
+                    spawn.core_dir()
+            finally:
+                spawn.ROOT = saved_root
+        finally:
+            os.environ.pop("TOKENMAXXXER_CORE", None)
+            if old is not None:
+                os.environ["TOKENMAXXXER_CORE"] = old
+
     def test_env_stamps(self):
         # D1: 스폰된 세션의 UserPromptSubmit 은 오케스트레이터가 쓴 텍스트다.
         # 그 턴이 사람 턴으로 오인되어 mint 되는 일이 없도록 도장을 찍는다.
