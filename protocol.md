@@ -81,19 +81,22 @@ Two things muster's reader has to get right, both named by the contract:
 ### Transition state, stated plainly
 
 The contract's own text says landing it in each rulebook is separate work, "one
-proposal per repo", and as of 2026-07-26 **no rulebook has landed it and no
-repository has a board.** So muster reads the v2 board first and, finding none,
-checks the v1 locations (`review-record.md`, `feasibility-record.md`,
-`state.md`, `product-record.md`) — not to use them, but to say *"this repo has
-not moved to v2 yet"* instead of the flat "nothing in progress" that a v1 repo
-would otherwise get. **A false quiet is the failure mode being avoided.**
+proposal per repo" — and as of 2026-07-27 **all eight rulebooks have landed it:
+every repository has a v2 board.** muster reads the v2 board first and, if a
+given repo somehow still lacks one, falls back to the v1 locations
+(`review-record.md`, `feasibility-record.md`, `state.md`, `product-record.md`)
+— not to use them, but to say *"this repo has not moved to v2 yet"* instead of
+the flat "nothing in progress" that a v1 repo would otherwise get. **A false
+quiet is the failure mode being avoided.**
 
-`roles/qa.json` still carries `QA_WORKSPACE` and a sandbox `allowWrite` scoped
-to it. Contract §10 abolishes that external tree, but removing it before the qa
-rulebook lands v2 would break a rulebook that currently works — and under v2
-that same `allowWrite` will have to cover the target repo instead, since qa's
-evidence moves in-repo. Both changes belong to the same commit as qa's landing,
-not to this one.
+`roles/qa.json` no longer carries `QA_WORKSPACE` or a sandbox `allowWrite`
+scoped to it. Contract §10 abolished that external tree, and the qa rulebook
+has since landed v2: qa's evidence — intake profile, bug reports, regression
+records, run stats — now lives entirely inside the target repo, under
+`docs/reports/records/<subject>/qa.md` and `docs/reports/records/<subject>/qa/**`,
+the same place every other role's record lives. qa's scratch space for a run
+is whatever session-scoped temp directory the run already has; no dedicated
+external workspace and no role-file default are needed for it.
 
 ## 3. A role is a plugin set plus a boundary
 
@@ -208,13 +211,10 @@ and **approving scope changes**. warrant halting a headless coding run at
 
 ## 8. Unsettled
 
-- **Landing contract v2 in the six rulebooks** — the contract's own text says
-  this is one proposal per repo, and none has landed. Until then no repository
-  has a board and muster has nothing to read. This is the prerequisite for
-  everything below it.
 - **A WAKES-ON watcher** — contract §3 names "a future automated watcher, if one
   is built" as the thing that could carry the table instead of a human. That is
   muster's job, and it implements §3's table rather than inventing a schedule.
-  It cannot be written before the board exists.
+  Now that all eight rulebooks have a board, this is buildable but not yet
+  built.
 - **What calls muster** — a person directly, cron, or an issue webhook. For
   stages 1–2 a person is enough. No long-running process is being built.
