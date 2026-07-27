@@ -17,12 +17,14 @@
 그대로 쓰는 것이 컨테이너 대신 샌드박스를 고른 이유이므로, 그 이점을 버리지 않는다.
 """
 import argparse
+import hashlib
 import json
 import os
 import string
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -539,7 +541,8 @@ def require_contract(cwd: str, override: bool) -> None:
         f"  보드를 안 쓸 작업이면 --no-contract 로 명시한다.")
 
 
-REPO_CONFIG = (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks")
+REPO_CONFIG = (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks",
+               ".claude/agents", ".mcp.json")
 
 
 def require_no_repo_config(cwd: str, override: bool) -> None:
@@ -687,6 +690,185 @@ def gate_report(cwd: str) -> list[str]:
            ["[게이트] 확인 필요:"] + [f"  - {b}" for b in bad]
 
 
+def board_snapshot(cwd: str) -> dict[str, str]:
+    """보드 파일들의 내용 해시. 세션 전후를 비교해 §6 의 '바뀐 보드'를 잰다.
+
+    git 이 아니라 파일 내용을 재는 이유: 세션이 커밋했든 안 했든 바뀐 것은
+    바뀐 것이고, 계약 §6 의 단위는 커밋이 아니라 보드다.
+    """
+    base = Path(cwd).resolve()
+    root = base / BOARD
+    if not root.is_dir():
+        return {}
+    out: dict[str, str] = {}
+    for p in sorted(root.rglob("*")):
+        if p.is_file():
+            out[str(p.relative_to(base))] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return out
+
+
+def session_result(stdout: str) -> dict:
+    """--output-format json 의 결과 오브젝트. 파싱 불가면 빈 dict — 모르는
+    것을 성공으로 취급하지 않는다."""
+    try:
+        got = json.loads(stdout)
+        return got if isinstance(got, dict) else {}
+    except ValueError:
+        return {}
+
+
+def classify(rc: int, result: dict, delta: list, blocked: list) -> str:
+    """세션 하나의 처분. 판정하지 않는다 — 이름만 붙인다 (보고 전용).
+
+    silent-failure 가 넷째 값인 이유: exit 0 에 보드 무변화가 실측된
+    침묵-사망 모드다. 조용히 넘어가지 않는 것이 이 함수의 존재 이유다.
+    """
+    if rc != 0 or result.get("is_error"):
+        return "errored"
+    if delta:
+        return "progressed"
+    if blocked:
+        return "waiting-on-human"
+    return "silent-failure"
+
+
+def ledger_write(entry: dict) -> Path:
+    """runs/ledger.jsonl 에 한 줄. runs/ 는 gitignore 되어 있다 — 측정 데이터는
+    소스가 아니다."""
+    d = ROOT / "runs"
+    d.mkdir(exist_ok=True)
+    p = d / "ledger.jsonl"
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return p
+
+
+def core_dir() -> Path:
+    """tokenmaxxxer-core 플러그인 루트. 없으면 멈춘다.
+
+    core 는 승인 토큰과 보드 게이트를 들고 있다. 없이 띄우면 역할은 그대로
+    돌지만 토큰 위조도, 계약이 갈라진 보드에 쓰는 것도 아무도 안 막는다 —
+    조용히 보호가 사라지는 쪽이라 경고가 아니라 정지다.
+
+    마켓플레이스 설치가 아니라 `--plugin-dir` 로 붙인다(실측 2026-07-27,
+    CLI 2.1.220: 디렉터리로 넘긴 플러그인의 UserPromptSubmit·PreToolUse 훅이
+    headless 에서 그대로 발화한다). 설치를 거치지 않으므로 캐시·클론 갈라짐도,
+    유령 등록 항목도, 이름이 이미 등록됐을 때 --settings 가 무시되는 함정도
+    이 경로에는 없다.
+    """
+    for cand in (os.environ.get("TOKENMAXXXER_CORE"),
+                 "$TOKENMAXXXER_RULEBOOKS/tokenmaxxxer-core",
+                 str(ROOT.parent / "tokenmaxxxer-core")):
+        if not cand:
+            continue
+        p = Path(os.path.expanduser(os.path.expandvars(cand)))
+        if "$" in str(p):
+            continue
+        if (p / "core" / ".claude-plugin" / "plugin.json").is_file():
+            return p / "core"
+    sys.exit(
+        "tokenmaxxxer-core 를 찾지 못했다. 역할 세션은 core 없이 뜨지 않는다 —\n"
+        "  승인 토큰과 보드 게이트가 거기 있고, 없으면 보호가 조용히 사라진다.\n"
+        "  체크아웃을 두고 $TOKENMAXXXER_CORE 로 가리켜라.")
+
+
+def _claude_version() -> str:
+    try:
+        out = subprocess.run(["claude", "--version"], capture_output=True,
+                             text=True, timeout=30)
+        return out.stdout.strip().splitlines()[0] if out.stdout.strip() else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def require_doctor(version: str | None = None) -> None:
+    """이 CLI 버전에서 훅이 headless 로 도는 것을 doctor 가 실측했는지 본다.
+
+    룰북 집행 전체가 '플러그인 훅이 -p 세션에서 돈다'는 한 문장 위에 서
+    있는데, 그 문장은 공식 문서에 없다 — 실측(2026-07-27, 2.1.220)뿐이다.
+    CLI 는 자동 업데이트되므로, 버전이 바뀌면 게이트 전부가 소리 없이
+    사라질 수 있다. 그래서 버전마다 한 번, 실측을 다시 요구한다.
+    """
+    v = version if version is not None else _claude_version()
+    ok = ROOT / "runs" / "doctor-ok"
+    if not v:
+        sys.exit("claude --version 을 읽지 못했다. claude 가 PATH 에 있나?")
+    if not ok.is_file() or ok.read_text().strip() != v:
+        sys.exit(
+            f"이 CLI({v})에서 훅이 headless 로 도는 것을 아직 실측하지 않았다.\n"
+            f"먼저 돌려라: python3 spawn.py doctor   (실 세션 1회, 소액 과금)")
+
+
+def doctor() -> int:
+    """프로브 플러그인 하나로 실 세션을 띄워 UserPromptSubmit / PreToolUse 가
+    실제로 발화하는지 잰다. 성공하면 runs/doctor-ok 에 CLI 버전을 적는다."""
+    v = _claude_version()
+    if not v:
+        print("claude --version 실패", file=sys.stderr)
+        return 1
+    with tempfile.TemporaryDirectory() as td:
+        plug = Path(td) / "probe"
+        (plug / ".claude-plugin").mkdir(parents=True)
+        (plug / "hooks").mkdir()
+        (plug / ".claude-plugin" / "plugin.json").write_text(json.dumps(
+            {"name": "muster-probe", "version": "0.0.0",
+             "description": "hook-firing canary"}))
+        ups, pre = Path(td) / "ups", Path(td) / "pre"
+        (plug / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {
+            "UserPromptSubmit": [{"hooks": [
+                {"type": "command", "command": f"touch {ups}"}]}],
+            "PreToolUse": [{"matcher": "Bash", "hooks": [
+                {"type": "command", "command": f"touch {pre}"}]}],
+        }}))
+        work = Path(td) / "work"
+        work.mkdir()
+        subprocess.run(["git", "init", "-q", str(work)], check=False)
+        # --model haiku: 프로브의 관심사는 훅 로딩이지 모델이 아니다. 싸게 간다.
+        subprocess.run(
+            ["claude", "-p", "--plugin-dir", str(plug), "--model", "haiku",
+             "--max-turns", "2", "--output-format", "json"],
+            cwd=work, input="Run this exact bash command and nothing else: echo ok",
+            text=True, capture_output=True, timeout=180)
+        fired_ups, fired_pre = ups.is_file(), pre.is_file()
+    print(f"UserPromptSubmit: {'발화' if fired_ups else '침묵'} / "
+          f"PreToolUse: {'발화' if fired_pre else '침묵'}  (CLI {v})")
+    if fired_ups and fired_pre:
+        d = ROOT / "runs"
+        d.mkdir(exist_ok=True)
+        (d / "doctor-ok").write_text(v)
+        print("doctor-ok 기록. 이 버전에서 스폰이 열린다.")
+        return 0
+    print("훅이 headless 에서 발화하지 않는다 — 이 CLI 버전으로는 룰북 집행이 "
+          "성립하지 않는다. 스폰은 계속 막힌다.", file=sys.stderr)
+    return 1
+
+
+def spawn_cmd(settings_path: str, role: str, unattended: bool,
+              core: str | None = None) -> tuple[list[str], dict[str, str]]:
+    """세션 argv 와 env **추가분**. 호출자가 os.environ 위에 얹는다.
+
+    --permission-mode acceptEdits: 실측 2026-07-27 — 권한 설정 없는 headless 는
+    Write 를 조용히 거부한다(permission_denials 에만 남는다). acceptEdits 는
+    대답할 사람이 없는 프롬프트를 없앨 뿐이고, 거부는 계속 게이트의 몫이다 —
+    PreToolUse exit 2 가 acceptEdits 아래서도 막는 것을 같은 날 실측했다.
+    샌드박스 Bash 는 원래 자동 허용이고, 비샌드박스 재실행은 이미
+    allowUnsandboxedCommands:false 가 막는다.
+
+    TOKENMAXXXER_SPAWNED: 스폰된 세션의 프롬프트는 오케스트레이터가 쓴
+    텍스트이지 사람 턴이 아니다. core 의 mint 훅이 이 도장을 보고 발행을
+    거른다. UNATTENDED 와 별개다 — 그쪽은 "사람이 없다"는 사실이고, 겹쳐
+    쓰면 attended 스폰이 깨진다.
+    """
+    cmd = ["claude", "-p", "--settings", settings_path,
+           "--permission-mode", "acceptEdits", "--output-format", "json"]
+    if core:
+        cmd += ["--plugin-dir", core]
+    env = {"CLAUDE_ROLE": role, "TOKENMAXXXER_SPAWNED": "1"}
+    if unattended:
+        env["TOKENMAXXXER_UNATTENDED"] = "1"
+    return cmd, env
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("role", nargs="?", help="역할. 생략하면 상태만 보여준다")
@@ -697,6 +879,8 @@ def main() -> int:
                     help="대상 레포에 계약이 없어도 띄운다. 보드를 안 쓸 작업에만")
     ap.add_argument("--trust-repo-config", action="store_true",
                     help="대상 레포의 .claude/ 설정·훅을 신뢰한다. 읽어본 뒤에만")
+    ap.add_argument("--unattended", action="store_true",
+                    help="사람이 없는 실행. mint 는 안 되고, 휴먼 게이트는 선다")
     a = ap.parse_args()
 
     if a.role == "init":
@@ -705,6 +889,9 @@ def main() -> int:
     if a.role == "update":
         # 룰북을 원격 최신으로. 인자를 비우면 전부.
         return update([a.task] if a.task else list(ROLES))
+    if a.role == "doctor":
+        # 훅 발화 실측. 버전마다 한 번 — 룰북 집행의 전제조건이다.
+        return doctor()
     if a.role == "wake":
         # 계약 §3 의 표를 기계로 평가하고, **누구를 열지**를 말한다.
         # 띄우지 않는다 — 무엇을 맡길지는 그 줄을 만족시킨 사건이 정하지 않는다.
@@ -727,6 +914,8 @@ def main() -> int:
     # 드라이런도 막는다 — ensure_installed 의 워밍업이 실제 세션을 띄우고,
     # 그 세션도 레포의 훅을 그대로 실행한다.
     require_no_repo_config(a.cwd, a.trust_repo_config)
+    if not a.dry_run:
+        require_doctor()
     s = role_settings(a.role)
     on = [k for k, v in s.get("enabledPlugins", {}).items() if v]
     if a.dry_run:
@@ -743,16 +932,64 @@ def main() -> int:
               f"작업 디렉터리 {a.cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
-        rc = subprocess.run(
-            ["claude", "-p", "--settings", settings],
-            cwd=a.cwd, input=a.task, text=True,
-            env={**os.environ, "CLAUDE_ROLE": a.role},
-        ).returncode
+        cmd, extra_env = spawn_cmd(settings, a.role, a.unattended, str(core_dir()))
+        before = board_snapshot(a.cwd)
+        t0 = time.monotonic()
+        # stdout 만 잡는다 — --output-format json 의 결과 오브젝트가 거기 온다.
+        # stderr 는 그대로 흘린다: 진행 로그는 사람 것이다.
+        proc = subprocess.run(
+            cmd, cwd=a.cwd, input=a.task, text=True,
+            stdout=subprocess.PIPE,
+            env={**os.environ, **extra_env},
+        )
+        rc = proc.returncode
     finally:
         os.unlink(settings)
 
-    for line in gate_report(a.cwd):
+    result = session_result(proc.stdout)
+    if result.get("result"):
+        print(result["result"])                  # 세션의 마지막 답 — 기존 UX
+    elif proc.stdout.strip():
+        print(proc.stdout, end="")               # JSON 이 아니면 그대로 — 숨기지 않는다
+
+    after = board_snapshot(a.cwd)
+    delta = sorted(p for p in set(before) | set(after)
+                   if before.get(p) != after.get(p))
+    import wakes
+    try:
+        _, _, blocked = wakes.evaluate(a.cwd)
+    except Exception:
+        blocked = []       # 분류 보조일 뿐, 평가 실패로 스폰 결과를 잃지 않는다
+
+    gates = gate_report(a.cwd)
+    outcome = classify(rc, result, delta, blocked)
+    denials = result.get("permission_denials") or []
+    ledger_write({
+        "ts": int(time.time()), "role": a.role, "cwd": str(Path(a.cwd).resolve()),
+        "session_id": result.get("session_id"),
+        "cost_usd": result.get("total_cost_usd"),
+        "turns": result.get("num_turns"), "rc": rc, "outcome": outcome,
+        "board_delta": delta, "denials": len(denials),
+        "duration_s": round(time.monotonic() - t0, 1),
+        "rulebook": rulebook_version(a.role),
+        "gates": gates,
+    })
+
+    for line in gates:
         print(line, file=sys.stderr)
+    print(f"[{a.role}] {outcome}"
+          + (f", 보드 변화 {len(delta)}건" if delta else ", 보드 무변화")
+          + (f", 비용 ${result.get('total_cost_usd'):.2f}"
+             if isinstance(result.get("total_cost_usd"), (int, float)) else ""),
+          file=sys.stderr)
+    if denials:
+        print(f"[{a.role}] 권한 거부 {len(denials)}건 — 세션이 요청했지만 답할 사람이 "
+              f"없어 거부된 도구 호출이다. runs/ledger.jsonl 과 대조하라", file=sys.stderr)
+    if outcome == "silent-failure":
+        print(f"[{a.role}] exit 0 인데 보드가 안 바뀌었다 — 성공이 아니라 "
+              f"실측된 침묵-사망 모드다. 세션 로그를 확인하라"
+              + (f" (session {result.get('session_id')})" if result.get("session_id") else ""),
+              file=sys.stderr)
     return rc
 
 

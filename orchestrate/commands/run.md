@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(python3:*), Bash(git remote:*), Bash(git status:*), Bash(cp:*), Bash(ls:*), Read
+allowed-tools: Bash(python3:*), Bash(git remote:*), Bash(git status:*), Bash(ls:*), Read
 description: 보드를 읽고 역할을 띄운다. 인자 없이 부르면 보드와 누가 깨어났는지 보여준다
 argument-hint: "[역할 [맡길 일]] — 예: qa /testrun:testrun smoke | 비우면 보드만"
 ---
@@ -57,6 +57,10 @@ python3 $MUSTER/spawn.py <역할> "<맡길 일>" -C <작업 디렉터리>
 ```
 cp <아무 룰북>/docs/specs/role-handoff-contract.md <대상 레포>/docs/specs/
 ```
+
+cp 는 일부러 사전 승인하지 않는다 — 게이트 없는 이 세션의 사전 승인된 cp 는
+위조 토큰을 보드에 심을 수 있다(2026-07-27 리뷰 D2). 권한 프롬프트에서 사람이
+본다.
 
 `--no-contract` 는 보드를 안 쓸 단발 작업에만 쓰고, **쓸 때는 사용자에게 말한다.**
 

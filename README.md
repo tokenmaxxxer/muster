@@ -213,9 +213,26 @@ python3 spawn.py wake                         # who does the board wake? (contra
 python3 spawn.py <role> "<task>" -C <repo>    # bring up that role
 python3 spawn.py <role> "x" --dry-run         # print the merged settings only
 python3 spawn.py <role> "x" --no-contract     # skip the contract precondition
+python3 spawn.py <role> "x" --unattended      # human absent: mint off, human gates stand
+python3 spawn.py doctor                       # measure hook firing on this CLI (once per version)
 ```
 
 Authentication uses whatever is already logged in. No token, no secret.
+
+### When a session ends
+
+Every spawn captures the session's result JSON, appends one line to muster's
+`runs/ledger.jsonl` (session id, cost, turns, board delta, gate report) and
+names the outcome: `errored` / `progressed` (the board changed) /
+`waiting-on-human` (a §19 row stands) / `silent-failure` (exit 0 and an
+unchanged board — the measured silent-death mode, now loud).
+
+Every spawned session is stamped `TOKENMAXXXER_SPAWNED=1`: its prompts are
+orchestrator-authored text, not a human turn, so core's mint hook must never
+mint an approval from them. A human's approval is minted only in the human's
+own session. And because rulebook enforcement rests on hooks firing in
+headless sessions — a fact measured, not documented — `spawn.py doctor` must
+re-measure it once per CLI version before any role spawns.
 
 ### Where a run stops on purpose
 
