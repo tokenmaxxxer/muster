@@ -22,7 +22,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-RECORD = "review-record.md"
+# 계약 v2 의 보드 자리. subject 마다 한 판씩 있고, 전부 합쳐서 센다.
+BOARD = "docs/reports/records"
+# v1 은 레포 루트에 한 파일이었다. 아직 안 옮긴 레포를 "리뷰를 돈 적 없다"로
+# 보고하면 원장이 거짓말을 한다 — 없는 것과 옛 자리에 있는 것은 정반대 처분을
+# 받아야 한다.
+LEGACY = "review-record.md"
 VERDICTS = ("Present", "Surface", "Absent", "Incorrect")
 # 요구사항 한 블록에 verdict 한 줄. 상태기계 스펙이 "정확히 하나"를 요구한다.
 VERDICT_RE = re.compile(r"^\s*verdict:\s*(\w+)\s*$", re.M)
@@ -59,14 +64,24 @@ def unresolved(text: str) -> int:
     return c["Absent"] + c["Incorrect"]
 
 
-def collect(repo: Path) -> dict:
-    cur = repo / RECORD
-    revs = history(repo, RECORD)
+def records(repo: Path) -> list[str]:
+    """셀 review 기록들의 레포 상대 경로. v2 를 먼저 보고, 없으면 v1 자리."""
+    board = repo / BOARD
+    if board.is_dir():
+        found = sorted(str(p.relative_to(repo))
+                       for p in board.glob("*/review.md") if p.is_file())
+        if found:
+            return found
+    return [LEGACY] if (repo / LEGACY).exists() else []
+
+
+def _one(repo: Path, rel: str) -> tuple[list[str], int, int]:
+    revs = history(repo, rel)
+    cur = repo / rel
     if cur.exists():                       # 아직 커밋 안 된 최신 판도 한 판으로 센다
         text = cur.read_text()
         if not revs or revs[-1] != text:
             revs = revs + [text]
-
     fixed = seen = 0
     for a, b in zip(revs, revs[1:]):
         # 요구사항 텍스트를 짝지어 추적하는 편이 정확하지만 블록 형식이 룰북 쪽에서
@@ -75,21 +90,45 @@ def collect(repo: Path) -> dict:
         before = unresolved(a)
         fixed += max(0, before - unresolved(b))
         seen += before
+    return revs, seen, fixed
 
-    return {"repo": str(repo), "found": cur.exists(),
-            "current": parse(cur.read_text()) if cur.exists() else None,
-            "revisions": len(revs), "findings_seen": seen, "findings_fixed": fixed,
+
+def collect(repo: Path) -> dict:
+    rels = records(repo)
+    legacy = rels == [LEGACY]
+    revisions = fixed = seen = 0
+    latest = None
+    for rel in rels:
+        revs, s, f = _one(repo, rel)
+        revisions += len(revs)
+        seen += s
+        fixed += f
+        if revs:
+            latest = parse(revs[-1])       # subject 가 여럿이면 마지막 판 하나를 보여준다
+
+    return {"repo": str(repo), "found": bool(rels), "legacy": legacy,
+            "subjects": len(rels), "records": rels,
+            "current": latest,
+            "revisions": revisions, "findings_seen": seen, "findings_fixed": fixed,
             "acceptance_pct": round(fixed / seen * 100, 1) if seen else None}
 
 
 def report(d: dict) -> str:
     if not d["found"]:
-        return (f"{d['repo']}\n  {RECORD} 없음 — 이 레포로 리뷰 사이클을 돈 적이 없다.\n"
+        return (f"{d['repo']}\n  {BOARD}/<subject>/review.md 없음 — 이 레포로 "
+                f"리뷰 사이클을 돈 적이 없다.\n"
                 f"  python3 spawn.py review \"<맡길 일>\" -C {d['repo']}")
     c = d["current"]
-    out = [d["repo"],
-           f"  상태 {c['status'] or '(없음)'}   요구사항 {c['total']}건   개정 {d['revisions']}판",
-           "  판정: " + (", ".join(f"{k} {v}" for k, v in c["counts"].items() if v) or "없음")]
+    out = [d["repo"]]
+    if d["legacy"]:
+        # 옛 자리에 있는 것을 "없다"로 보고하면 원장이 거짓말을 시작한다.
+        out.append(f"  ⚠ v1 자리({LEGACY})를 읽었다 — 계약 v2 는 "
+                   f"{BOARD}/<subject>/review.md 다. 아직 안 옮긴 레포다.")
+    elif d["subjects"] > 1:
+        out.append(f"  subject {d['subjects']}개를 합쳐서 셌다: "
+                   f"{', '.join(r.split('/')[-2] for r in d['records'])}")
+    out += [f"  상태 {c['status'] or '(없음)'}   요구사항 {c['total']}건   개정 {d['revisions']}판",
+            "  판정: " + (", ".join(f"{k} {v}" for k, v in c["counts"].items() if v) or "없음")]
     if c["unknown"]:
         out.append(f"  ⚠ 어휘 밖 판정: {', '.join(c['unknown'])} — 스펙은 "
                    f"{'/'.join(VERDICTS)} 넷만 허용한다")
