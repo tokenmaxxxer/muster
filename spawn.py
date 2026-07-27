@@ -539,7 +539,8 @@ def require_contract(cwd: str, override: bool) -> None:
         f"  보드를 안 쓸 작업이면 --no-contract 로 명시한다.")
 
 
-REPO_CONFIG = (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks")
+REPO_CONFIG = (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks",
+               ".claude/agents", ".mcp.json")
 
 
 def require_no_repo_config(cwd: str, override: bool) -> None:
