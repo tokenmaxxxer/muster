@@ -17,12 +17,14 @@
 그대로 쓰는 것이 컨테이너 대신 샌드박스를 고른 이유이므로, 그 이점을 버리지 않는다.
 """
 import argparse
+import hashlib
 import json
 import os
 import string
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -688,6 +690,59 @@ def gate_report(cwd: str) -> list[str]:
            ["[게이트] 확인 필요:"] + [f"  - {b}" for b in bad]
 
 
+def board_snapshot(cwd: str) -> dict[str, str]:
+    """보드 파일들의 내용 해시. 세션 전후를 비교해 §6 의 '바뀐 보드'를 잰다.
+
+    git 이 아니라 파일 내용을 재는 이유: 세션이 커밋했든 안 했든 바뀐 것은
+    바뀐 것이고, 계약 §6 의 단위는 커밋이 아니라 보드다.
+    """
+    base = Path(cwd).resolve()
+    root = base / BOARD
+    if not root.is_dir():
+        return {}
+    out: dict[str, str] = {}
+    for p in sorted(root.rglob("*")):
+        if p.is_file():
+            out[str(p.relative_to(base))] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return out
+
+
+def session_result(stdout: str) -> dict:
+    """--output-format json 의 결과 오브젝트. 파싱 불가면 빈 dict — 모르는
+    것을 성공으로 취급하지 않는다."""
+    try:
+        got = json.loads(stdout)
+        return got if isinstance(got, dict) else {}
+    except ValueError:
+        return {}
+
+
+def classify(rc: int, result: dict, delta: list, blocked: list) -> str:
+    """세션 하나의 처분. 판정하지 않는다 — 이름만 붙인다 (보고 전용).
+
+    silent-failure 가 넷째 값인 이유: exit 0 에 보드 무변화가 실측된
+    침묵-사망 모드다. 조용히 넘어가지 않는 것이 이 함수의 존재 이유다.
+    """
+    if rc != 0 or result.get("is_error"):
+        return "errored"
+    if delta:
+        return "progressed"
+    if blocked:
+        return "waiting-on-human"
+    return "silent-failure"
+
+
+def ledger_write(entry: dict) -> Path:
+    """runs/ledger.jsonl 에 한 줄. runs/ 는 gitignore 되어 있다 — 측정 데이터는
+    소스가 아니다."""
+    d = ROOT / "runs"
+    d.mkdir(exist_ok=True)
+    p = d / "ledger.jsonl"
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return p
+
+
 def spawn_cmd(settings_path: str, role: str,
               unattended: bool) -> tuple[list[str], dict[str, str]]:
     """세션 argv 와 env **추가분**. 호출자가 os.environ 위에 얹는다.
@@ -770,16 +825,64 @@ def main() -> int:
               f"작업 디렉터리 {a.cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
-        rc = subprocess.run(
-            ["claude", "-p", "--settings", settings],
-            cwd=a.cwd, input=a.task, text=True,
-            env={**os.environ, "CLAUDE_ROLE": a.role},
-        ).returncode
+        cmd, extra_env = spawn_cmd(settings, a.role, a.unattended)
+        before = board_snapshot(a.cwd)
+        t0 = time.monotonic()
+        # stdout 만 잡는다 — --output-format json 의 결과 오브젝트가 거기 온다.
+        # stderr 는 그대로 흘린다: 진행 로그는 사람 것이다.
+        proc = subprocess.run(
+            cmd, cwd=a.cwd, input=a.task, text=True,
+            stdout=subprocess.PIPE,
+            env={**os.environ, **extra_env},
+        )
+        rc = proc.returncode
     finally:
         os.unlink(settings)
 
-    for line in gate_report(a.cwd):
+    result = session_result(proc.stdout)
+    if result.get("result"):
+        print(result["result"])                  # 세션의 마지막 답 — 기존 UX
+    elif proc.stdout.strip():
+        print(proc.stdout, end="")               # JSON 이 아니면 그대로 — 숨기지 않는다
+
+    after = board_snapshot(a.cwd)
+    delta = sorted(p for p in set(before) | set(after)
+                   if before.get(p) != after.get(p))
+    import wakes
+    try:
+        _, _, blocked = wakes.evaluate(a.cwd)
+    except Exception:
+        blocked = []       # 분류 보조일 뿐, 평가 실패로 스폰 결과를 잃지 않는다
+
+    gates = gate_report(a.cwd)
+    outcome = classify(rc, result, delta, blocked)
+    denials = result.get("permission_denials") or []
+    ledger_write({
+        "ts": int(time.time()), "role": a.role, "cwd": str(Path(a.cwd).resolve()),
+        "session_id": result.get("session_id"),
+        "cost_usd": result.get("total_cost_usd"),
+        "turns": result.get("num_turns"), "rc": rc, "outcome": outcome,
+        "board_delta": delta, "denials": len(denials),
+        "duration_s": round(time.monotonic() - t0, 1),
+        "rulebook": rulebook_version(a.role),
+        "gates": gates,
+    })
+
+    for line in gates:
         print(line, file=sys.stderr)
+    print(f"[{a.role}] {outcome}"
+          + (f", 보드 변화 {len(delta)}건" if delta else ", 보드 무변화")
+          + (f", 비용 ${result.get('total_cost_usd'):.2f}"
+             if isinstance(result.get("total_cost_usd"), (int, float)) else ""),
+          file=sys.stderr)
+    if denials:
+        print(f"[{a.role}] 권한 거부 {len(denials)}건 — 세션이 요청했지만 답할 사람이 "
+              f"없어 거부된 도구 호출이다. runs/ledger.jsonl 과 대조하라", file=sys.stderr)
+    if outcome == "silent-failure":
+        print(f"[{a.role}] exit 0 인데 보드가 안 바뀌었다 — 성공이 아니라 "
+              f"실측된 침묵-사망 모드다. 세션 로그를 확인하라"
+              + (f" (session {result.get('session_id')})" if result.get("session_id") else ""),
+              file=sys.stderr)
     return rc
 
 

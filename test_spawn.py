@@ -54,5 +54,68 @@ class SpawnCmd(unittest.TestCase):
         self.assertEqual(env["TOKENMAXXXER_SPAWNED"], "1")
 
 
+class BoardSnapshot(unittest.TestCase):
+    def test_delta_shows_changed_and_new(self):
+        with tempfile.TemporaryDirectory() as td:
+            rec = Path(td) / spawn.BOARD / "alpha"
+            rec.mkdir(parents=True)
+            (rec / "qa.md").write_text("loop_state: probing\n")
+            before = spawn.board_snapshot(td)
+            (rec / "qa.md").write_text("loop_state: reproduced\n")
+            (rec / "coding.md").write_text("new\n")
+            after = spawn.board_snapshot(td)
+            delta = sorted(p for p in after if after.get(p) != before.get(p))
+            self.assertEqual(delta, [f"{spawn.BOARD}/alpha/coding.md",
+                                     f"{spawn.BOARD}/alpha/qa.md"])
+
+    def test_no_board_is_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(spawn.board_snapshot(td), {})
+
+
+class SessionResult(unittest.TestCase):
+    def test_parses_json(self):
+        got = spawn.session_result('{"session_id": "abc", "total_cost_usd": 0.5}')
+        self.assertEqual(got["session_id"], "abc")
+
+    def test_garbage_is_empty_dict(self):
+        # 파싱 불가를 성공으로 취급하지 않는다 — 빈 dict 는 아래 classify 에서
+        # is_error 도 아니고 필드도 없는, "모른다" 그대로다.
+        self.assertEqual(spawn.session_result("not json"), {})
+        self.assertEqual(spawn.session_result(""), {})
+
+
+class Classify(unittest.TestCase):
+    def test_errored_wins(self):
+        self.assertEqual(spawn.classify(1, {}, [], []), "errored")
+        self.assertEqual(spawn.classify(0, {"is_error": True}, ["x"], []), "errored")
+
+    def test_progressed_on_delta(self):
+        self.assertEqual(spawn.classify(0, {}, ["records/a/qa.md"], []), "progressed")
+
+    def test_waiting_on_human(self):
+        blocked = [("coding", "…§19 가 막는다")]
+        self.assertEqual(spawn.classify(0, {}, [], blocked), "waiting-on-human")
+
+    def test_silent_failure_is_loud(self):
+        # 실측된 침묵-사망 모드: exit 0, 보드 무변화, 막힌 줄도 없음.
+        self.assertEqual(spawn.classify(0, {}, [], []), "silent-failure")
+
+
+class Ledger(unittest.TestCase):
+    def test_appends_jsonl(self):
+        with tempfile.TemporaryDirectory() as td:
+            old = spawn.ROOT
+            spawn.ROOT = Path(td)
+            try:
+                p = spawn.ledger_write({"role": "qa", "outcome": "progressed"})
+                p2 = spawn.ledger_write({"role": "review", "outcome": "errored"})
+            finally:
+                spawn.ROOT = old
+            self.assertEqual(p, p2)
+            lines = [json.loads(l) for l in p.read_text().splitlines()]
+            self.assertEqual([l["role"] for l in lines], ["qa", "review"])
+
+
 if __name__ == "__main__":
     unittest.main()
