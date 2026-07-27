@@ -743,6 +743,77 @@ def ledger_write(entry: dict) -> Path:
     return p
 
 
+def _claude_version() -> str:
+    try:
+        out = subprocess.run(["claude", "--version"], capture_output=True,
+                             text=True, timeout=30)
+        return out.stdout.strip().splitlines()[0] if out.stdout.strip() else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def require_doctor(version: str | None = None) -> None:
+    """이 CLI 버전에서 훅이 headless 로 도는 것을 doctor 가 실측했는지 본다.
+
+    룰북 집행 전체가 '플러그인 훅이 -p 세션에서 돈다'는 한 문장 위에 서
+    있는데, 그 문장은 공식 문서에 없다 — 실측(2026-07-27, 2.1.220)뿐이다.
+    CLI 는 자동 업데이트되므로, 버전이 바뀌면 게이트 전부가 소리 없이
+    사라질 수 있다. 그래서 버전마다 한 번, 실측을 다시 요구한다.
+    """
+    v = version if version is not None else _claude_version()
+    ok = ROOT / "runs" / "doctor-ok"
+    if not v:
+        sys.exit("claude --version 을 읽지 못했다. claude 가 PATH 에 있나?")
+    if not ok.is_file() or ok.read_text().strip() != v:
+        sys.exit(
+            f"이 CLI({v})에서 훅이 headless 로 도는 것을 아직 실측하지 않았다.\n"
+            f"먼저 돌려라: python3 spawn.py doctor   (실 세션 1회, 소액 과금)")
+
+
+def doctor() -> int:
+    """프로브 플러그인 하나로 실 세션을 띄워 UserPromptSubmit / PreToolUse 가
+    실제로 발화하는지 잰다. 성공하면 runs/doctor-ok 에 CLI 버전을 적는다."""
+    v = _claude_version()
+    if not v:
+        print("claude --version 실패", file=sys.stderr)
+        return 1
+    with tempfile.TemporaryDirectory() as td:
+        plug = Path(td) / "probe"
+        (plug / ".claude-plugin").mkdir(parents=True)
+        (plug / "hooks").mkdir()
+        (plug / ".claude-plugin" / "plugin.json").write_text(json.dumps(
+            {"name": "muster-probe", "version": "0.0.0",
+             "description": "hook-firing canary"}))
+        ups, pre = Path(td) / "ups", Path(td) / "pre"
+        (plug / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {
+            "UserPromptSubmit": [{"hooks": [
+                {"type": "command", "command": f"touch {ups}"}]}],
+            "PreToolUse": [{"matcher": "Bash", "hooks": [
+                {"type": "command", "command": f"touch {pre}"}]}],
+        }}))
+        work = Path(td) / "work"
+        work.mkdir()
+        subprocess.run(["git", "init", "-q", str(work)], check=False)
+        # --model haiku: 프로브의 관심사는 훅 로딩이지 모델이 아니다. 싸게 간다.
+        subprocess.run(
+            ["claude", "-p", "--plugin-dir", str(plug), "--model", "haiku",
+             "--max-turns", "2", "--output-format", "json"],
+            cwd=work, input="Run this exact bash command and nothing else: echo ok",
+            text=True, capture_output=True, timeout=180)
+        fired_ups, fired_pre = ups.is_file(), pre.is_file()
+    print(f"UserPromptSubmit: {'발화' if fired_ups else '침묵'} / "
+          f"PreToolUse: {'발화' if fired_pre else '침묵'}  (CLI {v})")
+    if fired_ups and fired_pre:
+        d = ROOT / "runs"
+        d.mkdir(exist_ok=True)
+        (d / "doctor-ok").write_text(v)
+        print("doctor-ok 기록. 이 버전에서 스폰이 열린다.")
+        return 0
+    print("훅이 headless 에서 발화하지 않는다 — 이 CLI 버전으로는 룰북 집행이 "
+          "성립하지 않는다. 스폰은 계속 막힌다.", file=sys.stderr)
+    return 1
+
+
 def spawn_cmd(settings_path: str, role: str,
               unattended: bool) -> tuple[list[str], dict[str, str]]:
     """세션 argv 와 env **추가분**. 호출자가 os.environ 위에 얹는다.
@@ -787,6 +858,9 @@ def main() -> int:
     if a.role == "update":
         # 룰북을 원격 최신으로. 인자를 비우면 전부.
         return update([a.task] if a.task else list(ROLES))
+    if a.role == "doctor":
+        # 훅 발화 실측. 버전마다 한 번 — 룰북 집행의 전제조건이다.
+        return doctor()
     if a.role == "wake":
         # 계약 §3 의 표를 기계로 평가하고, **누구를 열지**를 말한다.
         # 띄우지 않는다 — 무엇을 맡길지는 그 줄을 만족시킨 사건이 정하지 않는다.
@@ -809,6 +883,8 @@ def main() -> int:
     # 드라이런도 막는다 — ensure_installed 의 워밍업이 실제 세션을 띄우고,
     # 그 세션도 레포의 훅을 그대로 실행한다.
     require_no_repo_config(a.cwd, a.trust_repo_config)
+    if not a.dry_run:
+        require_doctor()
     s = role_settings(a.role)
     on = [k for k, v in s.get("enabledPlugins", {}).items() if v]
     if a.dry_run:

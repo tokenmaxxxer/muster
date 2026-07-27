@@ -117,5 +117,44 @@ class Ledger(unittest.TestCase):
             self.assertEqual([l["role"] for l in lines], ["qa", "review"])
 
 
+class RequireDoctor(unittest.TestCase):
+    def _with_root(self, td):
+        old = spawn.ROOT
+        spawn.ROOT = Path(td)
+        return old
+
+    def test_halts_without_doctor_pass(self):
+        with tempfile.TemporaryDirectory() as td:
+            old = self._with_root(td)
+            try:
+                with self.assertRaises(SystemExit):
+                    spawn.require_doctor(version="2.1.220 (Claude Code)")
+            finally:
+                spawn.ROOT = old
+
+    def test_halts_on_version_change(self):
+        # CLI 는 자동 업데이트된다. 훅이 headless 에서 도는 것은 문서가 아니라
+        # 실측이 보증한다 — 버전이 바뀌면 보증도 끝난다.
+        with tempfile.TemporaryDirectory() as td:
+            old = self._with_root(td)
+            try:
+                (Path(td) / "runs").mkdir()
+                (Path(td) / "runs" / "doctor-ok").write_text("2.1.219 (Claude Code)")
+                with self.assertRaises(SystemExit):
+                    spawn.require_doctor(version="2.1.220 (Claude Code)")
+            finally:
+                spawn.ROOT = old
+
+    def test_passes_on_match(self):
+        with tempfile.TemporaryDirectory() as td:
+            old = self._with_root(td)
+            try:
+                (Path(td) / "runs").mkdir()
+                (Path(td) / "runs" / "doctor-ok").write_text("2.1.220 (Claude Code)")
+                spawn.require_doctor(version="2.1.220 (Claude Code)")  # no raise
+            finally:
+                spawn.ROOT = old
+
+
 if __name__ == "__main__":
     unittest.main()
