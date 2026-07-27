@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """spawn.py 의 순수 함수들 — 세션을 띄우지 않고 검사한다."""
+import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,19 +54,22 @@ class SpawnCmd(unittest.TestCase):
     def test_core_dir_resolves_or_halts(self):
         # A role session without core loses token forgery protection and the
         # contract-drift check silently. That is a halt, not a warning.
-        old = os.environ.pop("TOKENMAXXXER_CORE", None)
+        # core_dir 이 보는 자리 **셋 전부** 를 막아야 검사가 성립한다. 하나라도
+        # 살려 두면 그 환경이 있는 머신에서만 통과하는 테스트가 된다 — 실제로
+        # TOKENMAXXXER_RULEBOOKS 가 설정된 셸에서 이 케이스가 조용히 통과했다.
+        saved = {k: os.environ.pop(k, None)
+                 for k in ("TOKENMAXXXER_CORE", "TOKENMAXXXER_RULEBOOKS")}
+        saved_root, spawn.ROOT = spawn.ROOT, Path("/nonexistent/muster")
         try:
             os.environ["TOKENMAXXXER_CORE"] = "/nonexistent/core"
-            saved_root, spawn.ROOT = spawn.ROOT, Path("/nonexistent/muster")
-            try:
-                with self.assertRaises(SystemExit):
-                    spawn.core_dir()
-            finally:
-                spawn.ROOT = saved_root
+            with self.assertRaises(SystemExit):
+                spawn.core_dir()
         finally:
+            spawn.ROOT = saved_root
             os.environ.pop("TOKENMAXXXER_CORE", None)
-            if old is not None:
-                os.environ["TOKENMAXXXER_CORE"] = old
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
 
     def test_env_stamps(self):
         # D1: 스폰된 세션의 UserPromptSubmit 은 오케스트레이터가 쓴 텍스트다.
@@ -166,6 +171,27 @@ class Ledger(unittest.TestCase):
             self.assertEqual([l["role"] for l in lines], ["qa", "review"])
 
 
+class OwnershipReport(unittest.TestCase):
+    """세션 안 게이트가 안 돌았을 때의 마지막 흔적. 막지는 않고 말만 한다."""
+    B = spawn.BOARD
+
+    def test_own_record_and_subtree_are_silent(self):
+        self.assertEqual(spawn.ownership_report(
+            "/x", "qa", [f"{self.B}/alpha/qa.md", f"{self.B}/alpha/qa/run.log"]), [])
+
+    def test_foreign_record_is_named(self):
+        out = spawn.ownership_report("/x", "qa", [f"{self.B}/alpha/coding.md"])
+        self.assertTrue(out and "coding.md" in out[1])
+
+    def test_a_token_is_called_a_forgery(self):
+        out = spawn.ownership_report(
+            "/x", "qa", [f"{self.B}/alpha/tokens/scope-proposed--scope-approved.token"])
+        self.assertIn("위조", "\n".join(out))
+
+    def test_paths_outside_the_board_are_not_its_business(self):
+        self.assertEqual(spawn.ownership_report("/x", "qa", ["src/app.py"]), [])
+
+
 class RequireDoctor(unittest.TestCase):
     def _with_root(self, td):
         old = spawn.ROOT
@@ -203,6 +229,150 @@ class RequireDoctor(unittest.TestCase):
                 spawn.require_doctor(version="2.1.220 (Claude Code)")  # no raise
             finally:
                 spawn.ROOT = old
+
+
+class _TTY(io.StringIO):
+    """터미널인 척하는 stdin. approve 의 가드는 isatty() 하나뿐이라 이것으로
+    긍정 경로까지 검사할 수 있다."""
+    def isatty(self):
+        return True
+
+
+def _repo_with_contract(td):
+    root = Path(td) / "repo"
+    (root / "docs" / "specs").mkdir(parents=True)
+    src = spawn.ROOT / "contract" / "role-handoff-contract.md"
+    (root / "docs" / "specs" / "role-handoff-contract.md").write_bytes(src.read_bytes())
+    return root
+
+
+class Approve(unittest.TestCase):
+    KIND, SUB = "scope-proposed--scope-approved", "alpha"
+
+    def _run(self, root, typed, kind=None, subject=None):
+        old = sys.stdin
+        sys.stdin = _TTY(typed + "\n")
+        try:
+            # None 과 "" 를 구분한다 — `or` 로 기본값을 주면 빈 문자열 케이스가
+            # 조용히 유효한 값으로 바뀌어 검사가 성립하지 않는다.
+            return spawn.approve(str(root),
+                                 self.KIND if kind is None else kind,
+                                 self.SUB if subject is None else subject)
+        finally:
+            sys.stdin = old
+
+    def _token(self, root):
+        p = root / spawn.BOARD / self.SUB / "tokens" / (self.KIND + ".token")
+        return p.read_text() if p.exists() else None
+
+    def test_no_tty_refuses(self):
+        # 모델이 이 명령을 부르면 stdin 이 TTY 가 아니다 (실측 2026-07-27).
+        with tempfile.TemporaryDirectory() as td:
+            root = _repo_with_contract(td)
+            old, sys.stdin = sys.stdin, io.StringIO("APPROVE x y\n")
+            try:
+                with self.assertRaises(SystemExit):
+                    spawn.approve(str(root), self.KIND, self.SUB)
+            finally:
+                sys.stdin = old
+
+    def test_exact_line_mints_a_consumable_token(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _repo_with_contract(td)
+            rc = self._run(root, f"APPROVE {self.KIND} {self.SUB}")
+            self.assertEqual(rc, 0)
+            t = self._token(root)
+            self.assertIn("actor: user", t)
+            self.assertIn(f"kind: {self.KIND}", t)
+            self.assertIn(f"subject: {self.SUB}", t)
+            # core 가 실제로 읽고 소비할 수 있어야 한다 — 형식을 손으로 베낀
+            # 두 번째 구현이 되면 안 된다.
+            sys.path.insert(0, str(spawn.core_dir() / "hooks" / "lib"))
+            import consent
+            d = str(root / spawn.BOARD / self.SUB / "tokens")
+            got = consent.consume(d, self.KIND, subject=self.SUB)
+            self.assertEqual(got["actor"], "user")
+            self.assertIsNone(consent.find(d, self.KIND))
+
+    def test_the_token_is_not_committable(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _repo_with_contract(td)
+            self._run(root, f"APPROVE {self.KIND} {self.SUB}")
+            ig = root / spawn.BOARD / self.SUB / "tokens" / ".gitignore"
+            self.assertEqual(ig.read_text().strip(), "*")
+
+    def test_anything_but_the_exact_line_mints_nothing(self):
+        for typed in ("approve scope-proposed--scope-approved alpha",
+                      "APPROVE scope-proposed--scope-approved alpha please",
+                      "yes", ""):
+            with tempfile.TemporaryDirectory() as td:
+                root = _repo_with_contract(td)
+                self.assertEqual(self._run(root, typed), 1, typed)
+                self.assertIsNone(self._token(root), typed)
+
+    def test_unsafe_identifiers_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = _repo_with_contract(td)
+            for k, s in (("../escape", "alpha"), (self.KIND, "../escape"),
+                         ("", "alpha"), (self.KIND, "")):
+                with self.assertRaises(SystemExit):
+                    self._run(root, "x", kind=k, subject=s)
+
+
+class Drive(unittest.TestCase):
+    """드라이버의 유일한 일은 **멈추는 것**이다. 무엇을 띄울지는 wakes 가 정한다."""
+
+    def _fake_rows(self, rows):
+        return lambda cwd: (rows, [])
+
+    def test_stops_when_nothing_stands(self):
+        import wakes
+        old = wakes.fresh
+        wakes.fresh = self._fake_rows([])
+        try:
+            self.assertEqual(spawn.drive("/x", False), 0)
+        finally:
+            wakes.fresh = old
+
+    def test_stops_when_the_board_did_not_change(self):
+        """§6. 이게 없으면 같은 줄을 영원히 다시 띄운다."""
+        import wakes
+        row = wakes.Row("qa", "why", "qa|k", "sig-1")
+        old_fresh, old_obs, old_spawn = wakes.fresh, wakes.observed, spawn._spawn_one
+        calls = []
+        wakes.fresh = self._fake_rows([row])
+        wakes.observed = lambda cwd: {}          # consume 이 안 찍혔다 = 무변화
+        spawn._spawn_one = lambda *a, **k: calls.append(a) or 0
+        try:
+            self.assertEqual(spawn.drive("/x", False), 0)
+            self.assertEqual(len(calls), 1, "무변화인데 두 번 띄웠다")
+        finally:
+            wakes.fresh, wakes.observed, spawn._spawn_one = old_fresh, old_obs, old_spawn
+
+    def test_stops_on_a_failed_session(self):
+        import wakes
+        row = wakes.Row("qa", "why", "qa|k", "sig-1")
+        old_fresh, old_spawn = wakes.fresh, spawn._spawn_one
+        wakes.fresh = self._fake_rows([row])
+        spawn._spawn_one = lambda *a, **k: 2
+        try:
+            self.assertEqual(spawn.drive("/x", False), 2)
+        finally:
+            wakes.fresh, spawn._spawn_one = old_fresh, old_spawn
+
+    def test_honours_the_runaway_limit(self):
+        import wakes
+        row = wakes.Row("qa", "why", "qa|k", "sig-1")
+        old_fresh, old_obs, old_spawn = wakes.fresh, wakes.observed, spawn._spawn_one
+        calls = []
+        wakes.fresh = self._fake_rows([row])
+        wakes.observed = lambda cwd: {"qa|k": "sig-1"}   # 항상 진전했다고 친다
+        spawn._spawn_one = lambda *a, **k: calls.append(a) or 0
+        try:
+            spawn.drive("/x", False, limit=3)
+            self.assertEqual(len(calls), 3)
+        finally:
+            wakes.fresh, wakes.observed, spawn._spawn_one = old_fresh, old_obs, old_spawn
 
 
 if __name__ == "__main__":
