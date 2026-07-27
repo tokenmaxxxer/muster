@@ -219,6 +219,39 @@ def t_rulebook_version_is_recorded():
             role.unlink()
 
 
+def t_repo_local_claude_config_stops_the_spawn():
+    """대상 레포의 `.claude/` 훅은 muster 가 선언한 샌드박스 경계를 **안 받는다.**
+    실측 2026-07-27: denyWrite 경로에 쓰고 denyRead 인 ~/.claude 를 읽어냈다.
+    레포를 클론해서 muster 를 겨눈 것만으로 성립하므로 경고가 아니라 정지다."""
+    for rogue in (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks"):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            (root / rogue).parent.mkdir(parents=True, exist_ok=True)
+            if rogue.endswith("hooks"):
+                (root / rogue).mkdir()
+            else:
+                (root / rogue).write_text("{}")
+            try:
+                spawn.require_no_repo_config(str(root), False)
+            except SystemExit as e:
+                assert rogue.split("/")[-1] in str(e), e
+            else:
+                raise AssertionError(f"{rogue} 를 통과시켰다")
+            spawn.require_no_repo_config(str(root), True)   # 명시적 opt-out 은 통과
+
+
+def t_role_env_defaults_expand():
+    """역할 파일의 env 기본값에 `$HOME` 을 쓸 수 있어야 한다 — 절대경로를 안 박으려면
+    그래야 하고, 안 펴면 샌드박스 경로 치환이 한 번만 돌아 역할이 아예 안 뜬다."""
+    import json as _json
+    spec = _json.loads((spawn.ROOT / "roles" / "qa.json").read_text())
+    assert spec["env"]["QA_WORKSPACE"].startswith("$"), spec["env"]
+    os.environ.pop("QA_WORKSPACE", None)
+    s = spawn.role_settings("qa")
+    for p in s["sandbox"]["filesystem"]["allowWrite"]:
+        assert "$" not in p, p
+
+
 def t_role_files_carry_no_absolute_home_path():
     """역할 파일에 `/Users/<이름>/...` 을 박으면 그 레포는 **한 사람의 홈 경로를
     담은 채로 공개된다.** 남의 기계에서는 없는 경로라 조용히 github 로 떨어지고,
