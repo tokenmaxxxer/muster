@@ -523,7 +523,7 @@ def _install_hint(missing: list[str]) -> str:
 ROLES = ("product", "ux-design", "feasibility", "coding", "qa",
          "review", "verify", "reflect", "ops")
 BOARD = "docs"                          # v3: subject trees live at docs/issue-<n>/
-CONTRACT = "docs/specs/role-handoff-contract.md"   # 레포-로컬 계약. 룰북 게이트가 찾는 자리
+MARKER = "docs/specs/approvers.md"      # 보드 opt-in + 승인자 allowlist (v3)
 # 계약 v1 이 쓰던 자리. 아직 v2 로 안 옮긴 레포를 **말해주기 위해서만** 본다
 LEGACY = {"review": "review-record.md", "feasibility": "feasibility-record.md",
           "ops": "state.md", "product": "product-record.md"}
@@ -539,90 +539,48 @@ def slug(cwd: str) -> str:
     return Path(cwd).resolve().name
 
 
-def _canonical() -> Path:
-    """The one canonical contract: core's. muster keeps no second copy —
-    two canonical copies was itself a hash-sync hazard."""
-    return core_root() / "core" / "contract" / "role-handoff-contract.md"
+def init_board(cwd: str, login: str | None = None) -> int:
+    """대상 레포를 보드로 선언한다: docs/specs/approvers.md 를 만든다.
 
-
-def _digest(p: Path) -> str:
-    import hashlib
-    try:
-        return hashlib.sha256(p.read_bytes()).hexdigest()[:12]
-    except OSError:
-        return ""
-
-
-def contract_drift(cwd: str) -> str | None:
-    """대상 레포의 계약이 정본과 다르면 그 사실을 돌려준다.
-
-    계약은 authority 문서인데 frontmatter 가 `status: final` 뿐이고 **버전이 없다.**
-    그래서 두 판이 나란히 `final` 을 선언하면서 188줄 다를 수 있었고, 실제로 그랬다
-    (2026-07-26: 345줄판 3개 / 533줄판 3개). 버전이 없으면 내용 해시가 유일하게
-    남는 판별 수단이다 — 문서를 고치지 않고도 갈라짐을 볼 수 있다.
-    """
-    theirs = _digest(Path(cwd).resolve() / CONTRACT)
-    ours = _digest(_canonical())
-    if not theirs or not ours or theirs == ours:
-        return None
-    return f"{theirs} (정본 {ours})"
-
-
-def init_contract(cwd: str) -> int:
-    """대상 레포에 정본 계약을 심는다. **muster 가 남의 레포에 쓰는 유일한 경우다.**
-
-    보드 기록은 절대 쓰지 않는다(protocol.md §1) — 그건 역할의 것이고, 밖에서
-    고치면 전이 게이트를 우회한다. 계약 파일은 상태가 아니라 **전제조건**이고,
-    없으면 역할이 조용히 계약 밖에서 도는 것이 실측으로 확인됐다.
+    v3: 계약 심기는 폐지됐다 — 정본은 core 플러그인에만 있고, 레포 사본은
+    해시 검사로 강제 동일해져 정보량이 0이었다. 보드 표식이자 승인자
+    allowlist 인 approvers.md 만 있으면 된다. **사용자의 파일이다** —
+    이미 있으면 절대 덮지 않는다.
     """
     root = Path(cwd).resolve()
-    dest = root / CONTRACT
+    dest = root / MARKER
     if dest.exists():
-        drift = contract_drift(cwd)
-        if drift is None:
-            print(f"이미 정본과 같다: {dest}")
-            return 0
-        print(f"이미 계약이 있는데 정본과 다르다: {drift}\n"
-              f"  {dest}\n"
-              f"  덮어쓰지 않는다 — 그 레포가 의도적으로 다른 판을 쓰는 중일 수 있다.",
-              file=sys.stderr)
-        return 1
+        print(f"이미 있다: {dest}")
+        return 0
+    if not login:
+        r = subprocess.run(["gh", "api", "user", "--jq", ".login"],
+                           capture_output=True, text=True)
+        login = r.stdout.strip() if r.returncode == 0 else ""
+    if not login:
+        sys.exit("승인자 로그인을 모른다. gh auth login 을 하거나 "
+                 "init --login <github-login> 으로 준다.")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(_canonical().read_bytes())
-    print(f"계약을 심었다: {dest}  ({_digest(dest)})")
+    dest.write_text(f"- {login}\n", encoding="utf-8")
+    print(f"보드로 선언했다: {dest}  (approver: {login})")
     return 0
 
 
-def require_contract(cwd: str, override: bool) -> None:
-    """대상 레포에 레포-로컬 계약이 있는지 본다. 없으면 멈춘다.
+def require_board(cwd: str, override: bool) -> None:
+    """대상 레포가 보드인지(approvers.md 가 있는지) 본다. 없으면 멈춘다.
 
-    실측 A/B (2026-07-26, 같은 프롬프트·같은 역할, 표적만 다름):
-
-      계약 없음  → product 가 `status: hypothesis-registered` 만 쓴다. 계약 §1 의
-                   공통 헤더(kind/subject/produced_by/upstream/loop_state)가
-                   **하나도 없어서** 보드에 아무것도 안 올라가고 다음 역할이
-                   영영 안 깨어난다.
-      계약 있음  → 프롬프트가 계약을 언급하지 않아도 전부 갖춰 쓴다. 감시자가
-                   다음 역할을 지목한다.
-
-    가르는 변수는 **파일 하나**다. 그리고 없을 때의 실패가 조용하다 — 세션은
-    종료 0 이고 산출물도 그럴듯해서, 파이프라인이 시작조차 안 했다는 것을
-    아무것도 말해주지 않는다. 한 세션을 통째로 버리는 값이다.
-
-    그래서 경고가 아니라 정지다. 계약을 안 쓰는 레포(그냥 코드만 짜게 하는
-    경우)는 --no-contract 로 **명시적으로** 빠져나간다 — 사고가 아니라 결정이 되게.
+    core 의 게이트가 어차피 보드·실행 쓰기를 거부하므로, 세션을 태우기 전에
+    같은 사실을 말해주는 것뿐이다 — 버려질 세션에 과금하지 않는다.
     """
+    root = Path(cwd).resolve()
+    if (root / MARKER).is_file():
+        return
     if override:
         return
-    root = Path(cwd).resolve()
-    if (root / CONTRACT).is_file():
-        return
     sys.exit(
-        f"대상 레포에 {CONTRACT} 가 없다: {root}\n"
-        f"  이대로 띄우면 역할이 계약 v2 헤더 없이 기록을 쓴다. 보드에 아무것도\n"
-        f"  올라가지 않고 다음 역할이 안 깨어나는데, 세션은 성공으로 끝난다(실측).\n"
-        f"  `python3 spawn.py init -C {cwd}` 로 정본을 심거나,\n"
-        f"  보드를 안 쓸 작업이면 --no-contract 로 명시한다.")
+        f"대상 레포에 {MARKER} 가 없다: {root}\n"
+        f"  이 파일이 보드 opt-in 이자 승인자 allowlist 다. 만들려면:\n"
+        f"    python3 spawn.py init -C {root}\n"
+        f"  보드를 안 쓸 작업이면 --no-contract 로 건너뛴다.")
 
 
 REPO_CONFIG = (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks",
@@ -709,12 +667,9 @@ def status(cwd: str) -> list[str]:
     root = Path(cwd).resolve()
     out = [f"프로젝트: {slug(cwd)}   경로: {root}"]
 
-    if not (root / CONTRACT).is_file():
-        out.append(f"⚠ {CONTRACT} 없음 — 역할이 계약 헤더 없이 기록을 쓴다(실측). "
-                   f"`spawn.py init` 으로 심는다.")
-    elif (drift := contract_drift(cwd)):
-        # 계약에 버전 필드가 없어서 해시가 유일한 판별 수단이다.
-        out.append(f"⚠ 이 레포의 계약이 정본과 다르다: {drift}")
+    if not (root / MARKER).is_file():
+        out.append(f"⚠ {MARKER} 없음 — 보드 opt-in 이자 승인자 allowlist 다. "
+                   f"`spawn.py init` 으로 만든다.")
     b = board(root)
     if b:
         for subject, roles in b.items():
@@ -1103,11 +1058,12 @@ def main() -> int:
                     help="wake: 이미 답해진 줄까지 보여준다 (계약 §6 억제를 푼다)")
     ap.add_argument("--limit", type=int, default=12,
                     help="drive: 한 번에 띄울 최대 횟수 (기본 12, 폭주 방지)")
+    ap.add_argument("--login", help="init: approvers.md 에 넣을 GitHub 로그인 (기본: gh api user)")
     a = ap.parse_args()
 
     if a.role == "init":
-        # 계약을 심는다. muster 가 남의 레포에 쓰는 유일한 경우.
-        return init_contract(a.cwd)
+        # 보드로 선언한다(approvers.md). muster 가 남의 레포에 쓰는 유일한 경우.
+        return init_board(a.cwd, a.login)
     if a.role == "update":
         # 룰북을 원격 최신으로. 인자를 비우면 전부.
         return update([a.task] if a.task else list(ROLES))
@@ -1127,7 +1083,7 @@ def main() -> int:
                  "  사용자와의 대화에서 gh pr review --approve / gh pr merge 로 중계한다.")
     if a.role == "drive":
         # 보드가 지목하는 역할을 하나씩, 멈출 때까지.
-        require_contract(a.cwd, a.no_contract)
+        require_board(a.cwd, a.no_contract)
         require_no_repo_config(a.cwd, a.trust_repo_config)
         require_doctor()
         return drive(a.cwd, a.unattended, a.limit)
@@ -1141,7 +1097,7 @@ def main() -> int:
 
     # --dry-run 은 세션을 안 태운다. 계약 검사는 버려질 세션을 막으려는 것이므로
     # 아무것도 안 띄우는 호출까지 막을 이유가 없다.
-    require_contract(a.cwd, a.no_contract or a.dry_run)
+    require_board(a.cwd, a.no_contract or a.dry_run)
     # 드라이런도 막는다 — 레포가 자기 훅을 들고 있으면 그건 세션을 띄우기
     # 전에 알아야 할 사실이지, 띄우고 나서 알 일이 아니다.
     require_no_repo_config(a.cwd, a.trust_repo_config)
