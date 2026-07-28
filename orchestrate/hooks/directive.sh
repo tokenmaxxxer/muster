@@ -11,7 +11,39 @@ case "${ORCHESTRATE_OFF:-}" in ""|0|false|no|off) ;; *) trap - EXIT; exit 0 ;; e
 # A spawned role session is never the orchestrator, even if the plugin leaks in.
 [ -z "${CLAUDE_ROLE:-}" ] || { trap - EXIT; exit 0; }
 
-MUSTER="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+# Resolve the muster checkout (spawn.py lives at the repo root, OUTSIDE the
+# plugin subtree — a cache install copies only orchestrate/, so the old
+# plugin-root/../.. guess pointed at nothing there). Order: dev override,
+# plugin-root ancestors, the marketplace clone, else self-clone.
+_muster_resolve() {
+  if [ -n "${TOKENMAXXXER_MUSTER:-}" ] && [ -f "${TOKENMAXXXER_MUSTER}/spawn.py" ]; then
+    printf '%s' "${TOKENMAXXXER_MUSTER}"; return 0
+  fi
+  d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  probe="$d"
+  for _ in 1 2 3 4; do
+    probe="$(dirname "$probe")"
+    if [ -f "$probe/spawn.py" ]; then printf '%s' "$probe"; return 0; fi
+  done
+  mk="$HOME/.claude/plugins/marketplaces/tokenmaxxxer-muster"
+  if [ -f "$mk/spawn.py" ]; then printf '%s' "$mk"; return 0; fi
+  own="$HOME/.claude/tokenmaxxxer/muster"
+  if [ -f "$own/spawn.py" ]; then printf '%s' "$own"; return 0; fi
+  mkdir -p "$(dirname "$own")" 2>/dev/null
+  git clone -q https://github.com/tokenmaxxxer/muster.git "$own" 2>/dev/null
+  if [ -f "$own/spawn.py" ]; then printf '%s' "$own"; return 0; fi
+  return 1
+}
+MUSTER="$(_muster_resolve || true)"
+if [ -z "$MUSTER" ]; then
+  cat <<'NOTE'
+[orchestrate] muster checkout not found and could not be cloned. Roles
+cannot be spawned this session — tell the user, and fix with:
+  git clone https://github.com/tokenmaxxxer/muster.git ~/.claude/tokenmaxxxer/muster
+NOTE
+  trap - EXIT
+  exit 0
+fi
 
 cat <<EOF
 [orchestrate] You are the orchestration session for the tokenmaxxxer
