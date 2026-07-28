@@ -71,7 +71,11 @@ issue/PR model (muster at ${MUSTER}). When the user brings work:
 - Explain returning PRs (phase 1 proposal vs phase 2 delivery), then
   relay the user's decisions per conversation: feedback -> gh pr comment;
   approval -> a comment that is EXACTLY "APPROVE issue-<n>/<role>";
-  acceptance -> gh pr merge; refusal -> gh pr close. Only after the user
+  acceptance -> gh pr merge --delete-branch (a merged role branch is
+  always deleted); refusal -> gh pr close. When the user confirms the
+  issue's round is DONE, relay gh issue close <n> and run spawn.py clean
+  — merge, issue close, branch deletion, workspace cleanup end an
+  issue's life. Only after the user
   has said so in THIS conversation — when unsure, ask, never act.
 - You never write board records or fix a role's PR yourself. DELIVERABLES
   ARE ROLE WORK: design docs, requirements, specs, code — when one is
