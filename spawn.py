@@ -1151,10 +1151,16 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
                        capture_output=True, text=True)
     origin = r.stdout.strip()
     # 샌드박스는 HTTP 프록시만 뚫려 있다 — ssh(22번)는 나갈 수 없으므로
-    # 작업 클론의 origin 은 항상 https 로 정규화한다.
-    m = re.match(r"^(?:ssh://)?git@github\.com[:/](.+?)(?:\.git)?$", origin)
-    if m:
-        origin = "https://github.com/%s.git" % m.group(1)
+    # 작업 클론의 origin 은 기본으로 https 로 정규화한다. 회사 정책이 ssh
+    # 원격만 허용하면 MUSTER_KEEP_SSH=1 로 끈다 — 그 경우 세션 안 push 는
+    # 실패하지만, 세션 뒤 muster 가 호스트 환경(사용자의 ssh 키)에서
+    # push/PR 를 대신한다(아래 ensure_pushed).
+    if os.environ.get("MUSTER_KEEP_SSH", "") not in ("", "0", "false", "no", "off"):
+        pass
+    else:
+        m = re.match(r"^(?:ssh://)?git@github\.com[:/](.+?)(?:\.git)?$", origin)
+        if m:
+            origin = "https://github.com/%s.git" % m.group(1)
     if not origin:
         sys.exit(f"대상 레포에 origin 원격이 없다: {src} — 이슈/PR 모델은 "
                  f"GitHub 원격이 전제다 (계약 v3 s10)")
@@ -1201,6 +1207,45 @@ def checkout_issue_branch(cwd: str, issue: int, role: str) -> str:
     if r.returncode != 0:
         sys.exit(f"브랜치 {br} 로 못 갈아탔다: {r.stderr.strip()[:200]}")
     return br
+
+
+def ensure_pushed(work: str, issue: int, role: str) -> None:
+    """세션이 남긴 커밋을 호스트 환경에서 push 하고, PR 이 없으면 연다.
+
+    샌드박스의 GitHub egress 는 환경마다 다르게 막힌다(https 프록시 403,
+    ssh-only 정책, 키링 불가시 등 — 전부 실측). 산출물이 로컬 커밋으로만
+    남으면 보드에 존재하지 않는 것과 같으므로, muster 가 세션 종료 후
+    바깥에서 릴레이한다. 역할이 스스로 push/PR 에 성공했으면 전부 no-op.
+    """
+    br = f"issue-{issue}/{role}"
+    def git(*a):
+        return subprocess.run(["git", "-C", work, *a], capture_output=True, text=True)
+    if git("rev-parse", "--verify", "-q", br).returncode != 0:
+        return
+    ahead = git("rev-list", "--count", f"origin/{br}..{br}")
+    unborn = ahead.returncode != 0          # 원격에 브랜치 자체가 없음
+    n = ahead.stdout.strip() if ahead.returncode == 0 else "?"
+    if unborn or n not in ("", "0"):
+        r = git("push", "-q", "-u", "origin", br)
+        if r.returncode != 0:
+            print(f"[{role}] 호스트 push 실패: {r.stderr.strip()[:200]}", file=sys.stderr)
+            return
+        print(f"[{role}] 호스트에서 push 했다: {br}", file=sys.stderr)
+    pr = subprocess.run(["gh", "pr", "view", br, "--json", "number"],
+                        capture_output=True, text=True, cwd=work)
+    if pr.returncode != 0:
+        body = (f"Closes #{issue}.\n\nOpened by muster on behalf of the "
+                f"{role} role session (sandbox egress relay); the branch "
+                f"content is the role's own work.")
+        c = subprocess.run(["gh", "pr", "create", "--head", br,
+                            "--title", f"[{br}] phase 1",
+                            "--body", body],
+                           capture_output=True, text=True, cwd=work)
+        if c.returncode == 0:
+            print(f"[{role}] PR 을 열었다: {c.stdout.strip().splitlines()[-1] if c.stdout.strip() else br}",
+                  file=sys.stderr)
+        else:
+            print(f"[{role}] PR 생성 실패: {c.stderr.strip()[:200]}", file=sys.stderr)
 
 
 def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
@@ -1273,6 +1318,8 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     except Exception:
         blocked = []       # 분류 보조일 뿐, 평가 실패로 스폰 결과를 잃지 않는다
 
+    if issue is not None:
+        ensure_pushed(cwd, issue, role)
     gates = gate_report(cwd) + ownership_report(cwd, role, delta)
     outcome = classify(rc, result, delta, blocked)
     denials = result.get("permission_denials") or []
