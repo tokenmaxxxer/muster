@@ -13,6 +13,7 @@ spec 이 없다. spec 없음을 라우터 규칙에 그대로 넣으면 fail clo
   python3 gates/ci.py [<repo 경로>]     # 기본값: 현재 디렉터리
   종료 코드 0 통과 / 1 차단
 """
+from __future__ import annotations
 import sys
 from pathlib import Path
 
