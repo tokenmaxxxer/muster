@@ -1423,7 +1423,10 @@ def ensure_pushed(work: str, issue: int, role: str) -> None:
                         capture_output=True, text=True, cwd=work)
     has_open = pr.returncode == 0 and pr.stdout.strip() not in ("", "0")
     if not has_open:
-        body = (f"Closes #{issue}.\n\nOpened by muster on behalf of the "
+        # 참조만 한다 — Closes 를 박으면 record PR 하나가 머지되는 순간
+        # 이슈가 조기에 닫힌다(실측 직전 발견). 이슈 닫기는 라운드가 끝났을
+        # 때 사람의 행위다 (계약 s8).
+        body = (f"Part of #{issue}.\n\nOpened by muster on behalf of the "
                 f"{role} role session (sandbox egress relay); the branch "
                 f"content is the role's own work.")
         c = subprocess.run(["gh", "pr", "create", "--head", br,
