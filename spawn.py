@@ -1048,9 +1048,21 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
     # account. MUSTER_AGENT_GH_TOKEN, if set, becomes the session's GH_TOKEN
     # so gh in the container/sandbox authenticates as the agent — never the
     # user. gh-guard denies the human's acts in role sessions regardless.
+    # 샌드박스 안에서는 macOS 키링이 안 보여 gh 토큰이 무효로 읽힌다(실측).
+    # 그래서 토큰을 env 로 명시 주입한다: 에이전트 토큰이 있으면 그것,
+    # 없으면(1계정 기본) 사용자의 gh 토큰을 꺼내 넘긴다. gh-guard 가
+    # 역할 세션의 사람-행위 명령은 어차피 막는다.
     agent_token = os.environ.get("MUSTER_AGENT_GH_TOKEN")
+    if not agent_token:
+        try:
+            t = subprocess.run(["gh", "auth", "token"], capture_output=True,
+                               text=True, timeout=15)
+            agent_token = t.stdout.strip() if t.returncode == 0 else ""
+        except Exception:
+            agent_token = ""
     if agent_token:
         env["GH_TOKEN"] = agent_token
+        env["GIT_TERMINAL_PROMPT"] = "0"
     if unattended:
         env["TOKENMAXXXER_UNATTENDED"] = "1"
     return cmd, env
@@ -1138,6 +1150,11 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
     r = subprocess.run(["git", "-C", str(src), "remote", "get-url", "origin"],
                        capture_output=True, text=True)
     origin = r.stdout.strip()
+    # 샌드박스는 HTTP 프록시만 뚫려 있다 — ssh(22번)는 나갈 수 없으므로
+    # 작업 클론의 origin 은 항상 https 로 정규화한다.
+    m = re.match(r"^(?:ssh://)?git@github\.com[:/](.+?)(?:\.git)?$", origin)
+    if m:
+        origin = "https://github.com/%s.git" % m.group(1)
     if not origin:
         sys.exit(f"대상 레포에 origin 원격이 없다: {src} — 이슈/PR 모델은 "
                  f"GitHub 원격이 전제다 (계약 v3 s10)")
@@ -1153,6 +1170,11 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
         sys.exit(f"작업 클론을 만들지 못했다: {c.stderr.strip()[:200]}")
     subprocess.run(["git", "-C", str(work), "remote", "set-url", "origin",
                     origin], capture_output=True, text=True)
+    # https push 자격증명: 디스크에 토큰을 남기지 않고 env(GH_TOKEN)를 읽는
+    # credential helper 를 작업 클론에만 심는다.
+    subprocess.run(["git", "-C", str(work), "config", "credential.helper",
+                    "!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f"],
+                   capture_output=True, text=True)
     subprocess.run(["git", "-C", str(work), "fetch", "-q", "origin"],
                    capture_output=True, text=True)
     return str(work)
