@@ -412,7 +412,11 @@ def rulebook_version(role: str) -> str:
     """
     spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
     if issue is not None:
+        # 격리 작업 클론에서 돈다 — 사용자의 체크아웃은 건드리지 않고,
+        # 동시 스폰들이 서로의 index/브랜치를 밟지 않는다.
+        cwd = issue_workspace(cwd, issue, role)
         br = checkout_issue_branch(cwd, issue, role)
+        print(f"[{role}] 격리 작업 디렉토리: {cwd}  (브랜치 {br})", file=sys.stderr)
         task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
                 f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n\n") + task
     d = rulebook_dir(spec)
@@ -1120,6 +1124,40 @@ def main() -> int:
     return _spawn_one(a.cwd, a.role, a.task, a.unattended, a.issue)
 
 
+def issue_workspace(cwd: str, issue: int, role: str) -> str:
+    """이슈 스폰마다 muster 소유의 격리 클론을 만든다.
+
+    산출물이 PR 로만 돌아오는 모델에서 역할 세션이 사용자의 체크아웃을
+    공유할 이유가 없다 — 공유하면 동시 스폰 둘이 같은 .git/index 와 현재
+    브랜치를 두고 경합한다(실측: issue-45 와 issue-59 coding 세션이 한
+    트리에서 충돌 직전까지 갔다). 로컬에서 클론하고 origin 을 실제 원격으로
+    되돌려 push/gh 가 GitHub 로 가게 한다. 재스폰이면 기존 작업 디렉토리를
+    fetch 로 재사용한다 — 진행 중이던 브랜치 작업을 버리지 않는다.
+    """
+    src = Path(cwd).resolve()
+    r = subprocess.run(["git", "-C", str(src), "remote", "get-url", "origin"],
+                       capture_output=True, text=True)
+    origin = r.stdout.strip()
+    if not origin:
+        sys.exit(f"대상 레포에 origin 원격이 없다: {src} — 이슈/PR 모델은 "
+                 f"GitHub 원격이 전제다 (계약 v3 s10)")
+    work = ROOT / "runs" / "work" / f"{slug(cwd)}-issue-{issue}-{role}"
+    if (work / ".git").exists():
+        subprocess.run(["git", "-C", str(work), "fetch", "-q", "origin"],
+                       capture_output=True, text=True)
+        return str(work)
+    work.parent.mkdir(parents=True, exist_ok=True)
+    c = subprocess.run(["git", "clone", "-q", str(src), str(work)],
+                       capture_output=True, text=True)
+    if c.returncode != 0:
+        sys.exit(f"작업 클론을 만들지 못했다: {c.stderr.strip()[:200]}")
+    subprocess.run(["git", "-C", str(work), "remote", "set-url", "origin",
+                    origin], capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(work), "fetch", "-q", "origin"],
+                   capture_output=True, text=True)
+    return str(work)
+
+
 def checkout_issue_branch(cwd: str, issue: int, role: str) -> str:
     """대상 레포에서 issue-<n>/<역할> 브랜치를 만든다(있으면 갈아탄다).
 
@@ -1153,11 +1191,19 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     import wakes          # wakes 가 spawn 을 import 한다 — 여기서만 끌어온다
     spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
     if issue is not None:
+        # 격리 작업 클론에서 돈다 — 사용자의 체크아웃은 건드리지 않고,
+        # 동시 스폰들이 서로의 index/브랜치를 밟지 않는다.
+        cwd = issue_workspace(cwd, issue, role)
         br = checkout_issue_branch(cwd, issue, role)
+        print(f"[{role}] 격리 작업 디렉토리: {cwd}  (브랜치 {br})", file=sys.stderr)
         task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
                 f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n\n") + task
     if issue is not None:
+        # 격리 작업 클론에서 돈다 — 사용자의 체크아웃은 건드리지 않고,
+        # 동시 스폰들이 서로의 index/브랜치를 밟지 않는다.
+        cwd = issue_workspace(cwd, issue, role)
         br = checkout_issue_branch(cwd, issue, role)
+        print(f"[{role}] 격리 작업 디렉토리: {cwd}  (브랜치 {br})", file=sys.stderr)
         task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
                 f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n\n") + task
     plugins = plugin_dirs(role, spec)
