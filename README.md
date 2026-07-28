@@ -25,6 +25,35 @@ gates/        deterministic checks, run by spawn.py after a session. Zero LLM ca
 ledger/       the scorecard
 ```
 
+## Getting started (what the user actually sets up)
+
+Once, per machine:
+
+1. `gh auth login` — your own account (this is what approves and merges).
+2. A machine account for the agents: create one GitHub account, invite it
+   to your target repos (write), issue a fine-grained PAT, and
+   `export MUSTER_AGENT_GH_TOKEN=<pat>`. Role sessions authenticate as it;
+   it is never listed in approvers.md, so it can approve nothing.
+3. `git clone tokenmaxxxer/muster` and, in your conversational session:
+   `claude plugin marketplace add tokenmaxxxer/muster` +
+   `claude plugin install orchestrate@tokenmaxxxer-muster`.
+4. `python3 muster/spawn.py doctor` — once per CLI version.
+
+Rulebooks and tokenmaxxxer-core need NO manual clones: spawn fetches and
+ff-updates them under `muster/runs/rulebooks/` automatically (a local
+checkout, if present, wins — that is the development override).
+
+Once, per target repo:
+
+1. A GitHub remote (`gh repo create --private --source . --push` if
+   local-only).
+2. `python3 muster/spawn.py init -C <repo>` — plants core's canonical
+   contract.
+3. `docs/specs/approvers.md` — one line: `- <your-github-login>`.
+4. (Recommended) branch protection on main: PRs required.
+
+Then everything is conversation: `/orchestrate:run`.
+
 v3 notes: the board is `docs/issue-<n>/reports/<role>.md` in the target
 repo, `main`-merged only; the canonical contract lives in
 tokenmaxxxer-core (muster keeps no copy; `spawn.py init` plants core's);

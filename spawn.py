@@ -891,10 +891,27 @@ def core_root() -> Path:
             continue
         if (p / "core" / ".claude-plugin" / "plugin.json").is_file():
             return p
+    # 로컬 체크아웃이 없으면 룰북과 같은 길: muster 소유 클론을 받아 쓴다.
+    # 로컬 우선은 개발용 오버라이드일 뿐이다.
+    d = ROOT / "runs" / "rulebooks" / "tokenmaxxxer-core"
+    if (d / "core" / ".claude-plugin" / "plugin.json").is_file():
+        subprocess.run(["git", "-C", str(d), "pull", "-q", "--ff-only"],
+                       capture_output=True)
+        return d
+    try:
+        d.parent.mkdir(parents=True, exist_ok=True)
+        print("[core] tokenmaxxxer-core 를 받는 중", file=sys.stderr)
+        subprocess.run(["git", "clone", "-q",
+                        "https://github.com/tokenmaxxxer/tokenmaxxxer-core.git",
+                        str(d)], capture_output=True, text=True)
+    except OSError:
+        pass
+    if (d / "core" / ".claude-plugin" / "plugin.json").is_file():
+        return d
     sys.exit(
-        "tokenmaxxxer-core 를 찾지 못했다. 역할 세션은 core 없이 뜨지 않는다 —\n"
-        "  프로토콜 게이트와 정본 계약이 거기 있다.\n"
-        "  체크아웃을 두고 $TOKENMAXXXER_CORE 로 가리켜라.")
+        "tokenmaxxxer-core 를 찾지 못했고 받지도 못했다. 역할 세션은 core 없이\n"
+        "  뜨지 않는다 — 프로토콜 게이트와 정본 계약이 거기 있다.\n"
+        "  네트워크를 확인하거나 체크아웃을 두고 $TOKENMAXXXER_CORE 로 가리켜라.")
 
 
 def core_plugin_dirs() -> list[Path]:
