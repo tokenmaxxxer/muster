@@ -30,9 +30,12 @@ ledger/       the scorecard
 Once, per machine:
 
 1. `gh auth login` — your own account (this is what approves and merges).
-2. `git clone tokenmaxxxer/muster` and, in your conversational session:
+2. In your conversational session:
    `claude plugin marketplace add tokenmaxxxer/muster` +
    `claude plugin install orchestrate@tokenmaxxxer-muster`.
+   No clone needed — the marketplace add IS the clone, and the orchestrate
+   plugin drives spawn.py from inside it. A manual checkout is only for
+   developing muster itself.
 (`spawn.py doctor` — the probe that verifies plugin hooks actually fire
 headless on the current CLI version — runs automatically on the first
 spawn after a CLI update; one small probe session. Manual run optional.)
