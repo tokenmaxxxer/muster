@@ -1415,14 +1415,19 @@ def ensure_pushed(work: str, issue: int, role: str) -> None:
             print(f"[{role}] 호스트 push 실패: {r.stderr.strip()[:200]}", file=sys.stderr)
             return
         print(f"[{role}] 호스트에서 push 했다: {br}", file=sys.stderr)
-    pr = subprocess.run(["gh", "pr", "view", br, "--json", "number"],
+    # "PR 있음" 판정은 OPEN 만 센다 — gh pr view <브랜치> 는 같은 브랜치의
+    # 머지된 과거 PR(phase 1)도 잡아서, phase 2 의 새 PR 생성을 조용히
+    # 건너뛰게 했다(실측: #60 머지 후 phase 2 커밋이 PR 없이 남았다).
+    pr = subprocess.run(["gh", "pr", "list", "--head", br, "--state", "open",
+                         "--json", "number", "--jq", "length"],
                         capture_output=True, text=True, cwd=work)
-    if pr.returncode != 0:
+    has_open = pr.returncode == 0 and pr.stdout.strip() not in ("", "0")
+    if not has_open:
         body = (f"Closes #{issue}.\n\nOpened by muster on behalf of the "
                 f"{role} role session (sandbox egress relay); the branch "
                 f"content is the role's own work.")
         c = subprocess.run(["gh", "pr", "create", "--head", br,
-                            "--title", f"[{br}] phase 1",
+                            "--title", f"[{br}]",
                             "--body", body],
                            capture_output=True, text=True, cwd=work)
         if c.returncode == 0:
