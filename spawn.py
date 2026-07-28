@@ -1161,7 +1161,13 @@ def main() -> int:
         return drive(a.cwd, a.unattended, a.limit)
     if not a.role:
         print("\n".join(status(a.cwd)))
-        print("\n역할: " + ", ".join(sorted(p.stem for p in (ROOT / "roles").glob("*.json"))))
+        print("\n역할:")
+        for p in sorted((ROOT / "roles").glob("*.json")):
+            try:
+                meta = json.loads(p.read_text())
+            except ValueError:
+                meta = {}
+            print(f"  {p.stem:12s} {meta.get('decides','')}  — {meta.get('use_when','')}")
         print("보드가 누구를 깨우는지: spawn.py wake")
         return 0
     if not a.task:
