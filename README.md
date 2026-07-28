@@ -43,14 +43,16 @@ Rulebooks and tokenmaxxxer-core need NO manual clones: spawn fetches and
 ff-updates them under `muster/runs/rulebooks/` automatically (a local
 checkout, if present, wins — that is the development override).
 
-Once, per target repo:
+Once, per target repo — and the orchestrator offers to do all of it in
+conversation when it finds a piece missing:
 
 1. A GitHub remote (`gh repo create --private --source . --push` if
    local-only).
-2. `python3 muster/spawn.py init -C <repo>` — writes
-   `docs/specs/approvers.md` (the board opt-in + approver allowlist) with
-   your gh login. One line; you can also just create it by hand.
-3. (Recommended) branch protection on main: PRs required.
+2. `docs/specs/approvers.md` — the approver allowlist (and board opt-in).
+   `python3 muster/spawn.py init -C <repo>` writes it from your gh login,
+   or the orchestrate session creates it for you after confirming.
+3. Invite the agent machine account as a collaborator (write).
+4. (Recommended) branch protection on main: PRs required.
 
 Then everything is conversation: `/orchestrate:run`.
 

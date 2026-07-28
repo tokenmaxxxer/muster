@@ -40,9 +40,18 @@ argument-hint: "[역할 [맡길 일]] — 예: coding \"issue 7 진행\" | 비�
 1. **역할이 맞는가.** qa 는 제품을 실행하고, coding 은 코드를 쓰고, review 는
    읽기만 한다. 요청과 역할이 어긋나면 띄우지 말고 되물어라.
 2. **이슈가 있는가.** 역할은 이슈 없이 시작하지 않는다. 없으면 1번부터.
-3. **전제조건.** 대상 레포에 GitHub 원격 +
-   `docs/specs/approvers.md`(보드 opt-in 이자 승인자 allowlist —
-   `spawn.py init` 이 만들어준다)가 있어야 한다.
+3. **전제조건 — 없으면 대화로 채운다.**
+   - GitHub 원격이 없으면: `gh repo create --private --source . --push` 를
+     제안하고, 사용자가 좋다고 하면 실행한다.
+   - `docs/specs/approvers.md` 가 없으면: 이 레포를 보드로 선언해야 한다고
+     말하고, `gh api user --jq .login` 으로 읽은 사용자의 로그인을 승인자로
+     확인받은 뒤 `python3 $MUSTER/spawn.py init -C <레포>` 로 만들고
+     main 에 커밋·푸시한다 (이 파일 하나는 PR 없이 직접 가도 된다 —
+     사용자의 파일을 사용자의 확인 아래 쓰는 것이고, 아직 보드가 아니라
+     게이트도 없다). 승인자를 추가하고 싶다면 줄을 더한다.
+   - 에이전트 머신 계정이 이 레포의 collaborator 가 아니면 초대가 필요하다고
+     알린다 (`gh api repos/<o>/<r>/collaborators/<agent> -X PUT`).
+   전부 사용자의 확인을 받고 실행한다 — 조용히 만들지 않는다.
 
 ## 하지 않는 것
 
