@@ -2,25 +2,70 @@
 
 *[한국어](README.ko.md)*
 
-Musters a role — brings up one sandboxed session with only that role's rulebook installed.
+Musters a role — brings up one sandboxed session with only that role's
+rulebook and the tokenmaxxxer-core plugins installed.
 
-Not a dispatcher. A power outlet. **Each role owns its state; muster only reads it.**
+Not a dispatcher. A power outlet with a concierge: on contract v3 the
+orchestration session (this marketplace's `orchestrate` plugin) talks to
+the user, drafts issues the user dictates, spawns role sessions, explains
+the PRs that come back, and relays the user's decisions — comments,
+review Approve, merge — with the user's own account. Role sessions run on
+the AGENT account (`MUSTER_AGENT_GH_TOKEN`), work on `issue-<n>/<role>`
+branches, and return everything by PR. **Each role owns its state; muster
+only reads it.**
 
 ```
 protocol.md   the contract — muster's three jobs, the state-exposure deal, isolation
-              (protocol.ko.md is the same contract in Korean)
 roles/        one role is one file: rulebook bundle plus sandbox boundary
 spawn.py      reads state, brings up a session in a role's environment
-orchestrate/  the plugin that calls it from a conversation (/orchestrate:run)
-wakes.py      evaluates contract §3's WAKES-ON table: whom does the board wake
-bench/        ablation runner — same target, rulebook on and off
+              (--issue <n> creates the branch and anchors the prompt)
+orchestrate/  the plugin that drives the loop from a conversation (/orchestrate:run)
+wakes.py      evaluates contract s3's WAKES-ON table: whom does the board wake
 gates/        deterministic checks, run by spawn.py after a session. Zero LLM calls
 ledger/       the scorecard
 ```
 
-*On the name: this was `harness`, but in this organisation "harness" already means
-the rulebook stack and `qa-agent-rulebook/bench`. Names that collide make documents
-unable to point at each other.*
+## Getting started (what the user actually sets up)
+
+Once, per machine:
+
+1. `gh auth login` — your own account (this is what approves and merges).
+2. `git clone tokenmaxxxer/muster` and, in your conversational session:
+   `claude plugin marketplace add tokenmaxxxer/muster` +
+   `claude plugin install orchestrate@tokenmaxxxer-muster`.
+(`spawn.py doctor` — the probe that verifies plugin hooks actually fire
+headless on the current CLI version — runs automatically on the first
+spawn after a CLI update; one small probe session. Manual run optional.)
+
+Optional hardening: a separate agent identity (machine-account PAT via
+`export MUSTER_AGENT_GH_TOKEN=<pat>`, or a GitHub App) moves the
+agent/human split from the session layer (gh-guard) to the account layer.
+The default needs neither — one account, everything in conversation.
+
+Rulebooks and tokenmaxxxer-core need NO manual clones: spawn fetches and
+ff-updates them under `muster/runs/rulebooks/` automatically (a local
+checkout, if present, wins — that is the development override).
+
+Once, per target repo — and the orchestrator offers to do all of it in
+conversation when it finds a piece missing:
+
+1. A GitHub remote (`gh repo create --private --source . --push` if
+   local-only).
+2. `docs/specs/approvers.md` — the approver allowlist (and board opt-in).
+   `python3 muster/spawn.py init -C <repo>` writes it from your gh login,
+   or the orchestrate session creates it for you after confirming.
+3. (Recommended) branch protection on main: PRs required. (Only with the
+   optional agent account: invite it as a collaborator.)
+
+Then everything is conversation: `/orchestrate:run`.
+
+v3 notes: the board is `docs/issue-<n>/reports/<role>.md` in the target
+repo, `main`-merged only; the canonical contract lives ONLY in
+tokenmaxxxer-core — repos carry no copy; the board marker is
+docs/specs/approvers.md (`spawn.py init` writes it);
+`spawn.py approve` is gone — approval is a GitHub act the orchestrator
+relays; core's four plugins (core/terse/freelunch/scout) attach to every
+role session via --plugin-dir.
 
 ## Why this exists
 
@@ -132,32 +177,31 @@ rather than silently tolerated:
   user-scope uninstall reports success and leaves the entry in place. Uninstall the
   bundle with `--scope local` from that project.
 
-### Before the first run: the target repo needs the contract
+### Before the first run: the target repo needs its board opt-in
 
-Every role reads and writes the shared board defined by
-`docs/specs/role-handoff-contract.md`, and each rulebook's gate looks for that file
-**in the repository being worked on**. Without it a role still runs and still
-produces good-looking output — but with none of the contract's common header, so
-nothing lands on the board and no other role ever wakes. The session exits 0 and
-says nothing about it.
-
-`spawn.py` therefore refuses to start:
+Every role reads and writes the board (`docs/issue-<n>/reports/…`), and
+core's gates require the repo to carry `docs/specs/approvers.md` — the
+user-authored file that both declares "this repository is a board" and
+lists the human approvers. Without it, a role session's board and
+execution writes are refused (fail-closed), so `spawn.py` refuses to
+start rather than burn a doomed session:
 
 ```
 $ python3 spawn.py product "…" -C ~/work/new-app
-대상 레포에 docs/specs/role-handoff-contract.md 가 없다: …
+대상 레포에 docs/specs/approvers.md 가 없다: …
 ```
 
-Seed it once per project:
+Seed it once per project (`init` uses your gh login, or pass `--login`):
 
 ```bash
 python3 spawn.py init -C ~/work/new-app
 ```
 
-muster carries the canonical copy in `contract/`, and this is **the only thing it
-writes into someone else's repository** — board records are never written from
-here, because those belong to a role and editing them from outside routes around
-its gate. A contract file is a precondition, not state.
+This is **the only thing muster writes into someone else's repository** —
+board records are never written from here, because those belong to a role
+and editing them from outside routes around its gate. The canonical
+role-handoff contract lives only in tokenmaxxxer-core; repos carry no
+copy.
 
 It refuses to overwrite a contract that differs from canonical: a repo may be
 deliberately on another version, and replacing it silently would be the same

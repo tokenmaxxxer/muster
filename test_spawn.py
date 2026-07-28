@@ -47,9 +47,11 @@ class SpawnCmd(unittest.TestCase):
         # nothing is installed, so the cache-vs-clone divergence and the
         # registry-name-wins trap never enter this path.
         cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False,
-                                 core="/x/tokenmaxxxer-core/core")
-        self.assertEqual(cmd[cmd.index("--plugin-dir") + 1],
-                         "/x/tokenmaxxxer-core/core")
+                                 core_plugins=["/x/tokenmaxxxer-core/core",
+                                               "/x/tokenmaxxxer-core/terse"])
+        dirs = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "--plugin-dir"]
+        self.assertIn("/x/tokenmaxxxer-core/core", dirs)
+        self.assertIn("/x/tokenmaxxxer-core/terse", dirs)
 
     def test_core_dir_resolves_or_halts(self):
         # A role session without core loses token forgery protection and the
@@ -63,7 +65,7 @@ class SpawnCmd(unittest.TestCase):
         try:
             os.environ["TOKENMAXXXER_CORE"] = "/nonexistent/core"
             with self.assertRaises(SystemExit):
-                spawn.core_dir()
+                spawn.core_root()
         finally:
             spawn.ROOT = saved_root
             os.environ.pop("TOKENMAXXXER_CORE", None)
@@ -90,7 +92,7 @@ class SpawnCmd(unittest.TestCase):
 class BoardSnapshot(unittest.TestCase):
     def test_delta_shows_changed_and_new(self):
         with tempfile.TemporaryDirectory() as td:
-            rec = Path(td) / spawn.BOARD / "alpha"
+            rec = Path(td) / spawn.BOARD / "issue-3" / "reports"
             rec.mkdir(parents=True)
             (rec / "qa.md").write_text("loop_state: probing\n")
             before = spawn.board_snapshot(td)
@@ -98,8 +100,8 @@ class BoardSnapshot(unittest.TestCase):
             (rec / "coding.md").write_text("new\n")
             after = spawn.board_snapshot(td)
             delta = sorted(p for p in after if after.get(p) != before.get(p))
-            self.assertEqual(delta, [f"{spawn.BOARD}/alpha/coding.md",
-                                     f"{spawn.BOARD}/alpha/qa.md"])
+            self.assertEqual(delta, [f"{spawn.BOARD}/issue-3/reports/coding.md",
+                                     f"{spawn.BOARD}/issue-3/reports/qa.md"])
 
     def test_no_board_is_empty(self):
         with tempfile.TemporaryDirectory() as td:
@@ -177,16 +179,17 @@ class OwnershipReport(unittest.TestCase):
 
     def test_own_record_and_subtree_are_silent(self):
         self.assertEqual(spawn.ownership_report(
-            "/x", "qa", [f"{self.B}/alpha/qa.md", f"{self.B}/alpha/qa/run.log"]), [])
+            "/x", "qa", [f"{self.B}/issue-3/reports/qa.md",
+                         f"{self.B}/issue-3/reports/qa/run.log"]), [])
 
     def test_foreign_record_is_named(self):
-        out = spawn.ownership_report("/x", "qa", [f"{self.B}/alpha/coding.md"])
+        out = spawn.ownership_report("/x", "qa",
+                                     [f"{self.B}/issue-3/reports/coding.md"])
         self.assertTrue(out and "coding.md" in out[1])
 
-    def test_a_token_is_called_a_forgery(self):
-        out = spawn.ownership_report(
-            "/x", "qa", [f"{self.B}/alpha/tokens/scope-proposed--scope-approved.token"])
-        self.assertIn("위조", "\n".join(out))
+    def test_granted_subtrees_are_silent(self):
+        self.assertEqual(spawn.ownership_report(
+            "/x", "ops", [f"{self.B}/issue-3/reports/postmortems/x.md"]), [])
 
     def test_paths_outside_the_board_are_not_its_business(self):
         self.assertEqual(spawn.ownership_report("/x", "qa", ["src/app.py"]), [])
@@ -230,93 +233,6 @@ class RequireDoctor(unittest.TestCase):
             finally:
                 spawn.ROOT = old
 
-
-class _TTY(io.StringIO):
-    """터미널인 척하는 stdin. approve 의 가드는 isatty() 하나뿐이라 이것으로
-    긍정 경로까지 검사할 수 있다."""
-    def isatty(self):
-        return True
-
-
-def _repo_with_contract(td):
-    root = Path(td) / "repo"
-    (root / "docs" / "specs").mkdir(parents=True)
-    src = spawn.ROOT / "contract" / "role-handoff-contract.md"
-    (root / "docs" / "specs" / "role-handoff-contract.md").write_bytes(src.read_bytes())
-    return root
-
-
-class Approve(unittest.TestCase):
-    KIND, SUB = "scope-proposed--scope-approved", "alpha"
-
-    def _run(self, root, typed, kind=None, subject=None):
-        old = sys.stdin
-        sys.stdin = _TTY(typed + "\n")
-        try:
-            # None 과 "" 를 구분한다 — `or` 로 기본값을 주면 빈 문자열 케이스가
-            # 조용히 유효한 값으로 바뀌어 검사가 성립하지 않는다.
-            return spawn.approve(str(root),
-                                 self.KIND if kind is None else kind,
-                                 self.SUB if subject is None else subject)
-        finally:
-            sys.stdin = old
-
-    def _token(self, root):
-        p = root / spawn.BOARD / self.SUB / "tokens" / (self.KIND + ".token")
-        return p.read_text() if p.exists() else None
-
-    def test_no_tty_refuses(self):
-        # 모델이 이 명령을 부르면 stdin 이 TTY 가 아니다 (실측 2026-07-27).
-        with tempfile.TemporaryDirectory() as td:
-            root = _repo_with_contract(td)
-            old, sys.stdin = sys.stdin, io.StringIO("APPROVE x y\n")
-            try:
-                with self.assertRaises(SystemExit):
-                    spawn.approve(str(root), self.KIND, self.SUB)
-            finally:
-                sys.stdin = old
-
-    def test_exact_line_mints_a_consumable_token(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = _repo_with_contract(td)
-            rc = self._run(root, f"APPROVE {self.KIND} {self.SUB}")
-            self.assertEqual(rc, 0)
-            t = self._token(root)
-            self.assertIn("actor: user", t)
-            self.assertIn(f"kind: {self.KIND}", t)
-            self.assertIn(f"subject: {self.SUB}", t)
-            # core 가 실제로 읽고 소비할 수 있어야 한다 — 형식을 손으로 베낀
-            # 두 번째 구현이 되면 안 된다.
-            sys.path.insert(0, str(spawn.core_dir() / "hooks" / "lib"))
-            import consent
-            d = str(root / spawn.BOARD / self.SUB / "tokens")
-            got = consent.consume(d, self.KIND, subject=self.SUB)
-            self.assertEqual(got["actor"], "user")
-            self.assertIsNone(consent.find(d, self.KIND))
-
-    def test_the_token_is_not_committable(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = _repo_with_contract(td)
-            self._run(root, f"APPROVE {self.KIND} {self.SUB}")
-            ig = root / spawn.BOARD / self.SUB / "tokens" / ".gitignore"
-            self.assertEqual(ig.read_text().strip(), "*")
-
-    def test_anything_but_the_exact_line_mints_nothing(self):
-        for typed in ("approve scope-proposed--scope-approved alpha",
-                      "APPROVE scope-proposed--scope-approved alpha please",
-                      "yes", ""):
-            with tempfile.TemporaryDirectory() as td:
-                root = _repo_with_contract(td)
-                self.assertEqual(self._run(root, typed), 1, typed)
-                self.assertIsNone(self._token(root), typed)
-
-    def test_unsafe_identifiers_refused(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = _repo_with_contract(td)
-            for k, s in (("../escape", "alpha"), (self.KIND, "../escape"),
-                         ("", "alpha"), (self.KIND, "")):
-                with self.assertRaises(SystemExit):
-                    self._run(root, "x", kind=k, subject=s)
 
 
 class Drive(unittest.TestCase):

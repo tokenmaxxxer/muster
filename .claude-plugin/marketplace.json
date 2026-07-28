@@ -7,7 +7,7 @@
     {
       "name": "orchestrate",
       "source": "./orchestrate",
-      "description": "대화에서 역할별 에이전트를 띄운다. 대상 레포의 블랙보드(docs/reports/records/<subject>/<역할>.md)를 읽어 각 역할의 loop_state 와 계약 §3 이 누구를 깨웠는지 보여주고, 그 역할의 룰북 플러그인만 깔린 샌드박스 세션으로 일을 맡긴다. 보드는 읽기만 한다 — 전이는 각 룰북의 게이트가 한다."
+      "description": "The orchestration loop for contract v3: draft issues from the user's words, spawn role sessions (core plugins + role rulebook, agent account, issue-<n>/<role> branch), explain the PRs that come back, and relay the user's decisions — comments, review Approve, merge — with the user's own account, per conversation."
     },
     {
       "name": "freelunch",
