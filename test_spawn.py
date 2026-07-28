@@ -37,8 +37,8 @@ class SpawnCmd(unittest.TestCase):
         # 없애고, PreToolUse exit 2 게이트는 acceptEdits 아래서도 여전히 막는다.
         self.assertIn("acceptEdits", cmd)
         self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "acceptEdits")
-        # 결과 포착 없이는 세션이 "아무것도 안 하고 exit 0" 해도 모른다.
-        self.assertEqual(cmd[cmd.index("--output-format") + 1], "json")
+        # stream-json: 결과 이벤트 포착 + 라이브 로그 tee 둘 다 여기서 나온다.
+        self.assertEqual(cmd[cmd.index("--output-format") + 1], "stream-json")
 
     def test_core_is_attached_by_path(self):
         # core carries the consent token format and the board gate. It rides
