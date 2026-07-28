@@ -608,19 +608,58 @@ def require_no_repo_config(cwd: str, override: bool) -> None:
 
     계약 파일과 같은 처분을 한다 — 경고가 아니라 정지, 그리고 명시적 opt-out.
     사고가 아니라 결정이 되게.
+
+    신뢰는 **내용 해시에 고정**된다: --trust-repo-config 로 한 번 통과시키면
+    그 시점의 .claude/ 내용 다이제스트를 기록하고, 이후 스폰은 내용이 같을
+    때만 자동 통과한다. 내용이 바뀌면 다시 멈춘다 — "어제 읽어본 훅"이 아닌
+    "오늘 바뀐 훅"이 무검토로 도는 일을 막는다.
     """
-    if override:
-        return
     root = Path(cwd).resolve()
     rogue = [p for p in REPO_CONFIG if (root / p).exists()]
     if not rogue:
         return
+
+    import hashlib
+    h = hashlib.sha256()
+    for rel in sorted(rogue):
+        p = root / rel
+        h.update(rel.encode())
+        if p.is_dir():
+            for f in sorted(p.rglob("*")):
+                if f.is_file():
+                    h.update(str(f.relative_to(p)).encode())
+                    h.update(f.read_bytes())
+        else:
+            h.update(p.read_bytes())
+    digest = h.hexdigest()
+
+    pins = Path.home() / ".tokenmaxxxer" / "trusted-repo-config.json"
+    try:
+        table = json.loads(pins.read_text())
+    except (OSError, ValueError):
+        table = {}
+    key = str(root)
+
+    if override:
+        table[key] = digest
+        pins.parent.mkdir(parents=True, exist_ok=True)
+        pins.write_text(json.dumps(table, indent=2))
+        print(f"[trust] 레포 설정을 이 내용({digest[:12]})으로 신뢰 고정했다: "
+              f"{', '.join(rogue)}", file=sys.stderr)
+        return
+    if table.get(key) == digest:
+        return          # 전에 읽고 신뢰한 그 내용 그대로다
+
+    changed = key in table
     sys.exit(
         f"대상 레포가 자기 Claude 설정을 들고 있다: {', '.join(rogue)}\n"
         f"  {root}\n"
-        f"  그 훅들은 muster 가 선언한 샌드박스 경계를 **받지 않는다**. 띄우면\n"
+        + ("  전에 신뢰했던 내용에서 **바뀌었다** — 다시 읽어보고 판단해야 한다.\n"
+           if changed else "")
+        + f"  그 훅들은 muster 가 선언한 샌드박스 경계를 **받지 않는다**. 띄우면\n"
         f"  denyRead 로 막은 경로까지 읽힌다(실측). 내용을 직접 읽어보고,\n"
-        f"  믿을 수 있으면 --trust-repo-config 로 명시한다.")
+        f"  믿을 수 있으면 --trust-repo-config 로 명시한다 — 이 내용 해시로\n"
+        f"  고정되어, 같은 내용인 동안은 다시 묻지 않는다.")
 
 
 def frontmatter(p: Path) -> dict[str, str]:
