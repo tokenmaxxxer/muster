@@ -6,6 +6,7 @@
 원칙: **불확실하면 막는다.** 매니페스트를 파싱하지 못했거나 write-set 이 없으면
 "검사할 게 없다"가 아니라 "검사할 수 없다"이고, 둘은 정반대 처분을 받아야 한다.
 """
+from __future__ import annotations
 import fnmatch
 import json
 import os
