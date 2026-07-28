@@ -1165,7 +1165,14 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
     if not origin:
         sys.exit(f"대상 레포에 origin 원격이 없다: {src} — 이슈/PR 모델은 "
                  f"GitHub 원격이 전제다 (계약 v3 s10)")
-    work = ROOT / "runs" / "work" / f"{slug(cwd)}-issue-{issue}-{role}"
+    # 보호 경로 밖이어야 한다: muster 가 ~/.claude/plugins/ 아래 설치되면
+    # ROOT/runs/work 도 그 아래가 되는데, 거긴 Claude Code 의 전역 sensitive
+    # 경로라 역할 세션의 Write 가 전부 거부된다(실측: phase 2 가 코드 한 줄
+    # 못 쓰고 $2.68 을 태웠다). 기본은 ~/.tokenmaxxxer/work, 오버라이드는
+    # MUSTER_WORK_DIR.
+    base = os.environ.get("MUSTER_WORK_DIR")
+    work_base = Path(base) if base else Path.home() / ".tokenmaxxxer" / "work"
+    work = work_base / f"{slug(cwd)}-issue-{issue}-{role}"
     if (work / ".git").exists():
         subprocess.run(["git", "-C", str(work), "fetch", "-q", "origin"],
                        capture_output=True, text=True)
