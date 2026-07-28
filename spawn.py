@@ -952,9 +952,20 @@ def require_doctor(version: str | None = None) -> None:
     if not v:
         sys.exit("claude --version 을 읽지 못했다. claude 가 PATH 에 있나?")
     if not ok.is_file() or ok.read_text().strip() != v:
-        sys.exit(
-            f"이 CLI({v})에서 훅이 headless 로 도는 것을 아직 실측하지 않았다.\n"
-            f"먼저 돌려라: python3 spawn.py doctor   (실 세션 1회, 소액 과금)")
+        if version is not None:
+            # 명시된 버전(테스트 포함)에는 프로브를 태우지 않는다 — 옛 계약
+            # 그대로 정지한다.
+            sys.exit(
+                f"이 CLI({v})에서 훅이 headless 로 도는 것을 아직 실측하지 않았다.\n"
+                f"먼저 돌려라: python3 spawn.py doctor   (실 세션 1회, 소액 과금)")
+        # 미측정 버전이면 그 자리에서 잰다 — 사용자에게 명령 하나를 더
+        # 요구할 이유가 없다. 프로브 세션 1회(하이쿠, 소액)가 돈다.
+        print(f"[doctor] CLI {v} 는 아직 실측 전이다 — 훅 발화 프로브를 "
+              f"먼저 돌린다 (실 세션 1회, 소액 과금)", file=sys.stderr)
+        if doctor() != 0 or not (ok.is_file() and ok.read_text().strip() == v):
+            sys.exit(
+                f"이 CLI({v})에서 플러그인 훅이 headless 로 발화하지 않는다 — "
+                f"게이트 전부가 조용히 사라지는 버전이라 스폰을 막는다.")
 
 
 def doctor() -> int:
