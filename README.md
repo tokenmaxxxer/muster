@@ -30,14 +30,15 @@ ledger/       the scorecard
 Once, per machine:
 
 1. `gh auth login` — your own account (this is what approves and merges).
-2. A machine account for the agents: create one GitHub account, invite it
-   to your target repos (write), issue a fine-grained PAT, and
-   `export MUSTER_AGENT_GH_TOKEN=<pat>`. Role sessions authenticate as it;
-   it is never listed in approvers.md, so it can approve nothing.
-3. `git clone tokenmaxxxer/muster` and, in your conversational session:
+2. `git clone tokenmaxxxer/muster` and, in your conversational session:
    `claude plugin marketplace add tokenmaxxxer/muster` +
    `claude plugin install orchestrate@tokenmaxxxer-muster`.
-4. `python3 muster/spawn.py doctor` — once per CLI version.
+3. `python3 muster/spawn.py doctor` — once per CLI version.
+
+Optional hardening: a separate agent identity (machine-account PAT via
+`export MUSTER_AGENT_GH_TOKEN=<pat>`, or a GitHub App) moves the
+agent/human split from the session layer (gh-guard) to the account layer.
+The default needs neither — one account, everything in conversation.
 
 Rulebooks and tokenmaxxxer-core need NO manual clones: spawn fetches and
 ff-updates them under `muster/runs/rulebooks/` automatically (a local
@@ -51,8 +52,8 @@ conversation when it finds a piece missing:
 2. `docs/specs/approvers.md` — the approver allowlist (and board opt-in).
    `python3 muster/spawn.py init -C <repo>` writes it from your gh login,
    or the orchestrate session creates it for you after confirming.
-3. Invite the agent machine account as a collaborator (write).
-4. (Recommended) branch protection on main: PRs required.
+3. (Recommended) branch protection on main: PRs required. (Only with the
+   optional agent account: invite it as a collaborator.)
 
 Then everything is conversation: `/orchestrate:run`.
 
