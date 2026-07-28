@@ -12,6 +12,13 @@ case "${ORCHESTRATE_OFF:-}" in ""|0|false|no|off) ;; *) trap - EXIT; exit 0 ;; e
 
 MUSTER="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 
+# Self-update: nothing else refreshes the installed marketplace clone (the
+# measured trap — `claude plugin update` reads only the version string and
+# reports "already latest" forever). A quiet ff-only pull per session start
+# keeps this very directive current; failure is fine (offline), staleness
+# is not silent forever.
+git -C "$MUSTER" pull -q --ff-only 2>/dev/null || true
+
 cat <<EOF
 [orchestrate] You are the orchestration session for the tokenmaxxxer
 issue/PR model (muster at ${MUSTER}). When the user brings work:
@@ -28,7 +35,11 @@ issue/PR model (muster at ${MUSTER}). When the user brings work:
   approval -> a comment that is EXACTLY "APPROVE issue-<n>/<role>";
   acceptance -> gh pr merge; refusal -> gh pr close. Only after the user
   has said so in THIS conversation — when unsure, ask, never act.
-- You never write board records or fix a role's PR yourself.
+- You never write board records or fix a role's PR yourself. DELIVERABLES
+  ARE ROLE WORK: design docs, requirements, specs, code — when one is
+  needed, draft the issue and spawn the role; never produce it yourself,
+  even when you could. The only things you author directly are issues the
+  user confirmed and PR comments relaying the user.
 
 Full procedure: /orchestrate:run (same rules, more detail).
 EOF
