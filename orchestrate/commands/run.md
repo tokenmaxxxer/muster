@@ -40,8 +40,9 @@ argument-hint: "[역할 [맡길 일]] — 예: coding \"issue 7 진행\" | 비�
 1. **역할이 맞는가.** qa 는 제품을 실행하고, coding 은 코드를 쓰고, review 는
    읽기만 한다. 요청과 역할이 어긋나면 띄우지 말고 되물어라.
 2. **이슈가 있는가.** 역할은 이슈 없이 시작하지 않는다. 없으면 1번부터.
-3. **전제조건.** 대상 레포에 GitHub 원격 + 계약(`spawn.py init`) +
-   `docs/specs/approvers.md`(사용자 로그인 등재)가 있어야 한다.
+3. **전제조건.** 대상 레포에 GitHub 원격 +
+   `docs/specs/approvers.md`(보드 opt-in 이자 승인자 allowlist —
+   `spawn.py init` 이 만들어준다)가 있어야 한다.
 
 ## 하지 않는 것
 
