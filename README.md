@@ -33,7 +33,9 @@ Once, per machine:
 2. `git clone tokenmaxxxer/muster` and, in your conversational session:
    `claude plugin marketplace add tokenmaxxxer/muster` +
    `claude plugin install orchestrate@tokenmaxxxer-muster`.
-3. `python3 muster/spawn.py doctor` — once per CLI version.
+(`spawn.py doctor` — the probe that verifies plugin hooks actually fire
+headless on the current CLI version — runs automatically on the first
+spawn after a CLI update; one small probe session. Manual run optional.)
 
 Optional hardening: a separate agent identity (machine-account PAT via
 `export MUSTER_AGENT_GH_TOKEN=<pat>`, or a GitHub App) moves the
