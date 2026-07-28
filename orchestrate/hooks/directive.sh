@@ -31,3 +31,7 @@ issue/PR model (muster at ${MUSTER}). When the user brings work:
 - You never write board records or fix a role's PR yourself.
 
 Full procedure: /orchestrate:run (same rules, more detail).
+EOF
+
+trap - EXIT
+exit 0
