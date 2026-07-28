@@ -1136,6 +1136,34 @@ def main() -> int:
     if a.role == "init":
         # 보드로 선언한다(approvers.md). muster 가 남의 레포에 쓰는 유일한 경우.
         return init_board(a.cwd, a.login)
+    if a.role == "clean":
+        # 안전한 것만 지운다: 미커밋 변경 없음 + origin 에 없는 커밋 없음.
+        base = os.environ.get("MUSTER_WORK_DIR")
+        wb = Path(base) if base else Path.home() / ".tokenmaxxxer" / "work"
+        removed = kept = 0
+        for w in sorted(wb.glob("*")) if wb.is_dir() else []:
+            if not (w / ".git").is_dir():
+                continue
+            st = subprocess.run(["git", "-C", str(w), "status", "--porcelain"],
+                                capture_output=True, text=True).stdout.strip()
+            ahead = subprocess.run(
+                ["git", "-C", str(w), "log", "--branches", "--not", "--remotes",
+                 "--oneline"], capture_output=True, text=True).stdout.strip()
+            if st or ahead:
+                print(f"남김 (미보존 작업 있음): {w.name}"
+                      + (f"  [미커밋 {len(st.splitlines())}건]" if st else "")
+                      + (f"  [미push 커밋 {len(ahead.splitlines())}건]" if ahead else ""))
+                kept += 1
+                continue
+            import shutil
+            shutil.rmtree(w)
+            log = Path(str(w) + ".session.log")
+            if log.exists():
+                log.unlink()
+            print(f"지움: {w.name}")
+            removed += 1
+        print(f"정리 끝 — 지움 {removed}, 남김 {kept}")
+        return 0
     if a.role == "update":
         # 룰북을 원격 최신으로. 인자를 비우면 전부.
         return update([a.task] if a.task else list(ROLES))
@@ -1221,7 +1249,16 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
     # MUSTER_WORK_DIR.
     base = os.environ.get("MUSTER_WORK_DIR")
     work_base = Path(base) if base else Path.home() / ".tokenmaxxxer" / "work"
-    work = work_base / f"{slug(cwd)}-issue-{issue}-{role}"
+    # 이름은 origin 의 레포명에서 뽑는다 — 디렉토리 이름(slug)을 쓰면
+    # 워크스페이스를 -C 로 다시 넘겼을 때 이름이 이중으로 붙는다(실측:
+    # ...-issue-45-coding-issue-45-coding). origin 은 위에서 이미 읽었다.
+    repo_name = re.sub(r"\.git$", "", origin.rstrip("/").rsplit("/", 1)[-1]) or slug(cwd)
+    work = work_base / f"{repo_name}-issue-{issue}-{role}"
+    # cwd 가 이미 이 (이슈,역할)의 워크스페이스면 그대로 쓴다 — 중첩 금지.
+    if src == work.resolve():
+        subprocess.run(["git", "-C", str(src), "fetch", "-q", "origin"],
+                       capture_output=True, text=True)
+        return str(src)
     if (work / ".git").exists():
         subprocess.run(["git", "-C", str(work), "fetch", "-q", "origin"],
                        capture_output=True, text=True)
