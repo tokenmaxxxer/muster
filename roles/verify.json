@@ -10,5 +10,8 @@
         "github.com"
       ]
     }
-  }
+  },
+  "decides": "결함이 실재하는가 — 독립 재현으로",
+  "use_when": "주장을 눈으로 검증할 수 없을 때(실행 결과 주장, 복잡한 변경). coding·qa·review 가 놓친 것을 적대적으로 찾는다",
+  "produces": "attempt별 reproduced|not-reproduced + 증거, blocking|advisory finding"
 }
