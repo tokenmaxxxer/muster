@@ -1,7 +1,6 @@
 {
   "name": "orchestrate",
-  "version": "0.2.0",
-  "description": "역할별 환경으로 에이전트를 켜주는 커맨드. 배차 기사가 아니라 콘센트다.",
+  "description": "The orchestration loop for contract v3: draft issues from the user's words, spawn role sessions (core plugins + role rulebook, agent account, issue-<n>/<role> branch), explain the PRs that come back, and relay the user's decisions — comments, review Approve, merge — with the user's own account, per conversation.",
   "author": {
     "name": "Jung Jiwon & Lee Jongkwan"
   }

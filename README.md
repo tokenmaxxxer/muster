@@ -2,25 +2,35 @@
 
 *[한국어](README.ko.md)*
 
-Musters a role — brings up one sandboxed session with only that role's rulebook installed.
+Musters a role — brings up one sandboxed session with only that role's
+rulebook and the tokenmaxxxer-core plugins installed.
 
-Not a dispatcher. A power outlet. **Each role owns its state; muster only reads it.**
+Not a dispatcher. A power outlet with a concierge: on contract v3 the
+orchestration session (this marketplace's `orchestrate` plugin) talks to
+the user, drafts issues the user dictates, spawns role sessions, explains
+the PRs that come back, and relays the user's decisions — comments,
+review Approve, merge — with the user's own account. Role sessions run on
+the AGENT account (`MUSTER_AGENT_GH_TOKEN`), work on `issue-<n>/<role>`
+branches, and return everything by PR. **Each role owns its state; muster
+only reads it.**
 
 ```
 protocol.md   the contract — muster's three jobs, the state-exposure deal, isolation
-              (protocol.ko.md is the same contract in Korean)
 roles/        one role is one file: rulebook bundle plus sandbox boundary
 spawn.py      reads state, brings up a session in a role's environment
-orchestrate/  the plugin that calls it from a conversation (/orchestrate:run)
-wakes.py      evaluates contract §3's WAKES-ON table: whom does the board wake
-bench/        ablation runner — same target, rulebook on and off
+              (--issue <n> creates the branch and anchors the prompt)
+orchestrate/  the plugin that drives the loop from a conversation (/orchestrate:run)
+wakes.py      evaluates contract s3's WAKES-ON table: whom does the board wake
 gates/        deterministic checks, run by spawn.py after a session. Zero LLM calls
 ledger/       the scorecard
 ```
 
-*On the name: this was `harness`, but in this organisation "harness" already means
-the rulebook stack and `qa-agent-rulebook/bench`. Names that collide make documents
-unable to point at each other.*
+v3 notes: the board is `docs/issue-<n>/reports/<role>.md` in the target
+repo, `main`-merged only; the canonical contract lives in
+tokenmaxxxer-core (muster keeps no copy; `spawn.py init` plants core's);
+`spawn.py approve` is gone — approval is a GitHub act the orchestrator
+relays; core's four plugins (core/terse/freelunch/scout) attach to every
+role session via --plugin-dir.
 
 ## Why this exists
 
