@@ -17,6 +17,7 @@
 그대로 쓰는 것이 컨테이너 대신 샌드박스를 고른 이유이므로, 그 이점을 버리지 않는다.
 """
 import argparse
+import re
 import hashlib
 import json
 import os
@@ -409,6 +410,10 @@ def rulebook_version(role: str) -> str:
     8커밋 뒤처진 채로 반대 결론을 낸 적이 있다(2026-07-26).
     """
     spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
+    if issue is not None:
+        br = checkout_issue_branch(cwd, issue, role)
+        task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
+                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n\n") + task
     d = rulebook_dir(spec)
     if d is None:
         return "버전 불명 (룰북이 아직 없다)"
@@ -517,7 +522,7 @@ def _install_hint(missing: list[str]) -> str:
 # 계약 §3 의 WAKES-ON 표 순서. 보드를 읽을 때 이 순서로 보여준다.
 ROLES = ("product", "ux-design", "feasibility", "coding", "qa",
          "review", "verify", "reflect", "ops")
-BOARD = "docs/reports/records"          # 계약 v2 §10. 전부 대상 레포 안에 있다
+BOARD = "docs"                          # v3: subject trees live at docs/issue-<n>/
 CONTRACT = "docs/specs/role-handoff-contract.md"   # 레포-로컬 계약. 룰북 게이트가 찾는 자리
 # 계약 v1 이 쓰던 자리. 아직 v2 로 안 옮긴 레포를 **말해주기 위해서만** 본다
 LEGACY = {"review": "review-record.md", "feasibility": "feasibility-record.md",
@@ -534,7 +539,10 @@ def slug(cwd: str) -> str:
     return Path(cwd).resolve().name
 
 
-CANONICAL = ROOT / "contract" / "role-handoff-contract.md"
+def _canonical() -> Path:
+    """The one canonical contract: core's. muster keeps no second copy —
+    two canonical copies was itself a hash-sync hazard."""
+    return core_root() / "core" / "contract" / "role-handoff-contract.md"
 
 
 def _digest(p: Path) -> str:
@@ -554,7 +562,7 @@ def contract_drift(cwd: str) -> str | None:
     남는 판별 수단이다 — 문서를 고치지 않고도 갈라짐을 볼 수 있다.
     """
     theirs = _digest(Path(cwd).resolve() / CONTRACT)
-    ours = _digest(CANONICAL)
+    ours = _digest(_canonical())
     if not theirs or not ours or theirs == ours:
         return None
     return f"{theirs} (정본 {ours})"
@@ -580,7 +588,7 @@ def init_contract(cwd: str) -> int:
               file=sys.stderr)
         return 1
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(CANONICAL.read_bytes())
+    dest.write_bytes(_canonical().read_bytes())
     print(f"계약을 심었다: {dest}  ({_digest(dest)})")
     return 0
 
@@ -673,13 +681,19 @@ def frontmatter(p: Path) -> dict[str, str]:
 
 
 def board(root: Path) -> dict[str, dict[str, dict[str, str]]]:
-    """블랙보드를 읽는다: subject → 역할 → frontmatter (계약 v2 §10)."""
-    recs = root / BOARD
-    if not recs.is_dir():
+    """Read the board: subject (issue-<n>) -> role -> frontmatter (v3 s10).
+
+    A subject is a docs/issue-<n>/ tree; role records sit in its reports/.
+    """
+    docs = root / BOARD
+    if not docs.is_dir():
         return {}
     found = {}
-    for d in sorted(p for p in recs.iterdir() if p.is_dir()):
-        roles = {r: frontmatter(d / f"{r}.md") for r in ROLES if (d / f"{r}.md").is_file()}
+    for d in sorted(p for p in docs.iterdir()
+                    if p.is_dir() and re.match(r"^issue-[0-9]+$", p.name)):
+        rep = d / "reports"
+        roles = {r: frontmatter(rep / f"{r}.md") for r in ROLES
+                 if (rep / f"{r}.md").is_file()}
         if roles:
             found[d.name] = roles
     return found
@@ -723,9 +737,9 @@ def status(cwd: str) -> list[str]:
                    if (root / name).exists() or (root / "docs" / name).exists())
     if stale:
         out.append(f"보드 없음. 계약 v1 자리에 기록이 있다: {', '.join(stale)}")
-        out.append(f"  이 레포는 아직 계약 v2 로 안 옮겨졌다. v2 는 {BOARD}/<subject>/<역할>.md 다.")
+        out.append("  이 레포는 v3 이전 판이다. v3 는 docs/issue-<n>/reports/<역할>.md 다.")
     else:
-        out.append(f"보드 없음 ({BOARD}/). 아직 아무 역할도 기록을 쓰지 않았다.")
+        out.append("보드 없음 (docs/issue-<n>/). 아직 아무 역할도 기록을 쓰지 않았다.")
     return out
 
 
@@ -774,21 +788,19 @@ def ownership_report(cwd: str, role: str, delta: list) -> list[str]:
     빠뜨려 fail-open 이 되거나, 룰북 하나가 아직 마이그레이션 안 됐거나.
     막지는 않는다(이미 쓴 뒤다). 대신 조용히 넘어가지도 않는다.
     """
-    prefix = BOARD + "/"
     bad = []
     for p in delta:
-        if not p.startswith(prefix):
+        m = re.match(r"^docs/(issue-[0-9]+)/reports/(.+)$", p)
+        if not m:
             continue
-        tail = p[len(prefix):].split("/", 1)
-        if len(tail) < 2:
-            continue
-        subject, rest = tail
+        rest = m.group(2)
         if rest == f"{role}.md" or rest.startswith(f"{role}/"):
             continue
-        why = "다른 역할의 기록"
-        if rest.split("/")[0] == "tokens" or rest.endswith(".token"):
-            why = "**승인 토큰** — 도구가 쓴 토큰은 위조된 사람 승인이다"
-        bad.append(f"  - {p} ({why})")
+        if role == "feasibility" and rest.startswith("spikes/"):
+            continue
+        if role == "ops" and rest.startswith("postmortems/"):
+            continue
+        bad.append(f"  - {p} (다른 역할의 기록)")
     if not bad:
         return []
     return [f"[소유권] {role} 이 자기 것이 아닌 보드 경로를 건드렸다 — "
@@ -802,13 +814,16 @@ def board_snapshot(cwd: str) -> dict[str, str]:
     바뀐 것이고, 계약 §6 의 단위는 커밋이 아니라 보드다.
     """
     base = Path(cwd).resolve()
-    root = base / BOARD
-    if not root.is_dir():
+    docs = base / BOARD
+    if not docs.is_dir():
         return {}
     out: dict[str, str] = {}
-    for p in sorted(root.rglob("*")):
-        if p.is_file():
-            out[str(p.relative_to(base))] = hashlib.sha256(p.read_bytes()).hexdigest()
+    for d in sorted(docs.glob("issue-*")):
+        if not d.is_dir():
+            continue
+        for p in sorted(d.rglob("*")):
+            if p.is_file():
+                out[str(p.relative_to(base))] = hashlib.sha256(p.read_bytes()).hexdigest()
     return out
 
 
@@ -859,18 +874,12 @@ def ledger_write(entry: dict) -> Path:
     return p
 
 
-def core_dir() -> Path:
-    """tokenmaxxxer-core 플러그인 루트. 없으면 멈춘다.
+def core_root() -> Path:
+    """tokenmaxxxer-core 체크아웃 루트. 없으면 멈춘다.
 
-    core 는 승인 토큰과 보드 게이트를 들고 있다. 없이 띄우면 역할은 그대로
-    돌지만 토큰 위조도, 계약이 갈라진 보드에 쓰는 것도 아무도 안 막는다 —
+    core 는 상호작용 프로토콜의 게이트(보드·승인·gh-guard)와 정본 계약을
+    들고 있다. 없이 띄우면 역할은 그대로 돌지만 아무도 이탈을 막지 않는다 —
     조용히 보호가 사라지는 쪽이라 경고가 아니라 정지다.
-
-    마켓플레이스 설치가 아니라 `--plugin-dir` 로 붙인다(실측 2026-07-27,
-    CLI 2.1.220: 디렉터리로 넘긴 플러그인의 UserPromptSubmit·PreToolUse 훅이
-    headless 에서 그대로 발화한다). 설치를 거치지 않으므로 캐시·클론 갈라짐도,
-    유령 등록 항목도, 이름이 이미 등록됐을 때 --settings 가 무시되는 함정도
-    이 경로에는 없다.
     """
     for cand in (os.environ.get("TOKENMAXXXER_CORE"),
                  "$TOKENMAXXXER_RULEBOOKS/tokenmaxxxer-core",
@@ -881,90 +890,24 @@ def core_dir() -> Path:
         if "$" in str(p):
             continue
         if (p / "core" / ".claude-plugin" / "plugin.json").is_file():
-            return p / "core"
+            return p
     sys.exit(
         "tokenmaxxxer-core 를 찾지 못했다. 역할 세션은 core 없이 뜨지 않는다 —\n"
-        "  승인 토큰과 보드 게이트가 거기 있고, 없으면 보호가 조용히 사라진다.\n"
+        "  프로토콜 게이트와 정본 계약이 거기 있다.\n"
         "  체크아웃을 두고 $TOKENMAXXXER_CORE 로 가리켜라.")
 
 
-def approve(cwd: str, kind: str, subject: str) -> int:
-    """사람이 터미널에서 직접 승인 토큰을 발행한다.
+def core_plugin_dirs() -> list[Path]:
+    """core 마켓플레이스의 네 플러그인 전부 — core, terse, freelunch, scout.
 
-    headless 로 오케스트레이션하는 흐름에는 사람이 챌린지 라인을 칠 자리가
-    없다. 역할 세션의 프롬프트는 오케스트레이터가 쓴 텍스트라 core 의 mint
-    훅이 거기서는 발행하지 않고(그게 자기승인 구멍을 막는 도장이다), 그렇다고
-    오케스트레이터가 사람의 승인을 **전달**하면 모델을 한 번 통과한 텍스트가
-    되어 사람의 턴과 구별할 수 없어진다 (계약 §19).
-
-    가드는 **TTY** 다. Claude 의 Bash 도구에는 터미널이 없어서(실측
-    2026-07-27: stdin isatty False) 모델이 이 명령을 부르면 실패한다.
-    run.md 가 `Bash(python3:*)` 를 사전 승인하고 있으므로, 이 가드가 없으면
-    오케스트레이터가 자기 승인을 찍을 수 있다.
-
-    토큰 형식은 core 소유다 — core 의 consent 를 그대로 import 해서 손으로
-    베낀 두 번째 구현이 생기지 않게 한다. muster 가 대상 레포에 쓰는 두 번째
-    이자 마지막 경우이고, 계약 파일과 마찬가지로 **보드 기록이 아니다** —
-    사람의 행위이지 역할이 소유한 상태가 아니다.
+    마켓플레이스 설치가 아니라 `--plugin-dir` 로 붙인다(실측 2026-07-27,
+    CLI 2.1.220: 디렉터리로 넘긴 플러그인의 훅이 headless 에서 그대로
+    발화한다). 설치를 거치지 않으므로 캐시·클론 갈라짐도 유령 등록 항목도
+    이 경로에는 없다.
     """
-    if not sys.stdin.isatty():
-        sys.exit(
-            "spawn.py approve 는 터미널에서만 된다. 지금 stdin 이 TTY 가 아니다.\n"
-            "  사람의 승인은 사람이 직접 쳐야 한다 — 도구를 거쳐 전달된 승인은\n"
-            "  사람의 턴과 구별할 수 없다 (계약 §19).")
-
-    core = core_dir()
-    sys.path.insert(0, str(core / "hooks" / "lib"))
-    try:
-        import consent
-    except ImportError as e:
-        sys.exit(f"core 의 consent 를 읽지 못했다: {e}")
-
-    for name, val in (("kind", kind), ("subject", subject)):
-        if not val or not consent.KIND_RE.fullmatch(val) or val in (".", ".."):
-            sys.exit(f"{name} 이 안전하지 않다: {val!r}  "
-                     f"(허용 형식: {consent.KIND_RE.pattern})")
-
-    root = Path(cwd).resolve()
-    require_contract(str(root), False)
-    tokens = root / BOARD / subject / "tokens"
-    try:
-        tokens.mkdir(parents=True, exist_ok=True)
-        # mint.sh 와 같은 이유로 자기를 git 에서 제외한다: 커밋된 토큰은
-        # `git checkout` 으로 부활해 같은 승인이 다시 통과한다(실측).
-        ignore = tokens / ".gitignore"
-        if not ignore.exists():
-            ignore.write_text("*\n")
-    except OSError as e:
-        sys.exit(f"토큰 디렉터리를 만들지 못했다: {e}")
-
-    line = f"APPROVE {kind} {subject}"
-    print(f"승인하려는 것\n  kind:    {kind}\n  subject: {subject}\n"
-          f"  경로:    {BOARD}/{subject}/tokens/{kind}.token\n")
-    print(f"확인하려면 이 줄을 **그대로** 입력한다 (다르면 전부 취소):\n  {line}")
-    try:
-        typed = input("> ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print("\n취소했다. 발행하지 않았다.", file=sys.stderr)
-        return 1
-    if typed != line:
-        print("입력이 그 줄과 다르다. 발행하지 않았다.", file=sys.stderr)
-        return 1
-
-    p = tokens / f"{kind}.token"
-    tmp = tokens / f".token.{os.getpid()}"
-    try:
-        tmp.write_text(f"kind: {kind}\nsubject: {subject}\nactor: user\n"
-                       f"phrase: {line}\n", encoding="utf-8")
-        os.replace(tmp, p)
-    except OSError as e:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        sys.exit(f"토큰을 쓰지 못했다: {e}")
-    print(f"발행했다: {p.relative_to(root)}   (한 번만 쓰인다)")
-    return 0
+    root = core_root()
+    return [root / n for n in ("core", "terse", "freelunch", "scout")
+            if (root / n / ".claude-plugin" / "plugin.json").is_file()]
 
 
 def drive(cwd: str, unattended: bool, limit: int = 12) -> int:
@@ -995,10 +938,12 @@ def drive(cwd: str, unattended: bool, limit: int = 12) -> int:
         print(f"[drive] {turn}/{limit}  [{row.role}] {row.why}", file=sys.stderr)
         # 보드 요약을 같이 넘긴다 — 안 주면 세션이 탐색으로 보드를 다시
         # 발견하느라 토큰을 쓰고, 그 탐색이 매번 다르게 끝난다.
+        m_issue = re.search(r"issue-([0-9]+)", row.key + " " + row.why)
         rc = _spawn_one(cwd, row.role,
                         f"보드가 너를 깨웠다: {row.why}\n\n"
                         f"지금 보드:\n" + "\n".join(status(cwd)) + "\n\n"
-                        f"계약과 네 룰북이 요구하는 대로 네 기록을 쓴다.", unattended)
+                        f"계약과 네 룰북이 요구하는 대로 네 기록을 쓴다.", unattended,
+                        int(m_issue.group(1)) if m_issue else None)
         if rc != 0:
             print(f"[drive] {row.role} 이 실패했다 (rc={rc}). 멈춘다.", file=sys.stderr)
             return rc
@@ -1085,7 +1030,7 @@ def doctor() -> int:
 
 
 def spawn_cmd(settings_path: str, role: str, unattended: bool,
-              core: str | None = None,
+              core_plugins: list | None = None,
               plugins: list | None = None) -> tuple[list[str], dict[str, str]]:
     """세션 argv 와 env **추가분**. 호출자가 os.environ 위에 얹는다.
 
@@ -1108,9 +1053,16 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
     # 안 거치므로 캐시-클론 갈라짐도 유령 등록 항목도 이 경로엔 없다.
     for p in (plugins or []):
         cmd += ["--plugin-dir", str(p)]
-    if core:
-        cmd += ["--plugin-dir", core]
+    for p in (core_plugins or []):
+        cmd += ["--plugin-dir", str(p)]
     env = {"CLAUDE_ROLE": role, "TOKENMAXXXER_SPAWNED": "1"}
+    # Two-account model (core README): role sessions act as the AGENT
+    # account. MUSTER_AGENT_GH_TOKEN, if set, becomes the session's GH_TOKEN
+    # so gh in the container/sandbox authenticates as the agent — never the
+    # user. gh-guard denies the human's acts in role sessions regardless.
+    agent_token = os.environ.get("MUSTER_AGENT_GH_TOKEN")
+    if agent_token:
+        env["GH_TOKEN"] = agent_token
     if unattended:
         env["TOKENMAXXXER_UNATTENDED"] = "1"
     return cmd, env
@@ -1126,11 +1078,12 @@ def main() -> int:
                     help="대상 레포에 계약이 없어도 띄운다. 보드를 안 쓸 작업에만")
     ap.add_argument("--trust-repo-config", action="store_true",
                     help="대상 레포의 .claude/ 설정·훅을 신뢰한다. 읽어본 뒤에만")
+    ap.add_argument("--issue", type=int,
+                    help="이 이슈 번호로 스폰한다: issue-<n>/<역할> 브랜치를 만들고 프롬프트에 명시")
     ap.add_argument("--unattended", action="store_true",
                     help="사람이 없는 실행. mint 는 안 되고, 휴먼 게이트는 선다")
     ap.add_argument("--all", action="store_true",
                     help="wake: 이미 답해진 줄까지 보여준다 (계약 §6 억제를 푼다)")
-    ap.add_argument("--subject", help="approve: 승인할 subject")
     ap.add_argument("--limit", type=int, default=12,
                     help="drive: 한 번에 띄울 최대 횟수 (기본 12, 폭주 방지)")
     a = ap.parse_args()
@@ -1153,10 +1106,8 @@ def main() -> int:
         print("\n".join(wakes.report(a.cwd, show_answered=a.all)))
         return 0
     if a.role == "approve":
-        # 사람이 직접 승인 토큰을 발행한다. TTY 가 없으면 실패한다.
-        if not a.task or not a.subject:
-            sys.exit("사용법: spawn.py approve <kind> --subject <subject> -C <레포>")
-        return approve(a.cwd, a.task, a.subject)
+        sys.exit("v3: 승인은 파일 발행이 아니라 GitHub 행위다 — 오케스트레이터가\n"
+                 "  사용자와의 대화에서 gh pr review --approve / gh pr merge 로 중계한다.")
     if a.role == "drive":
         # 보드가 지목하는 역할을 하나씩, 멈출 때까지.
         require_contract(a.cwd, a.no_contract)
@@ -1181,10 +1132,34 @@ def main() -> int:
         print(json.dumps(role_settings(a.role), indent=2, ensure_ascii=False))
         return 0
     require_doctor()
-    return _spawn_one(a.cwd, a.role, a.task, a.unattended)
+    return _spawn_one(a.cwd, a.role, a.task, a.unattended, a.issue)
 
 
-def _spawn_one(cwd: str, role: str, task: str, unattended: bool) -> int:
+def checkout_issue_branch(cwd: str, issue: int, role: str) -> str:
+    """대상 레포에서 issue-<n>/<역할> 브랜치를 만든다(있으면 갈아탄다).
+
+    core 의 board-gate R4 가 보드 쓰기를 이 브랜치에서만 허용하므로, 스폰
+    전에 서 있어야 세션이 첫 쓰기부터 막히지 않는다. base 는 원격 기본
+    브랜치 — 역할 산출물은 main 에서 갈라져 PR 로만 돌아간다 (계약 v3 s10).
+    """
+    br = f"issue-{issue}/{role}"
+    def git(*a):
+        return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True)
+    git("fetch", "origin")
+    if git("rev-parse", "--verify", "-q", br).returncode == 0:
+        r = git("checkout", br)
+    else:
+        base = _base(cwd)
+        r = git("checkout", "-b", br, base)
+        if r.returncode != 0:      # base 없음(원격 없음 등) — 현 HEAD 에서라도 만든다
+            r = git("checkout", "-b", br)
+    if r.returncode != 0:
+        sys.exit(f"브랜치 {br} 로 못 갈아탔다: {r.stderr.strip()[:200]}")
+    return br
+
+
+def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
+               issue: int | None = None) -> int:
     """역할 하나를 띄우고, 무슨 일이 있었는지 원장에 남기고, 처분을 말한다.
 
     main() 과 drive() 가 같은 몸통을 쓴다 — 드라이버가 따로 스폰 경로를 들고
@@ -1192,6 +1167,14 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool) -> int:
     """
     import wakes          # wakes 가 spawn 을 import 한다 — 여기서만 끌어온다
     spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
+    if issue is not None:
+        br = checkout_issue_branch(cwd, issue, role)
+        task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
+                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n\n") + task
+    if issue is not None:
+        br = checkout_issue_branch(cwd, issue, role)
+        task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
+                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n\n") + task
     plugins = plugin_dirs(role, spec)
     s = role_settings(role)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
@@ -1202,8 +1185,8 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool) -> int:
               f"작업 디렉터리 {cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
-        cmd, extra_env = spawn_cmd(settings, role, unattended, str(core_dir()),
-                                   plugins)
+        cmd, extra_env = spawn_cmd(settings, role, unattended,
+                                   core_plugin_dirs(), plugins)
         before = board_snapshot(cwd)
         # 이 세션이 답하러 가는 줄들. 세션이 보드를 실제로 바꾼 뒤에만 소비로
         # 적는다 — §6 은 wake 가 **결과 기록**으로 소비된다고 말한다.

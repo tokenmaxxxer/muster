@@ -91,7 +91,7 @@ def _sig(root: Path, *rels: str) -> str:
 
 
 def _rec(subject: str, role: str) -> str:
-    return f"{spawn.BOARD}/{subject}/{role}.md"
+    return f"{spawn.BOARD}/{subject}/reports/{role}.md"
 
 
 def observed_path(cwd: str) -> Path:
@@ -172,11 +172,15 @@ def upstream(record: Path) -> dict[str, str]:
 
 
 def _hypotheses(root: Path) -> list[Path]:
-    d = root / "docs" / "proposals"
-    if not d.is_dir():
+    # v3: per-subject proposals live inside each issue tree.
+    out = []
+    docs = root / "docs"
+    if not docs.is_dir():
         return []
-    return [p for p in sorted(d.glob("*.md"))
-            if spawn.frontmatter(p).get("kind") == "hypothesis"]
+    for d in sorted(docs.glob("issue-*/proposals")):
+        out += [p for p in sorted(d.glob("*.md"))
+                if spawn.frontmatter(p).get("kind") == "hypothesis"]
+    return out
 
 
 def _findings_to(root: Path, role: str) -> list[str]:
@@ -186,7 +190,7 @@ def _findings_to(root: Path, role: str) -> list[str]:
     if not recs.is_dir():
         return []
     hits = []
-    for f in sorted(recs.rglob("*.md")):
+    for f in sorted(recs.glob("issue-*/reports/**/*.md")):
         try:
             text = f.read_text(encoding="utf-8-sig", errors="replace")
         except OSError:
@@ -203,7 +207,7 @@ def _front(root: Path, subject: str, roles: dict) -> str | None:
     §19 가 적은 통상 순서(product, 아니면 feasibility)로 물러난다.
     """
     rootless = [r for r in roles
-                if not upstream(root / spawn.BOARD / subject / f"{r}.md")]
+                if not upstream(root / spawn.BOARD / subject / "reports" / f"{r}.md")]
     if len(rootless) == 1:
         return rootless[0]
     for r in ("product", "feasibility"):
@@ -232,7 +236,7 @@ def _rows(cwd: str) -> tuple[list[Row], list[Row]]:
     blocked: list[Row] = []
 
     # ── feasibility: 새롭거나 바뀐 hypothesis 가 보드에 나타남
-    feas_records = [(root / spawn.BOARD / s / "feasibility.md")
+    feas_records = [(root / spawn.BOARD / s / "reports" / "feasibility.md")
                     for s, r in b.items() if "feasibility" in r]
     acked = {p: sha for rec in feas_records for p, sha in upstream(rec).items()}
     for h in _hypotheses(root):
