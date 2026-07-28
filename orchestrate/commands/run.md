@@ -38,7 +38,8 @@ argument-hint: "[역할 [맡길 일]] — 예: coding \"issue 7 진행\" | 비�
      정확히 이 문자열의 코멘트를 단다: `gh pr comment <n> --body "APPROVE issue-<n>/<역할>"`
      (approval-gate 가 이 정확한 문자열만 승인으로 인정한다. 에이전트 계정을
      분리한 하드닝 구성에서는 `gh pr review <n> --approve` 도 된다)
-   - 결과 수용 → `gh pr merge <n> --merge --delete-branch`
+   - 결과 수용 → `gh pr merge <n> --merge --delete-branch` — 머지된
+     브랜치는 반드시 함께 지운다. 역할별 이슈 브랜치는 PR 이 생명주기다
    - 거부 → `gh pr close <n>`
    승인·머지는 사용자가 이 대화에서 그 의사를 밝힌 뒤에만. 확신이 없으면
    실행하지 말고 되물어라. 당신이 먼저 승인을 제안할 수는 있어도, 사용자의
