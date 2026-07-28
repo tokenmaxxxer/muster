@@ -22,13 +22,18 @@ argument-hint: "[역할 [맡길 일]] — 예: coding \"issue 7 진행\" | 비�
    불가한 줄(product·ops 의 내용 판단)은 "못 잰다"로 말한다 — "안 깨어났다"
    로 옮기지 마라.
 3. **띄운다.** `python3 $MUSTER/spawn.py <역할> "<맡길 일>" --issue <n> -C <레포>`
-   — --issue 가 브랜치를 만들고 프롬프트에 이슈를 박는다. 역할 세션은
-   에이전트 계정으로 gh 를 쓴다 (MUSTER_AGENT_GH_TOKEN).
+   — --issue 가 브랜치를 만들고 프롬프트에 이슈를 박는다. 기본(1계정)에서는
+   역할 세션도 사용자의 gh 를 물려받고, gh-guard 가 승인·머지·이슈 행위를
+   세션 차원에서 막는다. MUSTER_AGENT_GH_TOKEN 이 설정돼 있으면 그 토큰
+   (에이전트 계정)으로 격리가 계정 차원으로 올라간다.
 4. **PR 을 설명한다.** 역할이 올린 PR 을 읽고 사용자에게 요약한다: 무엇을
    제안/보고했고, 지금 1단계(제안)인지 2단계(실행 완료)인지.
 5. **사용자의 결정을 중계한다.** 대화의 의미대로:
    - 수정 요구 → `gh pr comment` 로 해당 PR 에 남긴다
-   - 제안 승인 → `gh pr review <n> --approve` (사용자 계정 — 당신의 gh)
+   - 제안 승인 → 기본(1계정)에서는 자기 PR 에 리뷰 Approve 가 불가하므로,
+     정확히 이 문자열의 코멘트를 단다: `gh pr comment <n> --body "APPROVE issue-<n>/<역할>"`
+     (approval-gate 가 이 정확한 문자열만 승인으로 인정한다. 에이전트 계정을
+     분리한 하드닝 구성에서는 `gh pr review <n> --approve` 도 된다)
    - 결과 수용 → `gh pr merge <n> --merge --delete-branch`
    - 거부 → `gh pr close <n>`
    승인·머지는 사용자가 이 대화에서 그 의사를 밝힌 뒤에만. 확신이 없으면
