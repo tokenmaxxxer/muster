@@ -1272,6 +1272,14 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
                     origin], capture_output=True, text=True)
     # https push 자격증명: 디스크에 토큰을 남기지 않고 env(GH_TOKEN)를 읽는
     # credential helper 를 작업 클론에만 심는다.
+    try:
+        ex = work / ".git" / "info" / "exclude"
+        ex.parent.mkdir(parents=True, exist_ok=True)
+        if ".muster-cache" not in (ex.read_text() if ex.exists() else ""):
+            with ex.open("a") as fh:
+                fh.write(".muster-cache/\n")
+    except OSError:
+        pass
     subprocess.run(["git", "-C", str(work), "config", "credential.helper",
                     "!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f"],
                    capture_output=True, text=True)
@@ -1387,6 +1395,21 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
         cmd, extra_env = spawn_cmd(settings, role, unattended,
                                    core_plugin_dirs(), plugins)
+        if issue is not None:
+            # 툴체인 캐시를 워크스페이스 안으로 — go 등이 홈(~/Library/...)에
+            # 캐시·설정을 쓰려다 샌드박스에 막혀 빌드가 승인 프롬프트로
+            # 빠졌다(실측: phase 2 가 go build 를 한 번도 못 돌림). 쓰기가
+            # 전부 cwd 아래로 오면 샌드박스 안에서 승인 없이 돈다.
+            wcache = os.path.join(cwd, ".muster-cache")
+            extra_env.update({
+                "GOCACHE": os.path.join(wcache, "go-build"),
+                "GOMODCACHE": os.path.join(wcache, "gomod"),
+                "GOENV": os.path.join(wcache, "goenv"),
+                "GOPATH": os.path.join(wcache, "gopath"),
+                "XDG_CACHE_HOME": os.path.join(wcache, "xdg"),
+                "npm_config_cache": os.path.join(wcache, "npm"),
+                "PIP_CACHE_DIR": os.path.join(wcache, "pip"),
+            })
         before = board_snapshot(cwd)
         # 이 세션이 답하러 가는 줄들. 세션이 보드를 실제로 바꾼 뒤에만 소비로
         # 적는다 — §6 은 wake 가 **결과 기록**으로 소비된다고 말한다.
