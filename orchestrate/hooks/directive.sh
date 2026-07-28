@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# SessionStart: the orchestration directive. Installing this plugin IS the
-# opt-in — every session it is enabled in becomes a conversational
-# orchestrator for the issue/PR model. Informing only; role-session
-# enforcement lives in core's gates. Kill switch: ORCHESTRATE_OFF=1
+# UserPromptSubmit: the orchestration directive, injected EVERY prompt —
+# the coding-rulebook pattern (terse/freelunch/scout): steering must be
+# freshly read to steer, and a session-start-only injection drifts out of
+# a long context. Installing this plugin IS the opt-in. Kill switch:
+# ORCHESTRATE_OFF=1
 trap 'rc=$?; if [ "$rc" != 0 ] && [ "$rc" != 2 ]; then exit 2; fi' EXIT
 set -uo pipefail
 
@@ -11,13 +12,6 @@ case "${ORCHESTRATE_OFF:-}" in ""|0|false|no|off) ;; *) trap - EXIT; exit 0 ;; e
 [ -z "${CLAUDE_ROLE:-}" ] || { trap - EXIT; exit 0; }
 
 MUSTER="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-
-# Self-update: nothing else refreshes the installed marketplace clone (the
-# measured trap — `claude plugin update` reads only the version string and
-# reports "already latest" forever). A quiet ff-only pull per session start
-# keeps this very directive current; failure is fine (offline), staleness
-# is not silent forever.
-git -C "$MUSTER" pull -q --ff-only 2>/dev/null || true
 
 cat <<EOF
 [orchestrate] You are the orchestration session for the tokenmaxxxer
