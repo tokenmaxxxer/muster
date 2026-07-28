@@ -15,6 +15,7 @@
 줄었으면 지적이 반영된 것이다. 파일의 git 이력을 걸어 연속한 두 판을 비교하므로
 사람이 손으로 라벨링할 필요가 없다.
 """
+from __future__ import annotations
 import argparse
 import json
 import re

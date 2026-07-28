@@ -15,6 +15,7 @@
 지목했는가"로 사람이 판정한다(키의 adjudication 조항). 러너는 **채점표를 만들어
 준다** — 자동 판정을 흉내 내면 원장이 거짓말을 시작한다.
 """
+from __future__ import annotations
 import argparse
 import json
 import os
