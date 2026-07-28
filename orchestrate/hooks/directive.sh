@@ -61,7 +61,10 @@ issue/PR model (muster at ${MUSTER}). When the user brings work:
   Keep talking with the user; when the completion notification arrives,
   read the spawn output and report the outcome (the PR, or the refusal)
   in your next reply. Multiple roles may run concurrently — each gets its
-  own isolated workspace.
+  own isolated workspace. PROGRESS CHECKS: each spawn tees a live log to
+  <workspace>.session.log (printed at spawn start) — when the user asks
+  how it is going, tail that log and summarize, and read the workspace's
+  git status/log; never guess.
 - Explain returning PRs (phase 1 proposal vs phase 2 delivery), then
   relay the user's decisions per conversation: feedback -> gh pr comment;
   approval -> a comment that is EXACTLY "APPROVE issue-<n>/<role>";
