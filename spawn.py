@@ -866,6 +866,82 @@ def classify(rc: int, result: dict, delta: list, blocked: list) -> str:
     return "silent-failure"
 
 
+ROSTER = ROOT / "runs" / "active.json"
+
+
+def _roster_load() -> dict:
+    try:
+        return json.loads(ROSTER.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _roster_save(d: dict) -> None:
+    ROSTER.parent.mkdir(exist_ok=True)
+    ROSTER.write_text(json.dumps(d, indent=2, ensure_ascii=False))
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def roster_register(key: str, entry: dict) -> None:
+    d = _roster_load()
+    d[key] = entry
+    _roster_save(d)
+
+
+def roster_remove(key: str) -> None:
+    d = _roster_load()
+    if d.pop(key, None) is not None:
+        _roster_save(d)
+
+
+def roster_ps() -> int:
+    """돌고 있는 역할 세션들. 죽은 항목은 표시 후 정리한다."""
+    d = _roster_load()
+    if not d:
+        print("돌고 있는 역할 세션 없음")
+        return 0
+    dead = []
+    for key, e in sorted(d.items()):
+        pid = e.get("pid", 0)
+        alive = _alive(pid)
+        mins = (int(time.time()) - e.get("ts", 0)) // 60
+        state = "RUNNING" if alive else "DEAD(정리됨)"
+        print(f"{state:14s} {e.get('role','?'):12s} issue-{e.get('issue','?')}  "
+              f"{mins}분  pid {pid}")
+        print(f"               log: {e.get('log','')}")
+        print(f"               work: {e.get('work','')}")
+        if not alive:
+            dead.append(key)
+    for k in dead:
+        roster_remove(k)
+    return 0
+
+
+def roster_kill(issue: int, role: str) -> int:
+    d = _roster_load()
+    key = f"issue-{issue}/{role}"
+    e = d.get(key)
+    if not e:
+        print(f"로스터에 없다: {key}", file=sys.stderr)
+        return 1
+    pid = e.get("pid", 0)
+    if _alive(pid):
+        os.kill(pid, 15)
+        print(f"종료 신호를 보냈다: {key} (pid {pid}). 워크스페이스와 라이브 "
+              f"로그는 남는다 — 재스폰이 이어받는다.")
+    else:
+        print(f"이미 죽어 있다: {key}")
+    roster_remove(key)
+    return 0
+
+
 def ledger_write(entry: dict) -> Path:
     """runs/ledger.jsonl 에 한 줄. runs/ 는 gitignore 되어 있다 — 측정 데이터는
     소스가 아니다."""
@@ -1136,6 +1212,12 @@ def main() -> int:
     if a.role == "init":
         # 보드로 선언한다(approvers.md). muster 가 남의 레포에 쓰는 유일한 경우.
         return init_board(a.cwd, a.login)
+    if a.role == "ps":
+        return roster_ps()
+    if a.role == "kill":
+        if not a.task or a.issue is None:
+            sys.exit("사용법: spawn.py kill <역할> --issue <n>")
+        return roster_kill(a.issue, a.task)
     if a.role == "clean":
         # 안전한 것만 지운다: 미커밋 변경 없음 + origin 에 없는 커밋 없음.
         base = os.environ.get("MUSTER_WORK_DIR")
@@ -1426,10 +1508,16 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         log_path.parent.mkdir(parents=True, exist_ok=True)
         print(f"[{role}] 라이브 로그: {log_path}", file=sys.stderr)
         result = {}
+        roster_key = f"issue-{issue}/{role}" if issue is not None else f"adhoc/{role}/{os.getpid()}"
         proc = subprocess.Popen(
             cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             text=True, env={**os.environ, **extra_env},
         )
+        roster_register(roster_key, {
+            "pid": proc.pid, "role": role,
+            "issue": issue, "ts": int(time.time()),
+            "work": str(cwd), "log": str(log_path),
+        })
         try:
             proc.stdin.write(task)
             proc.stdin.close()
@@ -1446,6 +1534,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                 if isinstance(obj, dict) and obj.get("type") == "result":
                     result = obj
         rc = proc.wait()
+        roster_remove(roster_key)
     finally:
         os.unlink(settings)
     if result.get("result"):
