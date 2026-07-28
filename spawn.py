@@ -1035,7 +1035,8 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
     쓰면 attended 스폰이 깨진다.
     """
     cmd = ["claude", "-p", "--settings", settings_path,
-           "--permission-mode", "acceptEdits", "--output-format", "json"]
+           "--permission-mode", "acceptEdits",
+           "--output-format", "stream-json", "--verbose"]
     # 룰북도 core 와 같은 길로 붙는다 — 디렉터리로 넘긴 플러그인의 훅은
     # headless 에서 그대로 발화하고(실측 2026-07-27, CLI 2.1.220), 설치를
     # 안 거치므로 캐시-클론 갈라짐도 유령 등록 항목도 이 경로엔 없다.
@@ -1293,22 +1294,41 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         except Exception:
             answering = []
         t0 = time.monotonic()
-        # stdout 만 잡는다 — --output-format json 의 결과 오브젝트가 거기 온다.
-        # stderr 는 그대로 흘린다: 진행 로그는 사람 것이다.
-        proc = subprocess.run(
-            cmd, cwd=cwd, input=task, text=True,
-            stdout=subprocess.PIPE,
-            env={**os.environ, **extra_env},
+        # stream-json 을 줄 단위로 받아 라이브 로그에 tee 한다 — "지금 뭐
+        # 하는 중인가"가 세션이 끝나기 전에도 보이게. 최종 result 이벤트가
+        # 옛 --output-format json 의 결과 오브젝트와 같은 필드를 든다.
+        log_path = (Path(str(cwd) + ".session.log") if issue is not None
+                    else ROOT / "runs" / "last-session.log")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[{role}] 라이브 로그: {log_path}", file=sys.stderr)
+        result = {}
+        proc = subprocess.Popen(
+            cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            text=True, env={**os.environ, **extra_env},
         )
-        rc = proc.returncode
+        try:
+            proc.stdin.write(task)
+            proc.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+        with open(log_path, "w", encoding="utf-8") as lf:
+            for line in proc.stdout:
+                lf.write(line)
+                lf.flush()
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(obj, dict) and obj.get("type") == "result":
+                    result = obj
+        rc = proc.wait()
     finally:
         os.unlink(settings)
-
-    result = session_result(proc.stdout)
     if result.get("result"):
         print(result["result"])                  # 세션의 마지막 답 — 기존 UX
-    elif proc.stdout.strip():
-        print(proc.stdout, end="")               # JSON 이 아니면 그대로 — 숨기지 않는다
+    elif not result:
+        print(f"[{role}] 결과 이벤트를 받지 못했다 — 라이브 로그를 봐라: {log_path}",
+              file=sys.stderr)
 
     after = board_snapshot(cwd)
     delta = sorted(p for p in set(before) | set(after)
