@@ -418,7 +418,11 @@ def rulebook_version(role: str) -> str:
         br = checkout_issue_branch(cwd, issue, role)
         print(f"[{role}] 격리 작업 디렉토리: {cwd}  (브랜치 {br})", file=sys.stderr)
         task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
-                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n\n") + task
+                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n"
+                f"완료의 정의: 변경이 이 브랜치에 **커밋**되고 push 되어 PR 로\n"
+                f"제출된 상태다. 미커밋 변경은 존재하지 않는 것과 같다 —\n"
+                f"세션을 끝내기 전에 반드시 커밋하라. push/PR 이 네트워크로\n"
+                f"막히면 커밋까지는 해 둬라: muster 가 밖에서 릴레이한다.\n\n") + task
     d = rulebook_dir(spec)
     if d is None:
         return "버전 불명 (룰북이 아직 없다)"
@@ -1311,7 +1315,11 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         br = checkout_issue_branch(cwd, issue, role)
         print(f"[{role}] 격리 작업 디렉토리: {cwd}  (브랜치 {br})", file=sys.stderr)
         task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
-                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n\n") + task
+                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n"
+                f"완료의 정의: 변경이 이 브랜치에 **커밋**되고 push 되어 PR 로\n"
+                f"제출된 상태다. 미커밋 변경은 존재하지 않는 것과 같다 —\n"
+                f"세션을 끝내기 전에 반드시 커밋하라. push/PR 이 네트워크로\n"
+                f"막히면 커밋까지는 해 둬라: muster 가 밖에서 릴레이한다.\n\n") + task
     if issue is not None:
         # 격리 작업 클론에서 돈다 — 사용자의 체크아웃은 건드리지 않고,
         # 동시 스폰들이 서로의 index/브랜치를 밟지 않는다.
@@ -1319,7 +1327,11 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         br = checkout_issue_branch(cwd, issue, role)
         print(f"[{role}] 격리 작업 디렉토리: {cwd}  (브랜치 {br})", file=sys.stderr)
         task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
-                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n\n") + task
+                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n"
+                f"완료의 정의: 변경이 이 브랜치에 **커밋**되고 push 되어 PR 로\n"
+                f"제출된 상태다. 미커밋 변경은 존재하지 않는 것과 같다 —\n"
+                f"세션을 끝내기 전에 반드시 커밋하라. push/PR 이 네트워크로\n"
+                f"막히면 커밋까지는 해 둬라: muster 가 밖에서 릴레이한다.\n\n") + task
     plugins = plugin_dirs(role, spec)
     s = role_settings(role)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
@@ -1384,10 +1396,22 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     except Exception:
         blocked = []       # 분류 보조일 뿐, 평가 실패로 스폰 결과를 잃지 않는다
 
+    uncommitted = []
     if issue is not None:
+        st = subprocess.run(["git", "-C", cwd, "status", "--porcelain"],
+                            capture_output=True, text=True)
+        uncommitted = [l for l in st.stdout.splitlines() if l.strip()]
+        if uncommitted:
+            print(f"[{role}] 세션이 미커밋 변경 {len(uncommitted)}건을 남기고 "
+                  f"끝났다 — 커밋되지 않은 작업은 PR 에 존재하지 않는다. "
+                  f"같은 이슈로 재스폰하면 이 워크스페이스를 이어받아 커밋부터 "
+                  f"끝낼 수 있다:\n  " + "\n  ".join(uncommitted[:10]),
+                  file=sys.stderr)
         ensure_pushed(cwd, issue, role)
     gates = gate_report(cwd) + ownership_report(cwd, role, delta)
     outcome = classify(rc, result, delta, blocked)
+    if outcome == "silent-failure" and uncommitted:
+        outcome = "uncommitted-work"
     denials = result.get("permission_denials") or []
     if outcome == "progressed":
         # 계약 §6: wake 는 그 결과 기록이 쓰여야 소비된다. 아무것도 안 썼으면
