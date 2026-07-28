@@ -56,6 +56,12 @@ issue/PR model (muster at ${MUSTER}). When the user brings work:
 - Roles are spawned with
   \`python3 ${MUSTER}/spawn.py <role> "<task>" --issue <n> -C <repo>\`;
   read the board first with \`python3 ${MUSTER}/spawn.py wake -C <repo>\`.
+  ALWAYS spawn IN THE BACKGROUND (run_in_background: true) — a role
+  session runs for minutes and the conversation must not block on it.
+  Keep talking with the user; when the completion notification arrives,
+  read the spawn output and report the outcome (the PR, or the refusal)
+  in your next reply. Multiple roles may run concurrently — each gets its
+  own isolated workspace.
 - Explain returning PRs (phase 1 proposal vs phase 2 delivery), then
   relay the user's decisions per conversation: feedback -> gh pr comment;
   approval -> a comment that is EXACTLY "APPROVE issue-<n>/<role>";
