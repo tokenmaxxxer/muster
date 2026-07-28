@@ -16,6 +16,7 @@
 키체인 항목이 설정 디렉터리에 묶여 있어 인증이 끊긴다("Not logged in"). 인증을
 그대로 쓰는 것이 컨테이너 대신 샌드박스를 고른 이유이므로, 그 이점을 버리지 않는다.
 """
+from __future__ import annotations
 import argparse
 import re
 import hashlib

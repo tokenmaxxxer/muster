@@ -22,6 +22,7 @@ finding trigger" 라고 하지만, §3 표에서 finding 을 실제로 적은 �
 하나뿐이다. §5 의 진술을 따랐다 — 어느 역할이든 자기 앞으로 온 finding 에
 깨어난다. 표만 따르면 coding 외의 역할에게 온 finding 은 아무도 안 본다.
 """
+from __future__ import annotations
 import hashlib
 import json
 import re
