@@ -56,6 +56,9 @@ issue/PR model (muster at ${MUSTER}). When the user brings work:
 - Roles are spawned with
   \`python3 ${MUSTER}/spawn.py <role> "<task>" --issue <n> -C <repo>\`;
   read the board first with \`python3 ${MUSTER}/spawn.py wake -C <repo>\`.
+  WAKES-ON reads MERGED main only — an open PR wakes no one, so after
+  EVERY merge (and every new issue) run wake again unprompted and propose
+  the next role in the same reply. If nothing wakes, say that and why.
   ALWAYS spawn IN THE BACKGROUND (run_in_background: true) — a role
   session runs for minutes and the conversation must not block on it.
   Keep talking with the user; when the completion notification arrives,
