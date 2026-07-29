@@ -126,6 +126,73 @@ class SpawnCmd(unittest.TestCase):
             else:
                 os.environ["MUSTER_ROLE_MODEL"] = saved
 
+    def test_role_model_config_only_appends_flag(self):
+        # 이슈#60: MUSTER_ROLE_MODEL 미설정, role_model.txt 만 있으면
+        # --model <config value> 가 argv 에 붙는다.
+        saved_env = os.environ.pop("MUSTER_ROLE_MODEL", None)
+        saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
+        try:
+            spawn.ROLE_MODEL_CONFIG.write_text("sonnet")
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            self.assertIn("--model", cmd)
+            self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
+        finally:
+            if saved_cfg is None:
+                spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
+            else:
+                spawn.ROLE_MODEL_CONFIG.write_text(saved_cfg)
+            if saved_env is not None:
+                os.environ["MUSTER_ROLE_MODEL"] = saved_env
+
+    def test_role_model_env_overrides_config(self):
+        # 이슈#60: 둘 다 설정되면 env 값이 이긴다.
+        saved_env = os.environ.get("MUSTER_ROLE_MODEL")
+        saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
+        try:
+            spawn.ROLE_MODEL_CONFIG.write_text("haiku")
+            os.environ["MUSTER_ROLE_MODEL"] = "opus"
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            self.assertEqual(cmd[cmd.index("--model") + 1], "opus")
+        finally:
+            if saved_cfg is None:
+                spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
+            else:
+                spawn.ROLE_MODEL_CONFIG.write_text(saved_cfg)
+            if saved_env is None:
+                os.environ.pop("MUSTER_ROLE_MODEL", None)
+            else:
+                os.environ["MUSTER_ROLE_MODEL"] = saved_env
+
+    def test_role_model_whitespace_only_config_is_unchanged(self):
+        # 이슈#60: 공백만 있는 config 값도 미설정과 동일하게 취급한다.
+        saved_env = os.environ.pop("MUSTER_ROLE_MODEL", None)
+        saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
+        try:
+            spawn.ROLE_MODEL_CONFIG.write_text("   ")
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            self.assertNotIn("--model", cmd)
+        finally:
+            if saved_cfg is None:
+                spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
+            else:
+                spawn.ROLE_MODEL_CONFIG.write_text(saved_cfg)
+            if saved_env is not None:
+                os.environ["MUSTER_ROLE_MODEL"] = saved_env
+
+    def test_role_model_no_config_file_is_unchanged(self):
+        # 이슈#60: role_model.txt 자체가 없으면 미설정과 동일하다.
+        saved_env = os.environ.pop("MUSTER_ROLE_MODEL", None)
+        saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
+        try:
+            spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            self.assertNotIn("--model", cmd)
+        finally:
+            if saved_cfg is not None:
+                spawn.ROLE_MODEL_CONFIG.write_text(saved_cfg)
+            if saved_env is not None:
+                os.environ["MUSTER_ROLE_MODEL"] = saved_env
+
     def test_role_model_does_not_affect_haiku_probe(self):
         # doctor() 의 haiku 프로브는 spawn_cmd 를 거치지 않는다 - 소스에서
         # 하드코딩된 "--model", "haiku" 가 여전히 남아 있는지 직접 확인한다.
@@ -152,7 +219,7 @@ class DryRunModelReflection(unittest.TestCase):
     @staticmethod
     def _dry_run_output(role: str) -> dict:
         out = spawn.role_settings(role)
-        role_model = (os.environ.get("MUSTER_ROLE_MODEL") or "").strip()
+        role_model = spawn.resolved_role_model()
         if role_model:
             out["model"] = role_model
         return out
@@ -190,6 +257,22 @@ class DryRunModelReflection(unittest.TestCase):
                 os.environ.pop("MUSTER_ROLE_MODEL", None)
             else:
                 os.environ["MUSTER_ROLE_MODEL"] = saved
+
+    def test_config_only_output_reflects_model(self):
+        # 이슈#60: env 없이 role_model.txt 만 있어도 dry-run 출력이 반영한다.
+        saved_env = os.environ.pop("MUSTER_ROLE_MODEL", None)
+        saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
+        try:
+            spawn.ROLE_MODEL_CONFIG.write_text("sonnet")
+            out = self._dry_run_output("qa")
+            self.assertEqual(out.get("model"), "sonnet")
+        finally:
+            if saved_cfg is None:
+                spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
+            else:
+                spawn.ROLE_MODEL_CONFIG.write_text(saved_cfg)
+            if saved_env is not None:
+                os.environ["MUSTER_ROLE_MODEL"] = saved_env
 
 
 class PackageRegistryAccess(unittest.TestCase):
