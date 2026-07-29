@@ -32,7 +32,6 @@ per-restriction trade-off note pattern with one posture statement.
    - `sandbox.network.allowLocalBinding = True`
    - `sandbox.network.allowMachLookup = ["*"]` (macOS only; no-op on Linux
      per the schema's own doc string)
-   - `sandbox.filesystem.allowGitConfig = True`
    - `sandbox.enableWeakerNetworkIsolation = True`
    - `sandbox.allowAppleEvents = True` (macOS only)
    - `sandbox.enableWeakerNestedSandbox = True`
@@ -53,6 +52,13 @@ per-restriction trade-off note pattern with one posture statement.
 
 ## Out of scope
 
+- `filesystem.allowGitConfig` — dropped from the open set (not the write-scoping
+  exception from before, a correction): warrant-hunter verified against the
+  installed binary's zod schema that no `allowGitConfig:v.boolean()...`
+  declaration exists under `filesystem` — only an internal function-parameter
+  destructure defaulting to `false`. Setting it via `roles/*.json`/
+  `role_settings()` would be a silent no-op; the survey's inventory table
+  now flags this.
 - `filesystem.denyRead`/`allowRead` — not one of the three keep-reasons'
   concerns (write only), and not named in the acceptance criteria; left
   as-is.

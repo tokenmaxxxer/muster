@@ -18,7 +18,7 @@ the setting name and its nesting (`sandbox.network.*`,
 | `allowLocalBinding` | `network` | restricted | binding to local network addresses/ports |
 | `allowMachLookup` | `network` | none allowed | macOS-only list of mach service names reachable (trailing-`*` wildcard supported) |
 | `allowPty` | top-level `sandbox` | restricted | pty allocation inside the sandboxed process |
-| `allowGitConfig` | `filesystem` | `false` | read access to the host's global git config |
+| `allowGitConfig` | internal only (accessor reads `Hl?.filesystem?.allowGitConfig`) | `false` | **not exposed as a settings-writable schema field** — grep found only the internal function-parameter destructure (`allowGitConfig:b=!1`), never a matching `allowGitConfig:v.boolean()...` schema declaration anywhere in the binary. The declared `filesystem` schema only has `allowRead`, `allowManagedReadPathsOnly`, `disabled` (plus `denyRead`/`allowWrite`/`denyWrite` used elsewhere). Setting `sandbox.filesystem.allowGitConfig` in `roles/*.json`/`role_settings()` would be a silent no-op — **removed from the open set** (caught by warrant-hunter, verified against the same binary strings) |
 | `enableWeakerNetworkIsolation` | top-level `sandbox` | `false` | macOS-only: access to `com.apple.trustd.agent`, needed for Go-based CLI tools (gh, gcloud, terraform) to verify TLS certs through the sandbox's proxy |
 | `allowAppleEvents` | top-level `sandbox` | `false` | macOS-only: sandboxed Apple Events — CLI's own doc string flags this as "a demonstration vector through the trustd service" |
 | `enableWeakerNestedSandbox` | top-level `sandbox` | `false` | relaxes confinement when a sandboxed process itself spawns a nested sandbox |
@@ -50,12 +50,14 @@ None of the switches above serve any of the three:
   external to the sandbox schema (`.claude/hooks/*`) — no sandbox-schema
   switch implements or overlaps with it.
 
-**Conclusion: every restriction switch found is a candidate to open**,
-except the three already correctly kept for other reasons noted in the
-table (`allowUnsandboxedCommands: false` — keeps the sandbox itself
+**Conclusion: every remaining restriction switch found is a candidate to
+open**, except the three already correctly kept for other reasons noted in
+the table (`allowUnsandboxedCommands: false` — keeps the sandbox itself
 mandatory, i.e. the precondition for reason 1; `filesystem.allowWrite`/
 `denyWrite` — reason 2; `tlsTerminate` — orthogonal credential-masking
-mechanism, unset unless needed, not a default-deny switch).
+mechanism, unset unless needed, not a default-deny switch), plus
+`allowGitConfig`, which is not a real settings-writable switch at all (see
+table) and is dropped from the open set rather than kept for a reason.
 
 ## Where the merge belongs
 
