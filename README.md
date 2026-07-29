@@ -376,23 +376,36 @@ run arbitrary published code from that registry. This is accepted
 deliberately, scoped to official registries only — no wildcards, no mirrors,
 no CDNs beyond the registry's own asset host.
 
-### Web-access allowlist (issue #58)
+### Web access (issues #58, #65)
 
 Every role's sandbox allowlist only covered 3 hosts (`api.anthropic.com`,
 `*.github.com`, `github.com`) plus the registry hosts above, so `WebSearch`
 and `WebFetch` were silently denied for every role — the target of a search
 or an in-context URL is not knowable in advance, so no fixed host list can
 cover it (issue #43 hit this: 3/6 survey targets went unverified).
-`role_settings()` addresses this the same way it addresses the registry
-case:
 
-1. **Web-access domain merge.** `WEB_ACCESS_DOMAINS` (a single `["*"]`
-   entry — confirmed against the running Claude Code sandbox's domain
-   matcher, which treats a literal `"*"` as matching every host) is merged
-   into every sandboxed role's `sandbox.network.allowedDomains`, the same
-   additive, dedup-safe way `PACKAGE_REGISTRY_HOSTS` is merged just above.
-   This applies to all roles uniformly (operator decision: option B, not a
-   per-role opt-in).
+Web access is gated by **two independent layers**, and both have to be open
+or the tool call is denied. `role_settings()` addresses each the same way it
+addresses the registry case — additive, dedup-safe merges, applied to all
+roles uniformly (operator decision: option B, not a per-role opt-in):
+
+1. **Sandbox network layer (issue #58).** `WEB_ACCESS_DOMAINS` (a single
+   `["*"]` entry — confirmed against the running Claude Code sandbox's
+   domain matcher, which treats a literal `"*"` as matching every host) is
+   merged into every sandboxed role's `sandbox.network.allowedDomains`, the
+   same way `PACKAGE_REGISTRY_HOSTS` is merged just above. This governs
+   whether the sandbox lets the *network connection* out.
+
+2. **Tool-permission layer (issue #65).** Fixing layer 1 alone was not
+   enough: a live session still saw every `WebSearch` call denied with
+   "Permission to use WebSearch has been denied." Headless role sessions
+   run with `--permission-mode acceptEdits` and nobody to answer a
+   permission prompt, so a tool with no matching rule in
+   `permissions.allow` is auto-denied regardless of what the network layer
+   allows. `role_settings()` adds `WebSearch` and `WebFetch` to
+   `permissions.allow` for every role (merged, not replacing a role's own
+   `permissions.allow` entries) so headless sessions never hit that prompt
+   for these two tools.
 
 **Trade-off, explicit:** unlike the registry allowlist, this reopens
 outbound network to arbitrary hosts, not a fixed set — a `WebFetch`

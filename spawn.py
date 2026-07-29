@@ -390,6 +390,17 @@ def role_settings(role: str) -> dict:
     for name in globals_:
         s.setdefault("enabledPlugins", {}).setdefault(name, False)
 
+    # WebSearch/WebFetch 는 두 층에서 막힌다(이슈 #65, #58 후속). #58 은 샌드박스
+    # NETWORK 층(allowedDomains)만 열었다 — TOOL-PERMISSION 층은 별개로, headless
+    # 세션은 --permission-mode acceptEdits 로 뜨고 답할 사람이 없어서
+    # permissions.allow 에 규칙이 없는 도구는 그냥 거부된다(#58 조사가 놓친 지점).
+    # 모든 역할에 적용한다(#58 과 동일한 operator 결정: option B) — 샌드박스
+    # 활성 여부와 무관하다, 이 층은 샌드박스가 아니라 CLI 권한 프롬프트이므로.
+    allow = s.setdefault("permissions", {}).setdefault("allow", [])
+    for tool in ("WebSearch", "WebFetch"):
+        if tool not in allow:
+            allow.append(tool)
+
     # 자격증명 마스킹은 TLS 종료가 없으면 sentinel 값만 흘러 도구 인증이 깨진다.
     sb = s.get("sandbox", {})
     if sb.get("credentials", {}).get("envVars") and "tlsTerminate" not in sb.get("network", {}):
