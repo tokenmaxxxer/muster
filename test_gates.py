@@ -251,25 +251,30 @@ def t_wake_never_reports_judgement_rows_as_unwoken():
         assert "못 재는 것이다" in text, text
 
 
-def t_missing_contract_stops_the_spawn():
-    """실측 A/B: 레포에 계약이 없으면 역할이 계약 헤더 없이 기록을 쓰고, 보드에
-    아무것도 안 올라가고, 세션은 성공으로 끝난다. 경고로는 안 되는 이유가 그
-    조용함이다 — 한 세션을 통째로 버린다."""
+def t_missing_board_marker_stops_the_spawn():
+    """실측 A/B: 레포에 보드 표식(approvers.md)이 없으면 역할이 아무 기록도 못
+    올리고, 세션은 성공으로 끝난다. 경고로는 안 되는 이유가 그 조용함이다 —
+    한 세션을 통째로 버린다. v3 의 계약 검문은 require_board() 다."""
     with tempfile.TemporaryDirectory() as td:
         root = Path(td) / "repo"
         (root / "docs" / "specs").mkdir(parents=True)
+
+        # (a) marker 표식 있음 → 통과 (예외 없이 반환)
+        (root / spawn.MARKER).write_text("- u\n")
+        spawn.require_board(str(root), override=False)
+        (root / spawn.MARKER).unlink()
+
+        # (b) marker 표식 없음, override=True → 명시적 opt-out 은 통과.
+        # 사고가 아니라 결정이어야 한다.
+        spawn.require_board(str(root), override=True)
+
+        # (c) marker 표식 없음, override=False → 세션을 멈춘다
         try:
-            spawn.require_contract(str(root), override=False)
+            spawn.require_board(str(root), override=False)
         except SystemExit as e:
-            assert spawn.CONTRACT in str(e), e
+            assert spawn.MARKER in str(e), e
         else:
-            raise AssertionError("계약이 없는데 통과시켰다")
-
-        # 명시적 opt-out 은 통과. 사고가 아니라 결정이어야 한다.
-        spawn.require_contract(str(root), override=True)
-
-        (root / spawn.CONTRACT).write_text("# contract\n")
-        spawn.require_contract(str(root), override=False)
+            raise AssertionError("보드 표식이 없는데 통과시켰다")
 
 
 def t_rulebook_version_is_recorded():
@@ -380,25 +385,11 @@ def t_rulebook_falls_back_to_github():
         raise AssertionError("소스가 없는데 통과시켰다")
 
 
-def t_contract_drift_is_detected_by_content():
-    """계약 frontmatter 는 `status: final` 뿐이고 **버전이 없다.** 그래서 두 판이
-    나란히 final 을 선언하며 188줄 다를 수 있었다(2026-07-26 실측). 버전이 없으면
-    내용 해시가 유일한 판별 수단이다."""
-    with tempfile.TemporaryDirectory() as td:
-        root = Path(td) / "repo"
-        (root / "docs" / "specs").mkdir(parents=True)
-        assert spawn.contract_drift(str(root)) is None, "계약이 없으면 갈라짐도 없다"
-
-        assert spawn.init_contract(str(root)) == 0
-        assert spawn.contract_drift(str(root)) is None, "심은 직후는 정본과 같다"
-
-        (root / spawn.CONTRACT).write_text("---\nstatus: final\n---\n다른 판\n")
-        drift = spawn.contract_drift(str(root))
-        assert drift and "정본" in drift, drift
-
-        # 다른 판을 **덮어쓰지 않는다** — 의도적으로 다를 수 있다.
-        assert spawn.init_contract(str(root)) == 1
-        assert "다른 판" in (root / spawn.CONTRACT).read_text()
+# v3 abolished the per-repo contract copy (commit 613a5fbced1b08b48c4c8215a
+# 241d0b8a823dbcc: "init writes approvers.md, not a contract copy; require_board
+# replaces require_contract"). The two spawn.py functions this test exercised
+# for content-hash-based drift detection and copy-seeding no longer exist, so
+# there is nothing left to drift — do not restore this test.
 
 
 def t_new_roles_resolve_without_a_local_checkout():

@@ -84,6 +84,54 @@ GREEN: `t_wake_hypothesis_wakes_feasibility` -> "OK".
   OK - green after revert
   ```
 
+### Item 3 — `t_contract_drift_is_detected_by_content` deleted
+
+RED (already captured, confirmed by direct symbol probe rather than a
+destructive full-file run):
+```
+>>> spawn.contract_drift('/tmp')
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+AttributeError: module 'spawn' has no attribute 'contract_drift'
+```
+
+Deleted test_gates.py:383-401 (the `def` line and full body) and replaced it
+with an in-file comment recording that v3 abolished the per-repo contract
+copy (commit 613a5fbced1b08b48c4c8215a241d0b8a823dbcc) so a future
+contributor does not try to "restore" it.
+
+GREEN: `grep -n "contract_drift\|init_contract" test_gates.py` returns no
+matches (confirmed — the only prior hits were inside the deleted test body;
+the replacement comment was deliberately worded to avoid containing those
+literal symbol names, so the grep stays clean).
+
+### Item 4 — `t_missing_contract_stops_the_spawn` replaced by `require_board()` coverage
+
+RED (isolated the old test against the pre-edit file):
+```
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "test_gates.py", line 262, in t_missing_contract_stops_the_spawn
+    spawn.require_contract(str(root), override=False)
+    ^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'spawn' has no attribute 'require_contract'
+```
+
+Replaced test_gates.py:254-272 with a new test,
+`t_missing_board_marker_stops_the_spawn`, covering all three branches of
+`spawn.require_board()` (spawn.py:661-676): (a) marker present -> returns
+without raising; (b) marker absent + `override=True` -> returns without
+raising; (c) marker absent + `override=False` -> raises `SystemExit` whose
+message contains `spawn.MARKER`. Keeps the old test's intent — an unmet
+precondition stops the spawn before a session is burned.
+
+GREEN (isolated run, all three branches in one test body):
+```
+OK - all three branches green
+```
+`grep -n "require_board" test_gates.py` now returns the three call sites
+(one per branch) inside the new test.
+
 ## Why
 
 Upstream basis: issue #74 ("the self-check suite is dead: test_gates.py
