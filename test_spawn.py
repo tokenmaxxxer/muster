@@ -88,12 +88,14 @@ class SpawnCmd(unittest.TestCase):
         self.assertEqual(env["TOKENMAXXXER_UNATTENDED"], "1")
         self.assertEqual(env["TOKENMAXXXER_SPAWNED"], "1")
 
-    def test_role_model_unset_is_unchanged(self):
-        # MUSTER_ROLE_MODEL 미설정 시 오늘과 동일 - --model 이 붙지 않는다.
+    def test_role_model_unset_uses_builtin_default(self):
+        # 이슈#93: MUSTER_ROLE_MODEL/config 둘 다 미설정이면 built-in
+        # "sonnet" 이 --model 로 붙는다.
         saved = os.environ.pop("MUSTER_ROLE_MODEL", None)
         try:
             cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
-            self.assertNotIn("--model", cmd)
+            self.assertIn("--model", cmd)
+            self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
             if saved is not None:
                 os.environ["MUSTER_ROLE_MODEL"] = saved
@@ -112,14 +114,15 @@ class SpawnCmd(unittest.TestCase):
             else:
                 os.environ["MUSTER_ROLE_MODEL"] = saved
 
-    def test_role_model_whitespace_only_is_unchanged(self):
-        # 이슈#35: 공백만 있는 MUSTER_ROLE_MODEL 은 미설정과 동일하게 취급한다
-        # - "--model '   '" 같은 값이 argv 에 붙으면 안 된다.
+    def test_role_model_whitespace_only_uses_builtin_default(self):
+        # 이슈#35+#93: 공백만 있는 MUSTER_ROLE_MODEL 은 미설정과 동일하게
+        # 취급되어 built-in "sonnet" 이 붙는다 - "--model '   '" 은 안 된다.
         saved = os.environ.get("MUSTER_ROLE_MODEL")
         try:
             os.environ["MUSTER_ROLE_MODEL"] = "   "
             cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
-            self.assertNotIn("--model", cmd)
+            self.assertIn("--model", cmd)
+            self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
             if saved is None:
                 os.environ.pop("MUSTER_ROLE_MODEL", None)
@@ -163,14 +166,16 @@ class SpawnCmd(unittest.TestCase):
             else:
                 os.environ["MUSTER_ROLE_MODEL"] = saved_env
 
-    def test_role_model_whitespace_only_config_is_unchanged(self):
-        # 이슈#60: 공백만 있는 config 값도 미설정과 동일하게 취급한다.
+    def test_role_model_whitespace_only_config_uses_builtin_default(self):
+        # 이슈#60+#93: 공백만 있는 config 값도 미설정과 동일하게 취급되어
+        # built-in "sonnet" 이 붙는다.
         saved_env = os.environ.pop("MUSTER_ROLE_MODEL", None)
         saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
         try:
             spawn.ROLE_MODEL_CONFIG.write_text("   ")
             cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
-            self.assertNotIn("--model", cmd)
+            self.assertIn("--model", cmd)
+            self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
             if saved_cfg is None:
                 spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
@@ -179,16 +184,18 @@ class SpawnCmd(unittest.TestCase):
             if saved_env is not None:
                 os.environ["MUSTER_ROLE_MODEL"] = saved_env
 
-    def test_role_model_non_utf8_config_is_unchanged(self):
-        # 이슈#60: role_model.txt 가 UTF-8 이 아니면 read_role_model_config()
-        # 는 (docstring 대로) 미설정처럼 "" 를 돌려줘야 한다 — 스폰이
-        # UnicodeDecodeError 로 죽으면 안 된다.
+    def test_role_model_non_utf8_config_uses_builtin_default(self):
+        # 이슈#60+#93: role_model.txt 가 UTF-8 이 아니면 read_role_model_config()
+        # 는 (docstring 대로) 미설정처럼 "" 를 돌려주고, resolved_role_model()
+        # 은 built-in "sonnet" 으로 떨어진다 — 스폰이 UnicodeDecodeError 로
+        # 죽으면 안 된다.
         saved_env = os.environ.pop("MUSTER_ROLE_MODEL", None)
         saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
         try:
             spawn.ROLE_MODEL_CONFIG.write_bytes(b"\xff\xfe\x00\x01")
             cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
-            self.assertNotIn("--model", cmd)
+            self.assertIn("--model", cmd)
+            self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
             if saved_cfg is None:
                 spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
@@ -197,14 +204,30 @@ class SpawnCmd(unittest.TestCase):
             if saved_env is not None:
                 os.environ["MUSTER_ROLE_MODEL"] = saved_env
 
-    def test_role_model_no_config_file_is_unchanged(self):
-        # 이슈#60: role_model.txt 자체가 없으면 미설정과 동일하다.
+    def test_role_model_no_config_file_uses_builtin_default(self):
+        # 이슈#60+#93: role_model.txt 자체가 없으면 미설정과 동일하게 취급되어
+        # built-in "sonnet" 이 붙는다.
         saved_env = os.environ.pop("MUSTER_ROLE_MODEL", None)
         saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
         try:
             spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
             cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
-            self.assertNotIn("--model", cmd)
+            self.assertIn("--model", cmd)
+            self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
+        finally:
+            if saved_cfg is not None:
+                spawn.ROLE_MODEL_CONFIG.write_text(saved_cfg)
+            if saved_env is not None:
+                os.environ["MUSTER_ROLE_MODEL"] = saved_env
+
+    def test_resolved_role_model_builtin_default_is_sonnet(self):
+        # 이슈#93: env, config 둘 다 없으면 resolved_role_model() 은 "sonnet"
+        # 을 직접 돌려준다 — never no --model.
+        saved_env = os.environ.pop("MUSTER_ROLE_MODEL", None)
+        saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
+        try:
+            spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
+            self.assertEqual(spawn.resolved_role_model(), "sonnet")
         finally:
             if saved_cfg is not None:
                 spawn.ROLE_MODEL_CONFIG.write_text(saved_cfg)
@@ -242,11 +265,11 @@ class DryRunModelReflection(unittest.TestCase):
             out["model"] = role_model
         return out
 
-    def test_unset_output_has_no_model_key(self):
+    def test_unset_output_reflects_builtin_default(self):
         saved = os.environ.pop("MUSTER_ROLE_MODEL", None)
         try:
             out = self._dry_run_output("qa")
-            self.assertNotIn("model", out)
+            self.assertEqual(out.get("model"), "sonnet")
         finally:
             if saved is not None:
                 os.environ["MUSTER_ROLE_MODEL"] = saved
@@ -263,13 +286,14 @@ class DryRunModelReflection(unittest.TestCase):
             else:
                 os.environ["MUSTER_ROLE_MODEL"] = saved
 
-    def test_whitespace_only_output_has_no_model_key(self):
-        # 이슈#35: --dry-run 경로도 공백만 있는 값을 미설정처럼 취급한다.
+    def test_whitespace_only_output_reflects_builtin_default(self):
+        # 이슈#35+#93: --dry-run 경로도 공백만 있는 값을 미설정처럼 취급해
+        # built-in "sonnet" 을 반영한다.
         saved = os.environ.get("MUSTER_ROLE_MODEL")
         try:
             os.environ["MUSTER_ROLE_MODEL"] = "   "
             out = self._dry_run_output("qa")
-            self.assertNotIn("model", out)
+            self.assertEqual(out.get("model"), "sonnet")
         finally:
             if saved is None:
                 os.environ.pop("MUSTER_ROLE_MODEL", None)
