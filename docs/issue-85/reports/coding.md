@@ -71,4 +71,28 @@ resolved_findings before further commits, per the coding-progress gate.
 
 ## closed_checks
 
-(none yet — documentation-only change, no test suite applies)
+closed_checks:
+  - check: readme-rewrite-hunt (links/facts/parity/skeleton)
+    code_sha: e7a6a33
+    result: no finding
+
+## hunt-results
+
+A warrant-hunter probe ran against `code_under_review: e7a6a33` covering
+broken links/anchors, factual contradictions vs. repo docs, Korean/English
+parity gaps, and skeleton deviations from the approved proposal. The probe
+concluded with no finding.
+
+## board-gate note
+
+The hunter's report was written to `docs/reports/2026-07-29-hunt-readme-rewrite.md`,
+outside the issue tree. Per contract v3 s11 (board-gate R5), the `coding`
+role may write only `coding.md` and `coding/**` under
+`docs/issue-85/reports/`; relocating a foreign role's record into
+`docs/issue-85/reports/` is refused by the gate for this session (it is
+warrant-hunter's own record to place, at `docs/issue-85/reports/warrant-hunter.md`
+or `docs/issue-85/reports/warrant-hunter/**`). The report file itself was
+kept and staged at its current standing-bucket location
+(`docs/reports/2026-07-29-hunt-readme-rewrite.md`) rather than lost; a
+warrant-hunter-role session or the human maintainer should complete the
+move into the issue tree.
