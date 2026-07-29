@@ -1,6 +1,8 @@
 # Issue #85 — Coding Record
 
-loop_state: phase2-in-progress
+loop_state: phase2-complete
+
+code_under_review: e7a6a33
 
 ## Upstream basis
 
