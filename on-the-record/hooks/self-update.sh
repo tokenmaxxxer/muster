@@ -5,13 +5,15 @@
 trap 'rc=$?; if [ "$rc" != 0 ] && [ "$rc" != 2 ]; then exit 0; fi' EXIT
 set -uo pipefail
 case "${ORCHESTRATE_OFF:-}" in ""|0|false|no|off) ;; *) trap - EXIT; exit 0 ;; esac
-# Resolve the muster checkout (spawn.py lives at the repo root, OUTSIDE the
-# plugin subtree — a cache install copies only orchestrate/, so the old
-# plugin-root/../.. guess pointed at nothing there). Order: dev override,
-# plugin-root ancestors, the marketplace clone, else self-clone.
-_muster_resolve() {
-  if [ -n "${TOKENMAXXXER_MUSTER:-}" ] && [ -f "${TOKENMAXXXER_MUSTER}/spawn.py" ]; then
-    printf '%s' "${TOKENMAXXXER_MUSTER}"; return 0
+# Resolve the on-the-record checkout (spawn.py lives at the repo root,
+# OUTSIDE the plugin subtree — a cache install copies only orchestrate/, so
+# the old plugin-root/../.. guess pointed at nothing there). Order: dev
+# override, plugin-root ancestors, the marketplace clone, else self-clone
+# (preferring an existing new-path checkout, falling back to a still-present
+# old-path checkout before re-cloning).
+_checkout_resolve() {
+  if [ -n "${TOKENMAXXXER_CHECKOUT:-}" ] && [ -f "${TOKENMAXXXER_CHECKOUT}/spawn.py" ]; then
+    printf '%s' "${TOKENMAXXXER_CHECKOUT}"; return 0
   fi
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   probe="$d"
@@ -21,14 +23,16 @@ _muster_resolve() {
   done
   mk="$HOME/.claude/plugins/marketplaces/tokenmaxxxer"
   if [ -f "$mk/spawn.py" ]; then printf '%s' "$mk"; return 0; fi
-  own="$HOME/.claude/tokenmaxxxer/muster"
+  own="$HOME/.claude/tokenmaxxxer/on-the-record"
   if [ -f "$own/spawn.py" ]; then printf '%s' "$own"; return 0; fi
+  old="$HOME/.claude/tokenmaxxxer/muster"
+  if [ -f "$old/spawn.py" ]; then printf '%s' "$old"; return 0; fi
   mkdir -p "$(dirname "$own")" 2>/dev/null
-  git clone -q https://github.com/tokenmaxxxer/muster.git "$own" 2>/dev/null
+  git clone -q https://github.com/tokenmaxxxer/on-the-record.git "$own" 2>/dev/null
   if [ -f "$own/spawn.py" ]; then printf '%s' "$own"; return 0; fi
   return 1
 }
-MUSTER="$(_muster_resolve || true)"
-[ -n "$MUSTER" ] && git -C "$MUSTER" pull -q --ff-only 2>/dev/null || true
+CHECKOUT="$(_checkout_resolve || true)"
+[ -n "$CHECKOUT" ] && git -C "$CHECKOUT" pull -q --ff-only 2>/dev/null || true
 trap - EXIT
 exit 0

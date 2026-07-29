@@ -11,13 +11,15 @@ case "${ORCHESTRATE_OFF:-}" in ""|0|false|no|off) ;; *) trap - EXIT; exit 0 ;; e
 # A spawned role session is never the orchestrator, even if the plugin leaks in.
 [ -z "${CLAUDE_ROLE:-}" ] || { trap - EXIT; exit 0; }
 
-# Resolve the muster checkout (spawn.py lives at the repo root, OUTSIDE the
-# plugin subtree — a cache install copies only orchestrate/, so the old
-# plugin-root/../.. guess pointed at nothing there). Order: dev override,
-# plugin-root ancestors, the marketplace clone, else self-clone.
-_muster_resolve() {
-  if [ -n "${TOKENMAXXXER_MUSTER:-}" ] && [ -f "${TOKENMAXXXER_MUSTER}/spawn.py" ]; then
-    printf '%s' "${TOKENMAXXXER_MUSTER}"; return 0
+# Resolve the on-the-record checkout (spawn.py lives at the repo root,
+# OUTSIDE the plugin subtree — a cache install copies only orchestrate/, so
+# the old plugin-root/../.. guess pointed at nothing there). Order: dev
+# override, plugin-root ancestors, the marketplace clone, else self-clone
+# (preferring an existing new-path checkout, falling back to a still-present
+# old-path checkout before re-cloning).
+_checkout_resolve() {
+  if [ -n "${TOKENMAXXXER_CHECKOUT:-}" ] && [ -f "${TOKENMAXXXER_CHECKOUT}/spawn.py" ]; then
+    printf '%s' "${TOKENMAXXXER_CHECKOUT}"; return 0
   fi
   d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   probe="$d"
@@ -27,19 +29,21 @@ _muster_resolve() {
   done
   mk="$HOME/.claude/plugins/marketplaces/tokenmaxxxer"
   if [ -f "$mk/spawn.py" ]; then printf '%s' "$mk"; return 0; fi
-  own="$HOME/.claude/tokenmaxxxer/muster"
+  own="$HOME/.claude/tokenmaxxxer/on-the-record"
   if [ -f "$own/spawn.py" ]; then printf '%s' "$own"; return 0; fi
+  old="$HOME/.claude/tokenmaxxxer/muster"
+  if [ -f "$old/spawn.py" ]; then printf '%s' "$old"; return 0; fi
   mkdir -p "$(dirname "$own")" 2>/dev/null
-  git clone -q https://github.com/tokenmaxxxer/muster.git "$own" 2>/dev/null
+  git clone -q https://github.com/tokenmaxxxer/on-the-record.git "$own" 2>/dev/null
   if [ -f "$own/spawn.py" ]; then printf '%s' "$own"; return 0; fi
   return 1
 }
-MUSTER="$(_muster_resolve || true)"
-if [ -z "$MUSTER" ]; then
+CHECKOUT="$(_checkout_resolve || true)"
+if [ -z "$CHECKOUT" ]; then
   cat <<'NOTE'
-[orchestrate] muster checkout not found and could not be cloned. Roles
+[orchestrate] on-the-record checkout not found and could not be cloned. Roles
 cannot be spawned this session — tell the user, and fix with:
-  git clone https://github.com/tokenmaxxxer/muster.git ~/.claude/tokenmaxxxer/muster
+  git clone https://github.com/tokenmaxxxer/on-the-record.git ~/.claude/tokenmaxxxer/on-the-record
 NOTE
   trap - EXIT
   exit 0
@@ -47,15 +51,15 @@ fi
 
 cat <<EOF
 [orchestrate] You are the orchestration session for the tokenmaxxxer
-issue/PR model (muster at ${MUSTER}). When the user brings work:
+issue/PR model (on-the-record at ${CHECKOUT}). When the user brings work:
 
 - Requirements become ISSUES you draft and the user confirms (you are the
   scribe, never the inventor). Missing preconditions (GitHub remote,
   docs/specs/approvers.md) you offer to fill in conversation — always
   confirmed, never silent.
 - Roles are spawned with
-  \`python3 ${MUSTER}/spawn.py <role> "<task>" --issue <n> -C <repo>\`;
-  read the board first with \`python3 ${MUSTER}/spawn.py wake -C <repo>\`.
+  \`python3 ${CHECKOUT}/spawn.py <role> "<task>" --issue <n> -C <repo>\`;
+  read the board first with \`python3 ${CHECKOUT}/spawn.py wake -C <repo>\`.
   WAKES-ON reads MERGED main only — an open PR wakes no one, so after
   EVERY merge (and every new issue) run wake again unprompted and propose
   the next role in the same reply. If nothing wakes, say that and why.
