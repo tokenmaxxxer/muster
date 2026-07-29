@@ -1,11 +1,11 @@
 ---
 kind: coding-record
-loop_state: implemented-tested-pending-commit
+loop_state: committed-pending-push
 what-was-done: "Phase-2 implementation of MUSTER_ROLE_MODEL per approved docs/issue-31/proposals/coding.md: spawn_cmd appends --model <value> when the env var is set, README documents it next to MUSTER_AGENT_GH_TOKEN, test_spawn.py SpawnCmd gains three covering cases. Tests pass (33/33). Verified via direct spawn.spawn_cmd calls that --dry-run does not exercise spawn_cmd in this codebase."
 why: "Proposal approved; implementing exactly the frozen write set (spawn.py, README.md, test_spawn.py) with no scope drift."
 upstream-basis: "docs/issue-31/proposals/coding.md (approved build proposal) and this file's own phase-1 survey below."
-code_under_review: "TBD - filled in after commit"
-next-steps: "Commit and push to issue-31/coding (updates PR #32)."
+code_under_review: "91aeecb03eb803f427fd24d41a0989ff7e7122d6"
+next-steps: "Push to origin issue-31/coding (updates PR #32)."
 ---
 
 # Issue 31 - phase 2: MUSTER_ROLE_MODEL implementation
