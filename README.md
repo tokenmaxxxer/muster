@@ -50,6 +50,15 @@ spawned role sessions (e.g. `sonnet`, `opus`). Unset by default — role
 sessions then run on the CLI's default model. Does not affect the
 `doctor()` haiku probe, which always hardcodes its own cheap model.
 
+For a durable, repo-wide default that doesn't depend on remembering to
+set the env var per command, write the model name to a repo-root
+`role_model.txt` (one line, e.g. `sonnet`). Precedence is
+`MUSTER_ROLE_MODEL` (env) > `role_model.txt` (config) > none: the env
+var always wins when set, the config file is used only when the env var
+is unset, and a missing or whitespace-only value at either layer is
+treated the same as unset (no `--model` flag, today's baseline). `--dry-run`
+reflects the fully resolved value through the same precedence chain.
+
 Rulebooks and tokenmaxxxer-core need NO manual clones: spawn fetches and
 ff-updates them under `muster/runs/rulebooks/` automatically (a local
 checkout, if present, wins — that is the development override).
