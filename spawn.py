@@ -1238,7 +1238,7 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
     # MUSTER_ROLE_MODEL: 역할 세션이 쓰는 모델을 고정한다. 비어있으면(기본)
     # 오늘과 동일하게 --model 을 붙이지 않는다 — haiku 프로브(doctor())는
     # 이 함수를 거치지 않으므로 영향 없다.
-    role_model = os.environ.get("MUSTER_ROLE_MODEL")
+    role_model = (os.environ.get("MUSTER_ROLE_MODEL") or "").strip()
     if role_model:
         cmd += ["--model", role_model]
     env = {"CLAUDE_ROLE": role, "TOKENMAXXXER_SPAWNED": "1"}
@@ -1374,7 +1374,7 @@ def main() -> int:
         # 커맨드(`--dry-run`)로는 이 기능을 검증할 수 없다(실측:
         # docs/reports/2026-07-29-hunt-muster-role-model-build.md). 비어있으면
         # (기본) 키를 아예 안 넣어 91aeecb 이전 출력과 동일하게 둔다.
-        role_model = os.environ.get("MUSTER_ROLE_MODEL")
+        role_model = (os.environ.get("MUSTER_ROLE_MODEL") or "").strip()
         if role_model:
             out["model"] = role_model
         print(json.dumps(out, indent=2, ensure_ascii=False))
