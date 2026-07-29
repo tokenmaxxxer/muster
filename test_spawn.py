@@ -127,6 +127,44 @@ class SpawnCmd(unittest.TestCase):
                 os.environ["MUSTER_ROLE_MODEL"] = saved
 
 
+class DryRunModelReflection(unittest.TestCase):
+    """--dry-run 은 spawn_cmd 를 안 거치므로(세션을 안 띄우니까) 이슈#31
+    acceptance 커맨드(MUSTER_ROLE_MODEL=... --dry-run)가 실제로 뭔가
+    보여주는지는 main() 의 dry-run 분기가 role_settings() 출력에 model 을
+    얹는지에 달려 있다 — 여기서 그 분기를 직접 재현해 검사한다
+    (docs/reports/2026-07-29-hunt-muster-role-model-build.md).
+    """
+
+    @staticmethod
+    def _dry_run_output(role: str) -> dict:
+        out = spawn.role_settings(role)
+        role_model = os.environ.get("MUSTER_ROLE_MODEL")
+        if role_model:
+            out["model"] = role_model
+        return out
+
+    def test_unset_output_has_no_model_key(self):
+        saved = os.environ.pop("MUSTER_ROLE_MODEL", None)
+        try:
+            out = self._dry_run_output("qa")
+            self.assertNotIn("model", out)
+        finally:
+            if saved is not None:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
+    def test_set_output_reflects_model(self):
+        saved = os.environ.get("MUSTER_ROLE_MODEL")
+        try:
+            os.environ["MUSTER_ROLE_MODEL"] = "sonnet"
+            out = self._dry_run_output("qa")
+            self.assertEqual(out.get("model"), "sonnet")
+        finally:
+            if saved is None:
+                os.environ.pop("MUSTER_ROLE_MODEL", None)
+            else:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
+
 class BoardSnapshot(unittest.TestCase):
     def test_delta_shows_changed_and_new(self):
         with tempfile.TemporaryDirectory() as td:
