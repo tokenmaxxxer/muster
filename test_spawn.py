@@ -418,6 +418,43 @@ class PackageRegistryAccess(unittest.TestCase):
                     os.environ["GOMODCACHE"] = saved
 
 
+class SandboxDefaultOpenAccess(unittest.TestCase):
+    """이슈 #72: 나머지 기본값 제한적인 샌드박스 스위치를 전부 연다. sandbox.enabled
+    와 allowUnsandboxedCommands=False 는 그대로 유지되는지도 함께 검증한다."""
+
+    def test_open_switches_set_for_every_sandboxed_role(self):
+        for role_file in (Path(spawn.ROOT) / "roles").glob("*.json"):
+            role = role_file.stem
+            spec = json.loads(role_file.read_text())
+            if not spec.get("sandbox", {}).get("enabled"):
+                continue
+            out = spawn.role_settings(role)
+            net = out["sandbox"]["network"]
+            self.assertIs(net["allowAllUnixSockets"], True, role)
+            self.assertIs(net["allowLocalBinding"], True, role)
+            self.assertEqual(net["allowMachLookup"], ["*"], role)
+            self.assertIs(out["sandbox"]["enableWeakerNetworkIsolation"], True, role)
+            self.assertIs(out["sandbox"]["allowAppleEvents"], True, role)
+            self.assertIs(out["sandbox"]["enableWeakerNestedSandbox"], True, role)
+            self.assertIs(out["sandbox"]["enabled"], True, role)
+            self.assertIs(out["sandbox"]["allowUnsandboxedCommands"], False, role)
+
+    def test_role_declared_values_not_clobbered(self):
+        """이슈 #38 의 registry-host 병합과 같은 패턴: 병합이지 교체가 아니다."""
+        f = Path(spawn.ROOT) / "roles" / "coding.json"
+        original_text = f.read_text()
+        spec = json.loads(original_text)
+        spec.setdefault("sandbox", {})["enableWeakerNetworkIsolation"] = False
+        spec["sandbox"].setdefault("network", {})["allowLocalBinding"] = False
+        try:
+            f.write_text(json.dumps(spec))
+            out = spawn.role_settings("coding")
+            self.assertIs(out["sandbox"]["enableWeakerNetworkIsolation"], False)
+            self.assertIs(out["sandbox"]["network"]["allowLocalBinding"], False)
+        finally:
+            f.write_text(original_text)
+
+
 class BoardSnapshot(unittest.TestCase):
     def test_delta_shows_changed_and_new(self):
         with tempfile.TemporaryDirectory() as td:
