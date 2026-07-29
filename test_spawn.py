@@ -88,6 +88,82 @@ class SpawnCmd(unittest.TestCase):
         self.assertEqual(env["TOKENMAXXXER_UNATTENDED"], "1")
         self.assertEqual(env["TOKENMAXXXER_SPAWNED"], "1")
 
+    def test_role_model_unset_is_unchanged(self):
+        # MUSTER_ROLE_MODEL 미설정 시 오늘과 동일 - --model 이 붙지 않는다.
+        saved = os.environ.pop("MUSTER_ROLE_MODEL", None)
+        try:
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            self.assertNotIn("--model", cmd)
+        finally:
+            if saved is not None:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
+    def test_role_model_set_appends_flag(self):
+        # MUSTER_ROLE_MODEL 설정 시 --model <value> 가 argv 에 붙는다.
+        saved = os.environ.get("MUSTER_ROLE_MODEL")
+        try:
+            os.environ["MUSTER_ROLE_MODEL"] = "sonnet"
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            self.assertIn("--model", cmd)
+            self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
+        finally:
+            if saved is None:
+                os.environ.pop("MUSTER_ROLE_MODEL", None)
+            else:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
+    def test_role_model_does_not_affect_haiku_probe(self):
+        # doctor() 의 haiku 프로브는 spawn_cmd 를 거치지 않는다 - 소스에서
+        # 하드코딩된 "--model", "haiku" 가 여전히 남아 있는지 직접 확인한다.
+        saved = os.environ.get("MUSTER_ROLE_MODEL")
+        try:
+            os.environ["MUSTER_ROLE_MODEL"] = "sonnet"
+            src = Path(spawn.__file__).read_text()
+            self.assertIn('"--model", "haiku"', src)
+        finally:
+            if saved is None:
+                os.environ.pop("MUSTER_ROLE_MODEL", None)
+            else:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
+
+class DryRunModelReflection(unittest.TestCase):
+    """--dry-run 은 spawn_cmd 를 안 거치므로(세션을 안 띄우니까) 이슈#31
+    acceptance 커맨드(MUSTER_ROLE_MODEL=... --dry-run)가 실제로 뭔가
+    보여주는지는 main() 의 dry-run 분기가 role_settings() 출력에 model 을
+    얹는지에 달려 있다 — 여기서 그 분기를 직접 재현해 검사한다
+    (docs/reports/2026-07-29-hunt-muster-role-model-build.md).
+    """
+
+    @staticmethod
+    def _dry_run_output(role: str) -> dict:
+        out = spawn.role_settings(role)
+        role_model = os.environ.get("MUSTER_ROLE_MODEL")
+        if role_model:
+            out["model"] = role_model
+        return out
+
+    def test_unset_output_has_no_model_key(self):
+        saved = os.environ.pop("MUSTER_ROLE_MODEL", None)
+        try:
+            out = self._dry_run_output("qa")
+            self.assertNotIn("model", out)
+        finally:
+            if saved is not None:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
+    def test_set_output_reflects_model(self):
+        saved = os.environ.get("MUSTER_ROLE_MODEL")
+        try:
+            os.environ["MUSTER_ROLE_MODEL"] = "sonnet"
+            out = self._dry_run_output("qa")
+            self.assertEqual(out.get("model"), "sonnet")
+        finally:
+            if saved is None:
+                os.environ.pop("MUSTER_ROLE_MODEL", None)
+            else:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
 
 class BoardSnapshot(unittest.TestCase):
     def test_delta_shows_changed_and_new(self):

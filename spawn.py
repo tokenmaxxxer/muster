@@ -1163,6 +1163,12 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
         cmd += ["--plugin-dir", str(p)]
     for p in (core_plugins or []):
         cmd += ["--plugin-dir", str(p)]
+    # MUSTER_ROLE_MODEL: 역할 세션이 쓰는 모델을 고정한다. 비어있으면(기본)
+    # 오늘과 동일하게 --model 을 붙이지 않는다 — haiku 프로브(doctor())는
+    # 이 함수를 거치지 않으므로 영향 없다.
+    role_model = os.environ.get("MUSTER_ROLE_MODEL")
+    if role_model:
+        cmd += ["--model", role_model]
     env = {"CLAUDE_ROLE": role, "TOKENMAXXXER_SPAWNED": "1"}
     # Two-account model (core README): role sessions act as the AGENT
     # account. MUSTER_AGENT_GH_TOKEN, if set, becomes the session's GH_TOKEN
@@ -1290,7 +1296,21 @@ def main() -> int:
     # 전에 알아야 할 사실이지, 띄우고 나서 알 일이 아니다.
     require_no_repo_config(a.cwd, a.trust_repo_config)
     if a.dry_run:
-        print(json.dumps(role_settings(a.role), indent=2, ensure_ascii=False))
+        out = role_settings(a.role)
+        # MUSTER_ROLE_MODEL: spawn_cmd 는 이 dry-run 경로를 안 타므로(세션을
+        # 안 띄우니까) --model 부착 여부가 여기 안 보이면 이슈#31 acceptance
+        # 커맨드(`--dry-run`)로는 이 기능을 검증할 수 없다(실측:
+        # docs/reports/2026-07-29-hunt-muster-role-model-build.md). 비어있으면
+        # (기본) 키를 아예 안 넣어 91aeecb 이전 출력과 동일하게 둔다.
+        role_model = os.environ.get("MUSTER_ROLE_MODEL")
+        if role_model:
+            out["model"] = role_model
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+        if role_model:
+            # 실제 스폰 시 spawn_cmd 가 argv 에 붙이는 것과 같은 두 토큰을
+            # 여기서도 보여준다 — 이슈#31 acceptance("--dry-run 이 --model
+            # sonnet 을 보여준다")가 겨냥하는 문구 그대로.
+            print(f"--model {role_model}")
         return 0
     require_doctor()
     return _spawn_one(a.cwd, a.role, a.task, a.unattended, a.issue)

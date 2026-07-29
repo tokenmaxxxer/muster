@@ -45,6 +45,11 @@ Optional hardening: a separate agent identity (machine-account PAT via
 agent/human split from the session layer (gh-guard) to the account layer.
 The default needs neither — one account, everything in conversation.
 
+Optional: `export MUSTER_ROLE_MODEL=<model>` pins the model used by
+spawned role sessions (e.g. `sonnet`, `opus`). Unset by default — role
+sessions then run on the CLI's default model. Does not affect the
+`doctor()` haiku probe, which always hardcodes its own cheap model.
+
 Rulebooks and tokenmaxxxer-core need NO manual clones: spawn fetches and
 ff-updates them under `muster/runs/rulebooks/` automatically (a local
 checkout, if present, wins — that is the development override).
