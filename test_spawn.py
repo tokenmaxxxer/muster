@@ -179,6 +179,24 @@ class SpawnCmd(unittest.TestCase):
             if saved_env is not None:
                 os.environ["MUSTER_ROLE_MODEL"] = saved_env
 
+    def test_role_model_non_utf8_config_is_unchanged(self):
+        # 이슈#60: role_model.txt 가 UTF-8 이 아니면 read_role_model_config()
+        # 는 (docstring 대로) 미설정처럼 "" 를 돌려줘야 한다 — 스폰이
+        # UnicodeDecodeError 로 죽으면 안 된다.
+        saved_env = os.environ.pop("MUSTER_ROLE_MODEL", None)
+        saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
+        try:
+            spawn.ROLE_MODEL_CONFIG.write_bytes(b"\xff\xfe\x00\x01")
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            self.assertNotIn("--model", cmd)
+        finally:
+            if saved_cfg is None:
+                spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
+            else:
+                spawn.ROLE_MODEL_CONFIG.write_text(saved_cfg)
+            if saved_env is not None:
+                os.environ["MUSTER_ROLE_MODEL"] = saved_env
+
     def test_role_model_no_config_file_is_unchanged(self):
         # 이슈#60: role_model.txt 자체가 없으면 미설정과 동일하다.
         saved_env = os.environ.pop("MUSTER_ROLE_MODEL", None)

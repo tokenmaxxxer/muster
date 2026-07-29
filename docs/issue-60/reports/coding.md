@@ -62,5 +62,10 @@ No open findings yet; warrant-hunter runs before phase-2 completion per
 hunt cadence and any finding will be logged here with its resolution.
 
 ## closed_checks
-- `python3 -m pytest test_spawn.py -q` — 49 passed, 0 failed
+- `python3 -m pytest test_spawn.py -q` — 50 passed, 0 failed
   (code_under_review: this commit).
+- warrant-hunter finding: `read_role_model_config()` caught only
+  `OSError`; a non-UTF-8 `role_model.txt` raised `UnicodeDecodeError`,
+  crashing spawn.py instead of degrading to `""` as the docstring
+  promises. Resolved: now catches `(OSError, UnicodeDecodeError)`; added
+  regression test `test_role_model_non_utf8_config_is_unchanged`.
