@@ -50,6 +50,10 @@ Two fixes are requested:
   1738) and before `ledger_write(...)` (spawn.py:1739-1748), so a
   downgraded run neither consumes the wake row nor is durably recorded as
   `progressed`.
+- The fail-closed downgrade must consult the blocked signal before
+  firing — a blocked report exempts the session from the
+  progressed->FAILED downgrade even if a board delta classified it
+  progressed (see reports/coding/hunt-phase1.md).
 - Preserve the existing `outcome` vocabulary (`errored`, `progressed`,
   `waiting-on-human`, `refused`, `silent-failure`, `uncommitted-work`)
   as-is; add the new fail-closed result as an additional distinct value
