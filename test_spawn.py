@@ -524,6 +524,95 @@ class Classify(unittest.TestCase):
         self.assertEqual(spawn.classify(0, {}, [], []), "silent-failure")
 
 
+class FailClosedDowngrade(unittest.TestCase):
+    """issue #89 phase 2: progressed self-report but no verifiable commit
+    must be downgraded, unless a blocked signal is present."""
+
+    def test_no_new_commit_clean_tree_is_downgraded(self):
+        self.assertEqual(
+            spawn.fail_closed_downgrade("progressed", 3, [], False, []),
+            "failed-no-commit")
+
+    def test_no_new_commit_dirty_tree_is_downgraded(self):
+        self.assertEqual(
+            spawn.fail_closed_downgrade("progressed", 3, [], False,
+                                        ["M some/file.py"]),
+            "failed-no-commit")
+
+    def test_new_commit_dirty_tree_is_still_downgraded(self):
+        # a new commit landed but the tree is dirty afterwards — the
+        # proposal's "and/or dirty tree" clause still fires.
+        self.assertEqual(
+            spawn.fail_closed_downgrade("progressed", 3, [], True,
+                                        ["M some/file.py"]),
+            "failed-no-commit")
+
+    def test_new_commit_clean_tree_is_left_alone(self):
+        # honest-success path: real commit landed, tree is clean — no
+        # false positive, no friction.
+        self.assertEqual(
+            spawn.fail_closed_downgrade("progressed", 3, [], True, []),
+            "progressed")
+
+    def test_blocked_signal_exempts_progressed_from_downgrade(self):
+        # hunt-phase1.md: classify() checks delta before blocked, so a
+        # run that touched the board while a human gate is still open is
+        # classified "progressed" today. The downgrade must not silently
+        # erase that honest blocked signal by demoting it to FAILED.
+        blocked = [("coding", "§19")]
+        self.assertEqual(
+            spawn.fail_closed_downgrade("progressed", 3, blocked, False, []),
+            "progressed")
+
+    def test_non_progressed_outcomes_are_never_touched(self):
+        for outcome in ("waiting-on-human", "refused", "errored",
+                        "silent-failure", "uncommitted-work"):
+            self.assertEqual(
+                spawn.fail_closed_downgrade(outcome, 3, [], False, []),
+                outcome, outcome)
+
+    def test_adhoc_spawns_are_out_of_scope(self):
+        # issue is None -> no dedicated git workspace to check; leave as-is.
+        self.assertEqual(
+            spawn.fail_closed_downgrade("progressed", None, [], False, []),
+            "progressed")
+
+
+class PreambleWarning(unittest.TestCase):
+    """The issue-workspace task preamble in `_spawn_one` (spawn.py source,
+    not a re-implementation) must warn that the turn is headless/single-turn
+    and that run_in_background work dies at turn end."""
+
+    def test_issue_preamble_source_warns_about_headless_background_death(self):
+        src = Path(spawn.__file__).read_text(encoding="utf-8")
+        start = src.index('task = (f"당신의 이슈:')
+        end = src.index(") + task", start)
+        preamble_src = src[start:end]
+        self.assertIn("headless", preamble_src)
+        self.assertIn("run_in_background", preamble_src)
+
+
+class GitHead(unittest.TestCase):
+    def test_head_of_empty_repo_is_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            import subprocess
+            subprocess.run(["git", "init", "-q"], cwd=td)
+            self.assertIsNone(spawn._git_head(td))
+
+    def test_head_of_repo_with_commit_is_a_sha(self):
+        with tempfile.TemporaryDirectory() as td:
+            import subprocess
+            subprocess.run(["git", "init", "-q"], cwd=td)
+            subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=td)
+            subprocess.run(["git", "config", "user.name", "t"], cwd=td)
+            (Path(td) / "a.txt").write_text("x")
+            subprocess.run(["git", "add", "a.txt"], cwd=td)
+            subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=td)
+            head = spawn._git_head(td)
+            self.assertIsNotNone(head)
+            self.assertEqual(len(head), 40)
+
+
 class Ledger(unittest.TestCase):
     def test_appends_jsonl(self):
         with tempfile.TemporaryDirectory() as td:
