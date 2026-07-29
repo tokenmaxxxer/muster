@@ -112,6 +112,20 @@ class SpawnCmd(unittest.TestCase):
             else:
                 os.environ["MUSTER_ROLE_MODEL"] = saved
 
+    def test_role_model_whitespace_only_is_unchanged(self):
+        # 이슈#35: 공백만 있는 MUSTER_ROLE_MODEL 은 미설정과 동일하게 취급한다
+        # - "--model '   '" 같은 값이 argv 에 붙으면 안 된다.
+        saved = os.environ.get("MUSTER_ROLE_MODEL")
+        try:
+            os.environ["MUSTER_ROLE_MODEL"] = "   "
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            self.assertNotIn("--model", cmd)
+        finally:
+            if saved is None:
+                os.environ.pop("MUSTER_ROLE_MODEL", None)
+            else:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
     def test_role_model_does_not_affect_haiku_probe(self):
         # doctor() 의 haiku 프로브는 spawn_cmd 를 거치지 않는다 - 소스에서
         # 하드코딩된 "--model", "haiku" 가 여전히 남아 있는지 직접 확인한다.
@@ -138,7 +152,7 @@ class DryRunModelReflection(unittest.TestCase):
     @staticmethod
     def _dry_run_output(role: str) -> dict:
         out = spawn.role_settings(role)
-        role_model = os.environ.get("MUSTER_ROLE_MODEL")
+        role_model = (os.environ.get("MUSTER_ROLE_MODEL") or "").strip()
         if role_model:
             out["model"] = role_model
         return out
@@ -158,6 +172,19 @@ class DryRunModelReflection(unittest.TestCase):
             os.environ["MUSTER_ROLE_MODEL"] = "sonnet"
             out = self._dry_run_output("qa")
             self.assertEqual(out.get("model"), "sonnet")
+        finally:
+            if saved is None:
+                os.environ.pop("MUSTER_ROLE_MODEL", None)
+            else:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
+    def test_whitespace_only_output_has_no_model_key(self):
+        # 이슈#35: --dry-run 경로도 공백만 있는 값을 미설정처럼 취급한다.
+        saved = os.environ.get("MUSTER_ROLE_MODEL")
+        try:
+            os.environ["MUSTER_ROLE_MODEL"] = "   "
+            out = self._dry_run_output("qa")
+            self.assertNotIn("model", out)
         finally:
             if saved is None:
                 os.environ.pop("MUSTER_ROLE_MODEL", None)
