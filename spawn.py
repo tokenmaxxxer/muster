@@ -1163,6 +1163,12 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
         cmd += ["--plugin-dir", str(p)]
     for p in (core_plugins or []):
         cmd += ["--plugin-dir", str(p)]
+    # MUSTER_ROLE_MODEL: 역할 세션이 쓰는 모델을 고정한다. 비어있으면(기본)
+    # 오늘과 동일하게 --model 을 붙이지 않는다 — haiku 프로브(doctor())는
+    # 이 함수를 거치지 않으므로 영향 없다.
+    role_model = os.environ.get("MUSTER_ROLE_MODEL")
+    if role_model:
+        cmd += ["--model", role_model]
     env = {"CLAUDE_ROLE": role, "TOKENMAXXXER_SPAWNED": "1"}
     # Two-account model (core README): role sessions act as the AGENT
     # account. MUSTER_AGENT_GH_TOKEN, if set, becomes the session's GH_TOKEN

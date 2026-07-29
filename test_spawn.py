@@ -88,6 +88,44 @@ class SpawnCmd(unittest.TestCase):
         self.assertEqual(env["TOKENMAXXXER_UNATTENDED"], "1")
         self.assertEqual(env["TOKENMAXXXER_SPAWNED"], "1")
 
+    def test_role_model_unset_is_unchanged(self):
+        # MUSTER_ROLE_MODEL 미설정 시 오늘과 동일 - --model 이 붙지 않는다.
+        saved = os.environ.pop("MUSTER_ROLE_MODEL", None)
+        try:
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            self.assertNotIn("--model", cmd)
+        finally:
+            if saved is not None:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
+    def test_role_model_set_appends_flag(self):
+        # MUSTER_ROLE_MODEL 설정 시 --model <value> 가 argv 에 붙는다.
+        saved = os.environ.get("MUSTER_ROLE_MODEL")
+        try:
+            os.environ["MUSTER_ROLE_MODEL"] = "sonnet"
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            self.assertIn("--model", cmd)
+            self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
+        finally:
+            if saved is None:
+                os.environ.pop("MUSTER_ROLE_MODEL", None)
+            else:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
+    def test_role_model_does_not_affect_haiku_probe(self):
+        # doctor() 의 haiku 프로브는 spawn_cmd 를 거치지 않는다 - 소스에서
+        # 하드코딩된 "--model", "haiku" 가 여전히 남아 있는지 직접 확인한다.
+        saved = os.environ.get("MUSTER_ROLE_MODEL")
+        try:
+            os.environ["MUSTER_ROLE_MODEL"] = "sonnet"
+            src = Path(spawn.__file__).read_text()
+            self.assertIn('"--model", "haiku"', src)
+        finally:
+            if saved is None:
+                os.environ.pop("MUSTER_ROLE_MODEL", None)
+            else:
+                os.environ["MUSTER_ROLE_MODEL"] = saved
+
 
 class BoardSnapshot(unittest.TestCase):
     def test_delta_shows_changed_and_new(self):
