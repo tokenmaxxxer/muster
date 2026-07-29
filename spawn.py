@@ -62,6 +62,13 @@ PACKAGE_CACHE_DIRS = [
     ("MAVEN_REPO", "~/.m2/repository"),
 ]
 
+# WebSearch/WebFetch 목적지는 사전에 열거할 수 없다(이슈 #58) — 모든 역할에
+# 적용된다(operator 결정: option B). Claude Code 샌드박스의 도메인 매처(Kat())는
+# 리터럴 "*" 항목을 모든 호스트에 매칭시킨다(cli.js 확인, 2.1.220) — 그래서
+# 하나짜리 와일드카드 상수로 충분하고, 등록되지 않은 호스트 목록을 만들 필요가
+# 없다.
+WEB_ACCESS_DOMAINS = ["*"]
+
 
 def go_proxy_layer(s: dict) -> str | None:
     """호스트 GOMODCACHE 가 읽기 전용으로 마운트됐으면(이슈 #38) GOPROXY 에 그
@@ -348,6 +355,12 @@ def role_settings(role: str) -> dict:
             net = sb0.setdefault("network", {})
             domains = net.setdefault("allowedDomains", [])
             for host in PACKAGE_REGISTRY_HOSTS:
+                if host not in domains:
+                    domains.append(host)
+            # 웹 접근 도메인도 같은 방식으로 병합한다(이슈 #58) — 켜져 있는
+            # 역할이 선언한 도메인이나 레지스트리 호스트를 지우지 않고,
+            # 중복 추가도 하지 않는다.
+            for host in WEB_ACCESS_DOMAINS:
                 if host not in domains:
                     domains.append(host)
 

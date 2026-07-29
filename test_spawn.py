@@ -201,6 +201,20 @@ class PackageRegistryAccess(unittest.TestCase):
         for host in ("proxy.golang.org", "crates.io", "repo.maven.apache.org"):
             self.assertIn(host, domains)
 
+    def test_web_access_domain_merged_alongside_registry_hosts(self):
+        """이슈 #58: WEB_ACCESS_DOMAINS 도 같은 병합 지점에서 추가되고,
+        역할 선언 도메인·레지스트리 호스트는 여전히 남아있다(안 지워짐)."""
+        out = spawn.role_settings("coding")
+        domains = out["sandbox"]["network"]["allowedDomains"]
+        for host in spawn.WEB_ACCESS_DOMAINS:
+            self.assertIn(host, domains)
+        # 역할이 선언한 도메인 (roles/coding.json)
+        for host in ("api.anthropic.com", "*.github.com", "github.com"):
+            self.assertIn(host, domains)
+        # 레지스트리 호스트도 지워지지 않았다
+        for host in spawn.PACKAGE_REGISTRY_HOSTS:
+            self.assertIn(host, domains)
+
     def test_present_cache_dir_added_to_allow_read(self):
         with tempfile.TemporaryDirectory() as td:
             saved = os.environ.get("GOMODCACHE")
