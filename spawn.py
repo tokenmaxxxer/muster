@@ -361,7 +361,7 @@ def role_settings(role: str) -> dict:
             for env_var, default_path in PACKAGE_CACHE_DIRS:
                 raw = os.environ.get(env_var, default_path) if env_var else default_path
                 cache_path = os.path.expanduser(os.path.expandvars(raw))
-                if os.path.exists(cache_path):
+                if os.path.isdir(cache_path):
                     fs2 = sb0.setdefault("filesystem", {})
                     allow_read = fs2.setdefault("allowRead", [])
                     if cache_path not in allow_read:

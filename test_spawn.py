@@ -257,6 +257,20 @@ class PackageRegistryAccess(unittest.TestCase):
             else:
                 os.environ["GOMODCACHE"] = saved
 
+    def test_file_at_cache_path_is_skipped(self):
+        with tempfile.NamedTemporaryFile() as tf:
+            saved = os.environ.get("GOMODCACHE")
+            os.environ["GOMODCACHE"] = tf.name
+            try:
+                out = spawn.role_settings("coding")  # should not raise
+                allow_read = out["sandbox"]["filesystem"].get("allowRead", [])
+                self.assertNotIn(tf.name, allow_read)
+            finally:
+                if saved is None:
+                    os.environ.pop("GOMODCACHE", None)
+                else:
+                    os.environ["GOMODCACHE"] = saved
+
 
 class BoardSnapshot(unittest.TestCase):
     def test_delta_shows_changed_and_new(self):
