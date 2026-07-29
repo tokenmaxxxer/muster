@@ -293,6 +293,37 @@ class DryRunModelReflection(unittest.TestCase):
                 os.environ["MUSTER_ROLE_MODEL"] = saved_env
 
 
+class WebToolPermissionAccess(unittest.TestCase):
+    """이슈 #65: #58 이 연 것은 샌드박스 네트워크 층(allowedDomains)뿐이었다.
+    headless 세션은 --permission-mode acceptEdits 로 뜨고 답할 사람이 없어서
+    permissions.allow 에 규칙이 없는 도구는 별개로 거부된다 — 그 TOOL-PERMISSION
+    층을 role_settings() 가 채우는지 검증한다."""
+
+    def test_web_tools_allowed_for_every_role(self):
+        for role_file in (Path(spawn.ROOT) / "roles").glob("*.json"):
+            role = role_file.stem
+            out = spawn.role_settings(role)
+            allow = out["permissions"]["allow"]
+            self.assertIn("WebSearch", allow, role)
+            self.assertIn("WebFetch", allow, role)
+
+    def test_role_declared_permissions_allow_entries_preserved(self):
+        """이슈 #38 의 registry-host 병합과 같은 패턴: 병합이지 교체가 아니다."""
+        f = Path(spawn.ROOT) / "roles" / "coding.json"
+        original_text = f.read_text()
+        spec = json.loads(original_text)
+        spec["permissions"] = {"allow": ["Bash(git *)"]}
+        try:
+            f.write_text(json.dumps(spec))
+            out = spawn.role_settings("coding")
+            allow = out["permissions"]["allow"]
+            self.assertIn("Bash(git *)", allow)
+            self.assertIn("WebSearch", allow)
+            self.assertIn("WebFetch", allow)
+        finally:
+            f.write_text(original_text)
+
+
 class PackageRegistryAccess(unittest.TestCase):
     """이슈 #38: 패키지 레지스트리 접근 — 호스트 캐시 마운트 + 레지스트리 허용목록."""
 
