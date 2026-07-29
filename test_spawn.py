@@ -165,6 +165,72 @@ class DryRunModelReflection(unittest.TestCase):
                 os.environ["MUSTER_ROLE_MODEL"] = saved
 
 
+class PackageRegistryAccess(unittest.TestCase):
+    """이슈 #38: 패키지 레지스트리 접근 — 호스트 캐시 마운트 + 레지스트리 허용목록."""
+
+    def test_registry_hosts_merged_into_allowed_domains(self):
+        out = spawn.role_settings("coding")
+        domains = out["sandbox"]["network"]["allowedDomains"]
+        for host in ("proxy.golang.org", "crates.io", "repo.maven.apache.org"):
+            self.assertIn(host, domains)
+
+    def test_present_cache_dir_added_to_allow_read(self):
+        with tempfile.TemporaryDirectory() as td:
+            saved = os.environ.get("GOMODCACHE")
+            os.environ["GOMODCACHE"] = td
+            try:
+                out = spawn.role_settings("coding")
+                allow_read = out["sandbox"]["filesystem"].get("allowRead", [])
+                self.assertIn(td, allow_read)
+            finally:
+                if saved is None:
+                    os.environ.pop("GOMODCACHE", None)
+                else:
+                    os.environ["GOMODCACHE"] = saved
+
+    def test_absent_cache_dir_is_skipped_without_error(self):
+        missing = "/nonexistent/path/for/muster-issue-38-test"
+        saved = os.environ.get("GOMODCACHE")
+        os.environ["GOMODCACHE"] = missing
+        try:
+            out = spawn.role_settings("coding")  # should not raise
+            allow_read = out["sandbox"]["filesystem"].get("allowRead", [])
+            self.assertNotIn(missing, allow_read)
+        finally:
+            if saved is None:
+                os.environ.pop("GOMODCACHE", None)
+            else:
+                os.environ["GOMODCACHE"] = saved
+
+    def test_go_proxy_layer_prefers_mounted_host_cache(self):
+        with tempfile.TemporaryDirectory() as td:
+            saved = os.environ.get("GOMODCACHE")
+            os.environ["GOMODCACHE"] = td
+            try:
+                out = spawn.role_settings("coding")
+                proxy = spawn.go_proxy_layer(out)
+                self.assertIsNotNone(proxy)
+                self.assertTrue(proxy.startswith(f"file://{td}/cache/download,"))
+            finally:
+                if saved is None:
+                    os.environ.pop("GOMODCACHE", None)
+                else:
+                    os.environ["GOMODCACHE"] = saved
+
+    def test_go_proxy_layer_none_when_cache_not_mounted(self):
+        missing = "/nonexistent/path/for/muster-issue-38-test"
+        saved = os.environ.get("GOMODCACHE")
+        os.environ["GOMODCACHE"] = missing
+        try:
+            out = spawn.role_settings("coding")
+            self.assertIsNone(spawn.go_proxy_layer(out))
+        finally:
+            if saved is None:
+                os.environ.pop("GOMODCACHE", None)
+            else:
+                os.environ["GOMODCACHE"] = saved
+
+
 class BoardSnapshot(unittest.TestCase):
     def test_delta_shows_changed_and_new(self):
         with tempfile.TemporaryDirectory() as td:
