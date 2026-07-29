@@ -2,25 +2,121 @@
 
 *[English](README.md)*
 
+## 혼자 AI 로 코딩하다 보면 반드시 만나는 다섯 개의 벽
+
+1. **바이브 코딩은 표류한다.** 긴 채팅 세션 하나로 몇 시간을 이어가다 보면
+   맥락이 썩고, 초반에 정했던 요구사항은 잊히고, 코드베이스는 어느새 만든
+   사람조차 더 이상 이해 못 하는 상태가 된다.
+2. **품질은 동전 던지기다.** 어떤 세션은 훌륭하고 어떤 세션은 엉망인데,
+   검증 안 된 작업이 그대로 커밋되는 걸 막는 장치가 어느 쪽에도 없다.
+3. **매번 처음부터 다시 가르친다.** "테스트 먼저", "코드 전에 설계 문서부터"
+   같은 작업 규칙을 세션마다 처음부터 다시 알려줘야 한다 — 아무것도 이어지지
+   않기 때문이다.
+4. **아무것도 인계할 수 없다.** 요구사항, 결정, 히스토리가 전부 채팅 로그
+   안에만 있다. 팀원도, 미래의 나 자신도 그 작업에 올라타거나 감사할 방법이
+   없다.
+5. **에이전트를 병렬로 돌리면 서로 부딪힌다.** 격리도, 머지 규율도 없어서
+   여러 에이전트를 동시에 돌리면 서로의 작업을 밟는다.
+
+## 다른 AI 는 기록에 안 남고 일한다. 당신 것은 기록에 남기고 일한다.
+
+on-the-record 가 만드는 모든 작업물은 공식 git 기록이 된다.
+**요구사항은 이슈, 작업은 PR, 결정은 기록된 승인, 규칙은 버전 관리되는
+룰북이다.** 여기서는 어떤 것도 채팅 로그 안에만 머물지 않는다.
+
+이것이 AI 산출물을 데모용이 아니라 믿고 넘길 수 있는, 인계 가능한,
+판매 가능한 등급으로 만드는 이유다.
+
+- **역할 전문가, 태스크마다 깨끗한 맥락.** 역할마다 그 역할의 룰북만 깔린
+  자기만의 샌드박스 세션이 뜬다 — QA 룰북 맥락이 코딩 세션으로 새는 일도,
+  그 반대도 없다.
+- **프로세스 자산이 git 안에 산다.** 룰북은 버전 관리되는 파일이라, 더 나은
+  모델이 와도 아무것도 다시 가르칠 필요 없이 바로 집어 쓴다.
+- **사용자가 유일한 승인자로 남는다.** 사용자 본인 GitHub 계정이 승인하지
+  않으면 아무것도 머지되지 않는다 — 방관자가 아니라 CEO 자리다.
+- **자기 완결적이다.** 플러그인 하나가 시스템 전체를 설치한다. 따로 연결할
+  것이 없다.
+
+아래부터는 이 약속이 실제로 어떻게 구현되는지에 대한 이야기다 —
+설득이 아니라 뒷받침하는 세부사항이다.
+
 역할을 소집한다 — 그 역할의 룰북만 깔린 샌드박스 세션 하나를 띄운다.
 
-배차 기사가 아니라 콘센트다. **상태는 각 역할이 갖고, on-the-record 는 읽기만 한다.**
+배차 기사가 아니라 콘센트가 있는 컨시어지다: contract v3 에서는 오케스트레이션
+세션(이 마켓플레이스의 `on-the-record` 플러그인)이 사용자와 대화하고, 사용자가
+불러주는 이슈를 작성하고, 역할 세션을 띄우고, 돌아온 PR 을 설명하고, 사용자의
+결정 — 코멘트, 리뷰 Approve, 머지 — 을 사용자 본인 계정으로 대신 전달한다.
+역할 세션은 AGENT 계정(`MUSTER_AGENT_GH_TOKEN`)으로 돌고, `issue-<n>/<role>`
+브랜치에서 작업하며, 모든 결과는 PR 로 돌아온다. **각 역할이 자기 상태를 갖고,
+on-the-record 는 읽기만 한다.**
 
 ```
 protocol.md   규약 — on-the-record 가 하는 일 셋, 상태 노출 계약, 격리
-              (protocol.ko.md 가 같은 규약의 한국어판)
 roles/        역할 하나 = 파일 하나. 룰북 번들 + 샌드박스 경계
 spawn.py      상태를 읽고, 역할 환경으로 세션을 띄운다
+              (--issue <n> 가 브랜치를 만들고 프롬프트를 고정한다)
 on-the-record/  그걸 대화에서 부르는 플러그인 (/on-the-record:run)
 wakes.py      계약 §3 의 WAKES-ON 표를 평가한다 — 보드가 누구를 깨우는가
-bench/        ablation 러너 — 룰북 on/off 를 같은 표적에 돌린다
 gates/        결정론 검사. 세션이 끝나면 spawn.py 가 부른다. LLM 0회
 ledger/       성적표
 ```
 
-*이름: 이전엔 `harness` 였는데, 이 조직에서 harness 는 이미 룰북 스택과
-`qa-agent-rulebook/bench` 를 가리킨다. 겹치는 이름을 쓰면 문서가 서로를 가리키지
-못한다.*
+## 시작하기 (사용자가 실제로 해야 할 설정)
+
+기계당 한 번:
+
+1. `gh auth login` — 본인 계정(이게 승인하고 머지하는 계정이다).
+2. 대화 세션 안에서:
+   `claude plugin marketplace add tokenmaxxxer/on-the-record` +
+   `claude plugin install on-the-record@tokenmaxxxer`.
+   clone 필요 없다 — 마켓플레이스 add 자체가 clone 이고, on-the-record
+   플러그인이 그 안에서 spawn.py 를 돌린다. 수동 checkout 은 on-the-record
+   자체를 개발할 때만 필요하다.
+(`spawn.py doctor` — 플러그인 훅이 현재 CLI 버전에서 headless 로 실제로
+발화하는지 확인하는 프로브 — 는 CLI 업데이트 뒤 첫 스폰에서 자동으로 돈다.
+작은 프로브 세션 하나. 수동 실행은 선택.)
+
+선택 강화: 별도 에이전트 계정(머신 계정 PAT — `export
+MUSTER_AGENT_GH_TOKEN=<pat>` — 또는 GitHub App)을 두면 사람/에이전트 구분이
+세션 계층(gh-guard)에서 계정 계층으로 올라간다. 기본값은 둘 다 필요 없다 —
+계정 하나로, 전부 대화 안에서.
+
+선택: `export MUSTER_ROLE_MODEL=<model>` 은 스폰되는 역할 세션이 쓰는
+모델을 고정한다(예: `sonnet`, `opus`). 기본은 미설정 — 이 경우 역할
+세션은 CLI 기본 모델로 돈다. `doctor()` 의 haiku 프로브에는 영향 없다 —
+이건 항상 자기 전용 저가 모델을 하드코딩해 쓴다.
+
+명령마다 환경변수 설정을 기억하지 않아도 되는 지속적인 레포 전역
+기본값을 원하면, 레포 루트의 `role_model.txt` 에 모델 이름을 한 줄로
+적는다(예: `sonnet`). 우선순위는 `MUSTER_ROLE_MODEL`(env) >
+`role_model.txt`(config) > 없음이다: env 변수가 설정돼 있으면 항상
+이기고, config 파일은 env 변수가 없을 때만 쓰이며, 두 계층 모두에서
+비어 있거나 공백뿐인 값은 미설정과 동일하게 처리한다(`--model` 플래그
+없음, 오늘의 기본값). `--dry-run` 은 같은 우선순위 체인을 통해 완전히
+해석된 값을 그대로 보여준다.
+
+룰북과 tokenmaxxxer-core 는 수동 clone 이 전혀 필요 없다: spawn 이
+`on-the-record/runs/rulebooks/` 아래에 자동으로 받아오고 ff-update 한다
+(로컬 checkout 이 있으면 그쪽이 이긴다 — 개발용 override).
+
+프로젝트(표적 레포)당 한 번 — 뭔가 빠진 게 있으면 오케스트레이터가
+대화 중에 알아서 다 해주겠다고 제안한다:
+
+1. GitHub remote(로컬뿐이면 `gh repo create --private --source . --push`).
+2. `docs/specs/approvers.md` — 승인자 allowlist(이자 보드 opt-in).
+   `python3 on-the-record/spawn.py init -C <repo>` 가 사용자 gh 로그인으로
+   써주거나, on-the-record 세션이 확인 후 대신 만들어준다.
+3. (권장) main 에 branch protection: PR 필수. (선택적 에이전트 계정을
+   쓸 때만: 그 계정을 협업자로 초대.)
+
+그 다음부터는 전부 대화다: `/on-the-record:run`.
+
+v3 참고: 보드는 표적 레포의 `docs/issue-<n>/reports/<role>.md`, `main`
+머지분만; 정본 계약은 tokenmaxxxer-core 안에만 있다 — 레포는 사본을
+갖지 않는다; 보드 마커는 docs/specs/approvers.md (`spawn.py init` 가
+써준다); `spawn.py approve` 는 사라졌다 — 승인은 오케스트레이터가
+전달하는 GitHub 행위다; core 의 플러그인 넷(core/terse/freelunch/scout)
+은 --plugin-dir 로 모든 역할 세션에 붙는다.
 
 ## 왜 필요한가
 
@@ -120,35 +216,34 @@ update` 가 github 원격 최신으로 갱신해주지 않는다. 설치된 룰�
   자기 의존 플러그인들을 그 커밋에 묶어 둔다. user scope 의 uninstall 은 성공했다고
   답하면서 항목을 그대로 남긴다. 그 프로젝트에서 `--scope local` 로 번들을 지운다.
 
-### 첫 실행 전 — 표적 레포에 계약 파일이 있어야 한다
+### 첫 실행 전 — 표적 레포에 보드 opt-in 이 있어야 한다
 
-모든 역할이 `docs/specs/role-handoff-contract.md` 가 정의한 공유 보드를 읽고 쓰며,
-각 룰북의 게이트는 그 파일을 **작업 중인 레포에서** 찾는다. 없으면 역할은 그래도
-돌고 그럴듯한 산출물도 낸다 — 다만 계약의 공통 헤더가 하나도 안 붙어서 보드에
-아무것도 안 올라가고 다른 역할이 영영 안 깨어난다. 세션은 종료 0 이고 그 사실을
-아무것도 말해주지 않는다.
-
-그래서 `spawn.py` 가 아예 멈춘다:
+모든 역할이 보드(`docs/issue-<n>/reports/…`)를 읽고 쓰고, core 의 게이트는
+레포가 `docs/specs/approvers.md` 를 갖고 있길 요구한다 — "이 레포는 보드다"를
+선언하고 사람 승인자 목록을 적는, 사용자가 직접 쓰는 파일이다. 없으면 역할
+세션의 보드/실행 쓰기가 거부되므로(fail-closed), `spawn.py` 는 실패할 세션을
+태우는 대신 아예 시작을 거부한다:
 
 ```
 $ python3 spawn.py product "…" -C ~/work/new-app
-대상 레포에 docs/specs/role-handoff-contract.md 가 없다: …
+대상 레포에 docs/specs/approvers.md 가 없다: …
 ```
 
-프로젝트당 한 번 심는다:
+프로젝트당 한 번 심는다(`init` 은 사용자 gh 로그인을 쓰거나 `--login` 을 받는다):
 
 ```bash
 python3 spawn.py init -C ~/work/new-app
 ```
 
-정본은 on-the-record 의 `contract/` 에 있고, 이것이 **on-the-record 가 남의 레포에 쓰는 유일한
-경우다** — 보드 기록은 여기서 절대 쓰지 않는다. 그건 역할의 것이고 밖에서 고치면
-전이 게이트를 우회한다. 계약 파일은 상태가 아니라 **전제조건**이다.
+이것이 **on-the-record 가 남의 레포에 쓰는 유일한 것**이다 — 보드 기록은
+여기서 절대 쓰지 않는다. 그건 역할의 것이고 밖에서 고치면 그 역할의 게이트를
+우회하는 셈이다. 정본 role-handoff 계약은 tokenmaxxxer-core 안에만 있고,
+레포는 사본을 갖지 않는다.
 
-정본과 다른 계약이 이미 있으면 덮어쓰지 않는다. 그 레포가 의도적으로 다른 판일 수
-있고, 조용히 갈아치우는 것은 갈라짐과 같은 종류의 손상이다. `spawn.py` 가 내용
-해시로 갈라짐을 알린다 — 계약 frontmatter 에 버전 필드가 없어서 그게 유일한
-판별 수단이다. `status: final` 두 개가 188줄 다를 수 있다. 2026-07-26 실측으로
+정본과 다른 계약은 덮어쓰지 않는다: 그 레포가 의도적으로 다른 판일 수 있고,
+조용히 갈아치우는 것은 포크와 같은 종류의 손상이다. `spawn.py` 가 내용 해시로
+갈라짐을 보고한다 — 계약 frontmatter 에 버전 필드가 없어서 그게 유일한 판별
+수단이다. `status: final` 두 개가 188줄 다를 수 있다. 2026-07-26 실측으로
 룰북 셋은 345줄판, 셋은 533줄판이었다.
 
 `--no-contract` 로 건너뛸 수 있다. 보드를 안 쓸 작업(코딩 역할에 단발 수정을
@@ -257,6 +352,94 @@ Claude Code 의 Bash 샌드박스가 우리에게 필요한 것을 더 잘 준�
 
 **`CLAUDE_CONFIG_DIR` 로 통째 격리하지 않는 이유**: 설정은 완전히 갈리지만 macOS
 키체인 항목이 설정 디렉터리에 묶여 있어 인증이 끊긴다.
+
+### 패키지 레지스트리 접근 (issue #38)
+
+새로 뜬 샌드박스 워크스페이스에는 패키지 캐시가 없어서, `go build`/`npm
+install`/`pip install` 등이 첫 의존성 fetch 부터 네트워크 경계에 막힌다.
+`role_settings()` 는 이걸 두 방식으로 다룬다:
+
+1. **읽기 전용 호스트 캐시 마운트(기본 경로).** 잘 알려진 호스트 패키지
+   캐시 디렉터리(Go 모듈, npm, pip, cargo, Maven)가 존재하면
+   `sandbox.filesystem.allowRead` 에 추가된다 — 읽기 전용, 쓰기는 절대
+   안 된다. 이 마운트를 실제로 적극 활용하는 생태계 도구는 **Go** 뿐이다:
+   이슈 스코프 스폰은 `GOPROXY` 앞에 `file://<host GOMODCACHE>/cache/
+   download` 소스를 한 겹 더 얹어서, `go build`/`go test` 가 읽기 전용
+   마운트에 쓰기를 시도하지 않고도 호스트에 이미 캐시된 모듈을 읽게
+   한다(`GOMODCACHE` 자체는 아래의 기존 `.muster-cache` 리다이렉션대로
+   워크스페이스 로컬에 쓰기 가능 상태로 남는다). npm/pip/cargo/Maven
+   캐시 디렉터리도 존재하면 `allowRead` 에 추가되긴 하지만, 그 도구들
+   자신의 캐시 환경변수(`npm_config_cache`, `PIP_CACHE_DIR` 등)는 무조건
+   빈 워크스페이스 `.muster-cache/` 로 리다이렉트된다 — 호스트 캐시는
+   마운트돼 있지만 실제 읽기 경로에는 아직 연결이 안 된 상태라서, 이
+   생태계들에 대해서는 아래 레지스트리 allowlist 가 오늘 기준으로
+   네트워크 거부 실패를 실제로 막아주는 수단이다.
+2. **레지스트리 allowlist(캐시 미스 대비).** `PACKAGE_REGISTRY_HOSTS`
+   (npm, PyPI, Go 모듈 프록시, crates.io, Maven Central 등 공식
+   레지스트리 호스트명 고정 목록)가 모든 샌드박스 역할의
+   `sandbox.network.allowedDomains` 에 병합돼, 역할마다 `roles/*.json`
+   에 이걸 손으로 큐레이션할 필요가 없다.
+
+### 웹 접근 (issue #58, #65)
+
+역할별 샌드박스 allowlist 는 원래 호스트 3개(`api.anthropic.com`,
+`*.github.com`, `github.com`)와 위 레지스트리 호스트만 덮었기 때문에,
+`WebSearch` 와 `WebFetch` 는 모든 역할에서 조용히 거부되고 있었다 — 검색
+대상이나 맥락 속 URL 은 미리 알 수 없으니 고정 호스트 목록으로는 커버가
+안 된다(issue #43 이 이걸 맞았다: 서베이 대상 6개 중 3개가 검증 못 됨).
+
+웹 접근은 **독립된 두 계층**으로 막혀 있고, 둘 다 열려야 도구 호출이
+통과한다. `role_settings()` 는 레지스트리 케이스와 같은 방식으로 각 계층을
+다룬다 — 추가적이고 중복 안전한 병합을, 모든 역할에 균일하게 적용한다
+(운영 결정: 옵션 B, 역할별 opt-in 이 아니다):
+
+1. **샌드박스 네트워크 계층 (issue #58).** `WEB_ACCESS_DOMAINS`(리터럴
+   `["*"]` 하나 — 실제로 돌아가는 Claude Code 샌드박스의 도메인
+   매처가 리터럴 `"*"` 를 모든 호스트에 매치하는 것으로 확인됨)가
+   위의 `PACKAGE_REGISTRY_HOSTS` 와 같은 방식으로 모든 샌드박스 역할의
+   `sandbox.network.allowedDomains` 에 병합된다. 이건 샌드박스가
+   *네트워크 연결*을 내보내는지를 결정한다.
+
+2. **도구 권한 계층 (issue #65).** 계층 1만 고쳐서는 부족했다: 실제
+   세션에서도 모든 `WebSearch` 호출이 "Permission to use WebSearch
+   has been denied." 로 거부됐다. 헤드리스 역할 세션은
+   `--permission-mode acceptEdits` 로 돌고 권한 프롬프트에 답할 사람이
+   없어서, `permissions.allow` 에 매치되는 규칙이 없는 도구는 네트워크
+   계층이 뭘 허용하든 자동 거부된다. `role_settings()` 는 모든 역할의
+   `permissions.allow` 에 `WebSearch` 와 `WebFetch` 를 추가한다(역할
+   자신의 `permissions.allow` 항목을 대체하지 않고 병합) — 그래서
+   헤드리스 세션이 이 두 도구에 대해서는 그 프롬프트를 절대 만나지
+   않는다.
+
+### 기본 개방 태세 (issue #72)
+
+issue #38, #58, #65, #69 는 각각 두더지잡기 식으로 제한 스위치를 하나씩
+열었다. #72 는 그걸 뒤집는다: 이제 샌드박스는 스키마가 노출하는 모든
+제한 스위치에서 기본이 **개방**이고, 제한 상태로 남는 건 딱 둘 —
+`sandbox.filesystem.allowWrite`/`denyWrite`(워크스페이스 쓰기 범위)와
+board-gate/gh-guard 훅(샌드박스 스키마 밖, `.claude/hooks/*` 로 전적으로
+강제됨)이다. `role_settings()` 는 모든 샌드박스 역할에 대해
+`allowAllUnixSockets`, `allowLocalBinding`, `allowMachLookup`,
+`enableWeakerNetworkIsolation`, `allowAppleEvents`,
+`enableWeakerNestedSandbox` 를 열어 병합한다 — 추가적이고 덮어쓰지
+않으며, 위의 레지스트리/웹 도메인 allowlist 병합(`PACKAGE_REGISTRY_HOSTS`,
+`WEB_ACCESS_DOMAINS`)과 같은 병합 지점, 같은 패턴이다.
+
+샌드박스 자체는 내부 스위치를 몇 개나 열든 `enabled: true` 로 남는다:
+헤드리스 Bash 의 자동 허용(위 함정 ①)은 샌드박스가 *존재한다*는 것에
+의존하지 그 내부 제한 설정 중 무엇에도 의존하지 않는다 — 그래서 개별
+스위치가 전부 열렸다 해도 샌드박스를 꺼버리면 그 보호가 사라진다.
+`sandbox.allowUnsandboxedCommands` 도 여전히 `false` 로 남는다 —
+그게 샌드박스를 권고가 아니라 필수로 유지하는 것이다(위 함정 ③ 참고);
+샌드박스 내부 제한 스위치를 여는 것과 샌드박스 자체를 우회할 수
+있는지는 별개다.
+
+이 태세 선언 하나가 예전에 Package-registry access 와 Web access 아래에
+있던 개별 트레이드오프 설명들을 대체한다 — 그 두 병합은 여전히
+실재하고(여전히 이름 붙여둘 가치가 있다 — #72 이전의 "기본 전면 제한"
+배경에 대한 유이한 예외였으니까), 다만 더 이상 "기본 거부, 이것만 예외"
+배경 위의 특수 케이스가 아니다. 이제는 완전히 열린 샌드박스 안의 두
+항목일 뿐이다.
 
 ## 게이트
 

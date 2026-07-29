@@ -2,6 +2,46 @@
 
 *[한국어](README.ko.md)*
 
+## Five walls every solo AI-coding user hits
+
+1. **Vibe coding drifts.** One long chat session runs for hours; context
+   rots, early requirements get forgotten, and the codebase ends up in a
+   state nobody — including the user who asked for it — still understands.
+2. **Quality is a coin flip.** Some sessions land great work, some land
+   sloppy work, and nothing gates an agent from committing unverified
+   changes either way.
+3. **You repeat yourself every session.** Working rules — "tests first,"
+   "write the design doc before the code" — have to be re-taught from
+   scratch each time, because nothing carries them forward.
+4. **Nothing is handover-able.** Requirements, decisions, and history live
+   only in a chat log. Nobody — not a teammate, not future-you — can onboard
+   onto the work or audit how it got there.
+5. **Parallel agents collide.** Run more than one agent at a time and there
+   is no isolation and no merge discipline, so their work steps on itself.
+
+## Other AI works off the record. Yours works on the record.
+
+Every piece of work on-the-record produces becomes an official git record:
+**requirements are issues, work arrives as PRs, decisions are recorded
+approvals, rules are versioned rulebooks.** Nothing here lives only in a
+chat transcript.
+
+That is what turns AI output into something trustworthy, handover-able, and
+sellable-grade — not just demo-grade:
+
+- **Role experts, clean context per task.** Each role gets its own
+  sandboxed session with only that role's rulebook loaded — no context
+  bleed from a QA rulebook into a coding session, or vice versa.
+- **The process asset lives in git.** Rulebooks are versioned files a
+  better model can pick up and run immediately, with nothing re-taught.
+- **The user stays the sole approver.** Nothing merges without the user's
+  own GitHub account approving it — the CEO position, not a bystander.
+- **Self-contained.** One plugin installs the whole system; nothing else to
+  wire up.
+
+Everything below this point is how that promise is actually implemented —
+supporting detail, not the pitch.
+
 Musters a role — brings up one sandboxed session with only that role's
 rulebook and the tokenmaxxxer-core plugins installed.
 
@@ -302,8 +342,8 @@ re-measure it once per CLI version before any role spawns.
 
 Two halts are the contract working, not failures to route around:
 
-- **coding, at `proposed → approved`.** Contract §8 reserves approving scope changes
-  for a human. A headless run stops there and waits.
+- **coding, at `proposed → approved`.** Contract §8 reserves approving scope
+  changes for a human. A headless run stops there and waits.
 - **any role, on a first read of an upstream artifact.** Contract §12 makes the role
   ask once, by name, before acting on it — and forbids guessing the answer.
 
