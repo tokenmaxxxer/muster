@@ -69,6 +69,22 @@ PACKAGE_CACHE_DIRS = [
 # 없다.
 WEB_ACCESS_DOMAINS = ["*"]
 
+# Open every remaining default-deny sandbox switch surveyed for issue #72
+# (docs/issue-72/reports/coding/survey.md) — the sandbox itself (`enabled`)
+# and `allowUnsandboxedCommands=False` stay untouched; those two alone keep
+# the sandbox mandatory. macOS-only keys (`allowMachLookup`,
+# `allowAppleEvents`) are no-ops on Linux.
+SANDBOX_OPEN_NETWORK = {
+    "allowAllUnixSockets": True,
+    "allowLocalBinding": True,
+    "allowMachLookup": ["*"],
+}
+SANDBOX_OPEN_TOP_LEVEL = {
+    "enableWeakerNetworkIsolation": True,
+    "allowAppleEvents": True,
+    "enableWeakerNestedSandbox": True,
+}
+
 
 def go_proxy_layer(s: dict) -> str | None:
     """호스트 GOMODCACHE 가 읽기 전용으로 마운트됐으면(이슈 #38) GOPROXY 에 그
@@ -363,6 +379,14 @@ def role_settings(role: str) -> dict:
             for host in WEB_ACCESS_DOMAINS:
                 if host not in domains:
                     domains.append(host)
+            # 나머지 기본값이 제한적인 샌드박스 스위치를 전부 연다(이슈 #72) —
+            # sandbox.enabled 와 allowUnsandboxedCommands=False 는 그대로 둔다.
+            for key, val in SANDBOX_OPEN_NETWORK.items():
+                if key not in net:
+                    net[key] = val
+            for key, val in SANDBOX_OPEN_TOP_LEVEL.items():
+                if key not in sb0:
+                    sb0[key] = val
 
     # 호스트 패키지 캐시를 읽기 전용으로 마운트한다(이슈 #38). 존재하는
     # 디렉터리만 추가한다 — 없으면 조용히 건너뛴다(에러도 출력도 없음).

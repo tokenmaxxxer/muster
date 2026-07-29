@@ -367,15 +367,6 @@ dependency fetch. `role_settings()` addresses this two ways:
    `sandbox.network.allowedDomains`, so a role no longer needs to hand-curate
    these per `roles/*.json`.
 
-**Trade-off, explicit:** the cache mount is read-only and low-risk — a
-compromised build step can read stale packages but cannot write back to the
-host cache. The registry allowlist is higher but bounded risk: it reopens
-outbound network to a fixed set of hosts, and package install is a
-code-execution path, so anything reachable through the allowlist can pull and
-run arbitrary published code from that registry. This is accepted
-deliberately, scoped to official registries only — no wildcards, no mirrors,
-no CDNs beyond the registry's own asset host.
-
 ### Web access (issues #58, #65)
 
 Every role's sandbox allowlist only covered 3 hosts (`api.anthropic.com`,
@@ -407,16 +398,36 @@ roles uniformly (operator decision: option B, not a per-role opt-in):
    `permissions.allow` entries) so headless sessions never hit that prompt
    for these two tools.
 
-**Trade-off, explicit:** unlike the registry allowlist, this reopens
-outbound network to arbitrary hosts, not a fixed set — a `WebFetch`
-against any URL can return content, and that content can carry text
-crafted to look like instructions aimed at the agent (prompt injection).
-No technical content filter or sanitizer is added on fetched web content.
-The compensating control is muster's existing human gate chain: a
-phase-1 proposal is written before code changes, a human must Approve it,
-the resulting PR diff is reviewed, and a human merges it — that chain, not
-a filter on fetched content, is the final defense against an injected
-instruction turning into a landed change.
+### Default-open posture (issue #72)
+
+Issues #38, #58, #65, and #69 each opened one restriction switch at a time,
+whack-a-mole style. #72 flips that: the sandbox now defaults **open** on
+every restriction switch the schema exposes, except two things that stay
+restricted — `sandbox.filesystem.allowWrite`/`denyWrite` (workspace write
+scoping) and the board-gate/gh-guard hooks (enforced entirely outside the
+sandbox schema, by `.claude/hooks/*`). `role_settings()` merges
+`allowAllUnixSockets`, `allowLocalBinding`, `allowMachLookup`,
+`enableWeakerNetworkIsolation`, `allowAppleEvents`, and
+`enableWeakerNestedSandbox` open for every sandboxed role, additive and
+no-clobber, the same merge site and pattern as the pre-existing registry/
+web-domain allowlist merges above (`PACKAGE_REGISTRY_HOSTS`,
+`WEB_ACCESS_DOMAINS`).
+
+The sandbox itself stays `enabled: true` regardless of how many internal
+switches are opened: headless Bash's auto-allow (trap ① above) depends on
+the sandbox *existing*, not on any of its internal restriction settings, so
+turning the sandbox off would remove that protection even though every
+individual switch is now open. `sandbox.allowUnsandboxedCommands` also stays
+`false` — that is what keeps the sandbox mandatory rather than advisory (see
+trap ③ above); opening the restriction switches inside the sandbox doesn't
+change whether the sandbox itself can be bypassed.
+
+This one posture statement replaces the per-restriction trade-off notes that
+used to sit under Package-registry access and Web access above — those two
+merges are still real (and still worth naming, since they are the two
+pre-#72 exceptions to the fully-restrictive default), but they are no longer
+special cases against a "default-deny except this" backdrop. They are just
+two more entries in an otherwise fully open sandbox.
 
 ## Gates
 
