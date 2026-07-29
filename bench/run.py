@@ -4,7 +4,7 @@
   python3 bench/run.py --role qa --target todo-cli --reps 3
   python3 bench/run.py --role qa --target todo-cli --reps 1 --arms on   # 한 팔만
 
-프로토콜은 `qa-agent-rulebook/bench/README.md` 를 그대로 따른다. 러너를 muster 에
+프로토콜은 `qa-agent-rulebook/bench/README.md` 를 그대로 따른다. 러너를 on-the-record 에
 두는 이유는 **계측기가 측정 대상 안에 있으면 다른 룰북을 못 재기 때문**이다.
 표적과 정답 키는 각 룰북이 자기 `bench/` 에 갖고 온다.
 

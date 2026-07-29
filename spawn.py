@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""역할별 플러그인 환경으로 에이전트를 띄운다. muster 의 핵심 동작 하나.
+"""역할별 플러그인 환경으로 에이전트를 띄운다. on-the-record 의 핵심 동작 하나.
 
   python3 spawn.py <역할> <맡길 일> [-C <작업 디렉터리>] [--dry-run]
   python3 spawn.py review "PR 12 를 리뷰해라"
@@ -139,7 +139,7 @@ def registered(name: str) -> dict:
 def rulebook_source(spec: dict) -> dict:
     """룰북을 어디서 가져올지. **로컬 체크아웃이 있으면 그쪽이 이긴다.**
 
-    로컬 우선인 이유는 개발이다 — 룰북을 고치면서 muster 로 돌려볼 때 커밋·푸시를
+    로컬 우선인 이유는 개발이다 — 룰북을 고치면서 on-the-record 로 돌려볼 때 커밋·푸시를
     거치게 하면 아무도 안 쓴다. 없으면 github 에서 받는다. 비공개 레포도 된다(실측).
     """
     p = _path(spec)
@@ -155,7 +155,7 @@ def rulebook_dir(spec: dict) -> Path | None:
 
     클론 자리를 짐작하기 전에 **등록부의 installLocation 을 먼저 본다.** 이름이
     이미 등록돼 있으면 `--settings` 의 extraKnownMarketplaces 는 무시되고 등록된
-    쪽이 그대로 쓰인다 — muster 가 github 를 달라고 해도 등록부가 directory 면
+    쪽이 그대로 쓰인다 — on-the-record 가 github 를 달라고 해도 등록부가 directory 면
     클론은 영영 안 생긴다. 실측 2026-07-26: 룰북 9개 중 8개는 이름만으로 받아졌고
     coding 만 실패했는데, 원인은 레포가 아니라 어제 로컬 경로로 등록해 둔
     `tokenmaxxxer-coding` 항목이었다.
@@ -172,7 +172,7 @@ def rulebook_dir(spec: dict) -> Path | None:
 
 def rulebook_checkout(role: str, spec: dict) -> Path:
     """세션에 **실제로 붙일** 룰북 체크아웃. 로컬이 있으면 그것, 없으면
-    muster 가 자기 밑에 클론해 둔다.
+    on-the-record 가 자기 밑에 클론해 둔다.
 
     설치를 거치지 않는다. 설치 경로에는 실측된 함정이 셋 있고 전부 조용하다:
     캐시와 클론이 갈라지고(`claude plugin update` 는 버전 문자열만 본다),
@@ -182,7 +182,7 @@ def rulebook_checkout(role: str, spec: dict) -> Path:
     2026-07-27: drive 가 띄운 qa 세션이 방금 고친 보안 결함이 그대로 있는
     e940cbe 로 돌았다(머지된 main 은 1195ace).
 
-    muster 소유 클론이라 무엇이 돌았는지 sha 로 말할 수 있고, 나중에 특정
+    on-the-record 소유 클론이라 무엇이 돌았는지 sha 로 말할 수 있고, 나중에 특정
     sha 로 고정하는 것도 여기서만 하면 된다.
     """
     p = _path(spec)
@@ -218,7 +218,7 @@ def checkout_version(role: str, spec: dict) -> str:
     sha = git("rev-parse", "--short", "HEAD") or "?"
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     dirty = " (커밋 안 된 변경 있음)" if git("status", "--porcelain") else ""
-    where = "로컬" if _path(spec) and _mkt(Path(_path(spec))).exists() else "muster 클론"
+    where = "로컬" if _path(spec) and _mkt(Path(_path(spec))).exists() else "on-the-record 클론"
     return f"{sha} ({branch}, {where}){dirty}"
 
 
@@ -291,7 +291,7 @@ def ensure_rulebook(role: str, spec: dict) -> Path:
 
 
 def _fetch_hint(spec: dict) -> str:
-    """왜 못 받았는지 muster 가 실제로 알 수 있는 원인부터 말한다.
+    """왜 못 받았는지 on-the-record 가 실제로 알 수 있는 원인부터 말한다.
 
     같은 이름이 사용자 전역 `~/.claude/settings.json` 의 extraKnownMarketplaces 에
     이미 선언돼 있으면 **그쪽이 `--settings` 를 이긴다.** 그 선언이 망가져 있으면
@@ -487,7 +487,7 @@ def update(roles: list[str]) -> int:
             subprocess.run(["claude", "plugin", "install", n], capture_output=True, text=True)
             # `install` 은 전역 settings.json 의 enabledPlugins 에 그 플러그인을
             # **켠 채로** 남긴다. 그대로 두면 사용자가 여는 보통 세션마다 룰북
-            # 아홉 개가 한꺼번에 붙는다 — muster 가 막으려는 그 오염을 muster 가
+            # 아홉 개가 한꺼번에 붙는다 — on-the-record 가 막으려는 그 오염을 on-the-record 가
             # 만드는 꼴이다(실측 2026-07-27: 갱신 한 번에 22개가 전역에 켜졌다).
             # 필요한 것은 **설치**지 활성화가 아니다. 켜는 일은 역할 세션의
             # `--settings` 가 한다.
@@ -565,7 +565,7 @@ def _installed() -> set[str]:
     중 6개가 등록만 있고 캐시가 없었다.
 
     이름만 세면 ensure_installed 가 "이미 설치됨"으로 통과시키고, 세션은 룰북
-    0개로 조용히 돈다 — muster 는 "플러그인 1개"라고 출력하고, 에이전트는 룰북
+    0개로 조용히 돈다 — on-the-record 는 "플러그인 1개"라고 출력하고, 에이전트는 룰북
     없이 그럴듯한 답을 내놓는다. 이 함수가 막으려던 실패가 한 겹 아래에서 그대로
     일어난다. 그래서 기록이 아니라 **산출물**을 확인한다.
     """
@@ -601,7 +601,7 @@ def ensure_installed(role: str, want: list[str], settings: str, cwd: str) -> Non
     # 처음 보는 마켓플레이스는 **두 번** 걸린다 — 1회차가 등록하고 2회차가 설치한다
     # (실측). 한 번만 돌리고 포기하면 사용자가 같은 명령을 두 번 쳐야 한다.
     for _ in range(2):
-        # 워밍업도 대상 레포에서 돈다. cwd 를 안 넘기면 muster 자신의 디렉터리에서
+        # 워밍업도 대상 레포에서 돈다. cwd 를 안 넘기면 on-the-record 자신의 디렉터리에서
         # 돌아 노출이 역할 세션과 달라진다 — 같은 경계로 재현되어야 실측이 뜻을 갖는다.
         subprocess.run(["claude", "-p", "--settings", settings], cwd=cwd,
                        input="ok", text=True, capture_output=True)
@@ -614,7 +614,7 @@ def ensure_installed(role: str, want: list[str], settings: str, cwd: str) -> Non
 
 
 def _install_hint(missing: list[str]) -> str:
-    """설치가 왜 안 됐는지 muster 가 실제로 알 수 있는 원인부터 말한다.
+    """설치가 왜 안 됐는지 on-the-record 가 실제로 알 수 있는 원인부터 말한다.
 
     `installed_plugins.json` 에 항목이 남아 있으면 이미 설치된 것으로 보고
     **재설치를 건너뛴다.** 캐시 디렉터리가 사라져도 항목은 남으므로, 그 상태는
@@ -707,15 +707,15 @@ REPO_CONFIG = (".claude/settings.json", ".claude/settings.local.json", ".claude/
 def require_no_repo_config(cwd: str, override: bool) -> None:
     """대상 레포가 자기 Claude 설정을 들고 있으면 멈춘다.
 
-    **muster 의 샌드박스는 이걸 못 막는다.** 설정 우선순위는
+    **on-the-record 의 샌드박스는 이걸 못 막는다.** 설정 우선순위는
     `--settings` > `<레포>/.claude/settings.json` > `~/.claude/settings.json` 인데,
-    muster 는 양 끝만 읽고 가운데를 안 본다. 그리고 `hooks` 는 덮어쓰기가 아니라
+    on-the-record 는 양 끝만 읽고 가운데를 안 본다. 그리고 `hooks` 는 덮어쓰기가 아니라
     **더해지고**, 훅 명령은 선언한 `sandbox.filesystem` 정책을 받지 않는다.
 
     실측 2026-07-27. `denyWrite` 와 `denyRead` 를 선언한 역할 설정으로 띄웠는데,
     레포가 커밋해 둔 SessionStart 훅이 **denyWrite 경로에 쓰고 denyRead 인
     `~/.claude/settings.json` 을 읽어냈다.** 사용자 권한 그대로, 프롬프트 없이,
-    `env={**os.environ}` 을 통째로 들고. 레포를 클론해서 muster 를 겨눈 것만으로
+    `env={**os.environ}` 을 통째로 들고. 레포를 클론해서 on-the-record 를 겨눈 것만으로
     성립한다.
 
     계약 파일과 같은 처분을 한다 — 경고가 아니라 정지, 그리고 명시적 opt-out.
@@ -768,7 +768,7 @@ def require_no_repo_config(cwd: str, override: bool) -> None:
         f"  {root}\n"
         + ("  전에 신뢰했던 내용에서 **바뀌었다** — 다시 읽어보고 판단해야 한다.\n"
            if changed else "")
-        + f"  그 훅들은 muster 가 선언한 샌드박스 경계를 **받지 않는다**. 띄우면\n"
+        + f"  그 훅들은 on-the-record 가 선언한 샌드박스 경계를 **받지 않는다**. 띄우면\n"
         f"  denyRead 로 막은 경로까지 읽힌다(실측). 내용을 직접 읽어보고,\n"
         f"  믿을 수 있으면 --trust-repo-config 로 명시한다 — 이 내용 해시로\n"
         f"  고정되어, 같은 내용인 동안은 다시 묻지 않는다.")
@@ -816,7 +816,7 @@ def board(root: Path) -> dict[str, dict[str, dict[str, str]]]:
 def status(cwd: str) -> list[str]:
     """보드를 **읽는다**. 쓰지 않는다 (protocol.md §1).
 
-    상태는 에이전트의 것이다. muster 가 이걸 고치기 시작하면 룰북의 전이 게이트를
+    상태는 에이전트의 것이다. on-the-record 가 이걸 고치기 시작하면 룰북의 전이 게이트를
     우회하게 된다 — 게이트는 기록 쓰기를 가로채 막지만, 그 파일을 밖에서 고치면
     문지기를 안 거친다.
     """
@@ -870,7 +870,7 @@ def _base(cwd: str) -> str:
 def gate_report(cwd: str) -> list[str]:
     """세션이 무엇을 건드렸는지 결정론적으로 본다. LLM 0회.
 
-    **막지는 않는다.** 세션이 끝난 뒤라 되돌릴 수 없고, muster 는 판정하지 않는다.
+    **막지는 않는다.** 세션이 끝난 뒤라 되돌릴 수 없고, on-the-record 는 판정하지 않는다.
     대신 조용히 넘어가지도 않는다 — 보호 경로(인증·시크릿·마이그레이션·CI 설정)를
     건드렸거나 실재하지 않는 패키지를 넣었으면 사람이 알아야 한다.
 
@@ -1078,7 +1078,7 @@ def core_root() -> Path:
             continue
         if (p / "core" / ".claude-plugin" / "plugin.json").is_file():
             return p
-    # 로컬 체크아웃이 없으면 룰북과 같은 길: muster 소유 클론을 받아 쓴다.
+    # 로컬 체크아웃이 없으면 룰북과 같은 길: on-the-record 소유 클론을 받아 쓴다.
     # 로컬 우선은 개발용 오버라이드일 뿐이다.
     d = ROOT / "runs" / "rulebooks" / "tokenmaxxxer-core"
     if (d / "core" / ".claude-plugin" / "plugin.json").is_file():
@@ -1118,7 +1118,7 @@ def drive(cwd: str, unattended: bool, limit: int = 12) -> int:
     """보드가 지목하는 역할을 한 번에 하나씩, 멈출 때까지 띄운다.
 
     감시자가 아니라 **직렬 루프**다. 동시에 둘을 띄우지 않는다 — 보드는 공유
-    상태이고, 계약 §3 은 동시 깨움을 정상으로 보지만 muster 가 그걸 중재하지는
+    상태이고, 계약 §3 은 동시 깨움을 정상으로 보지만 on-the-record 가 그걸 중재하지는
     않는다.
 
     멈추는 자리 넷, 전부 정상 종료다:
@@ -1347,7 +1347,7 @@ def main() -> int:
     a = ap.parse_args()
 
     if a.role == "init":
-        # 보드로 선언한다(approvers.md). muster 가 남의 레포에 쓰는 유일한 경우.
+        # 보드로 선언한다(approvers.md). on-the-record 가 남의 레포에 쓰는 유일한 경우.
         return init_board(a.cwd, a.login)
     if a.role == "ps":
         return roster_ps()
@@ -1462,7 +1462,7 @@ def main() -> int:
 
 
 def issue_workspace(cwd: str, issue: int, role: str) -> str:
-    """이슈 스폰마다 muster 소유의 격리 클론을 만든다.
+    """이슈 스폰마다 on-the-record 소유의 격리 클론을 만든다.
 
     산출물이 PR 로만 돌아오는 모델에서 역할 세션이 사용자의 체크아웃을
     공유할 이유가 없다 — 공유하면 동시 스폰 둘이 같은 .git/index 와 현재
@@ -1478,7 +1478,7 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
     # 샌드박스는 HTTP 프록시만 뚫려 있다 — ssh(22번)는 나갈 수 없으므로
     # 작업 클론의 origin 은 기본으로 https 로 정규화한다. 회사 정책이 ssh
     # 원격만 허용하면 MUSTER_KEEP_SSH=1 로 끈다 — 그 경우 세션 안 push 는
-    # 실패하지만, 세션 뒤 muster 가 호스트 환경(사용자의 ssh 키)에서
+    # 실패하지만, 세션 뒤 on-the-record 가 호스트 환경(사용자의 ssh 키)에서
     # push/PR 를 대신한다(아래 ensure_pushed).
     if os.environ.get("MUSTER_KEEP_SSH", "") not in ("", "0", "false", "no", "off"):
         pass
@@ -1489,7 +1489,7 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
     if not origin:
         sys.exit(f"대상 레포에 origin 원격이 없다: {src} — 이슈/PR 모델은 "
                  f"GitHub 원격이 전제다 (계약 v3 s10)")
-    # 보호 경로 밖이어야 한다: muster 가 ~/.claude/plugins/ 아래 설치되면
+    # 보호 경로 밖이어야 한다: on-the-record 가 ~/.claude/plugins/ 아래 설치되면
     # ROOT/runs/work 도 그 아래가 되는데, 거긴 Claude Code 의 전역 sensitive
     # 경로라 역할 세션의 Write 가 전부 거부된다(실측: phase 2 가 코드 한 줄
     # 못 쓰고 $2.68 을 태웠다). 기본은 ~/.tokenmaxxxer/work, 오버라이드는
@@ -1563,7 +1563,7 @@ def ensure_pushed(work: str, issue: int, role: str) -> None:
 
     샌드박스의 GitHub egress 는 환경마다 다르게 막힌다(https 프록시 403,
     ssh-only 정책, 키링 불가시 등 — 전부 실측). 산출물이 로컬 커밋으로만
-    남으면 보드에 존재하지 않는 것과 같으므로, muster 가 세션 종료 후
+    남으면 보드에 존재하지 않는 것과 같으므로, on-the-record 가 세션 종료 후
     바깥에서 릴레이한다. 역할이 스스로 push/PR 에 성공했으면 전부 no-op.
     """
     br = f"issue-{issue}/{role}"
@@ -1591,7 +1591,7 @@ def ensure_pushed(work: str, issue: int, role: str) -> None:
         # 참조만 한다 — Closes 를 박으면 record PR 하나가 머지되는 순간
         # 이슈가 조기에 닫힌다(실측 직전 발견). 이슈 닫기는 라운드가 끝났을
         # 때 사람의 행위다 (계약 s8).
-        body = (f"Part of #{issue}.\n\nOpened by muster on behalf of the "
+        body = (f"Part of #{issue}.\n\nOpened by on-the-record on behalf of the "
                 f"{role} role session (sandbox egress relay); the branch "
                 f"content is the role's own work.")
         c = subprocess.run(["gh", "pr", "create", "--head", br,
@@ -1625,7 +1625,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                 f"완료의 정의: 변경이 이 브랜치에 **커밋**되고 push 되어 PR 로\n"
                 f"제출된 상태다. 미커밋 변경은 존재하지 않는 것과 같다 —\n"
                 f"세션을 끝내기 전에 반드시 커밋하라. push/PR 이 네트워크로\n"
-                f"막히면 커밋까지는 해 둬라: muster 가 밖에서 릴레이한다.\n\n") + task
+                f"막히면 커밋까지는 해 둬라: on-the-record 가 밖에서 릴레이한다.\n\n") + task
     plugins = plugin_dirs(role, spec)
     s = role_settings(role)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:

@@ -96,7 +96,7 @@ def _rec(subject: str, role: str) -> str:
 
 
 def observed_path(cwd: str) -> Path:
-    """관찰 기록은 **muster 안에** 산다. 대상 레포는 읽기 전용이다(규약 §1).
+    """관찰 기록은 **on-the-record 안에** 산다. 대상 레포는 읽기 전용이다(규약 §1).
 
     경로로 키를 잡는다 — 슬러그만 쓰면 이름이 같은 두 레포가 서로의 소비
     기록을 지운다.

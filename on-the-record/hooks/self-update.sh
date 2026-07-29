@@ -19,7 +19,7 @@ _muster_resolve() {
     probe="$(dirname "$probe")"
     if [ -f "$probe/spawn.py" ]; then printf '%s' "$probe"; return 0; fi
   done
-  mk="$HOME/.claude/plugins/marketplaces/tokenmaxxxer-muster"
+  mk="$HOME/.claude/plugins/marketplaces/tokenmaxxxer"
   if [ -f "$mk/spawn.py" ]; then printf '%s' "$mk"; return 0; fi
   own="$HOME/.claude/tokenmaxxxer/muster"
   if [ -f "$own/spawn.py" ]; then printf '%s' "$own"; return 0; fi

@@ -1,12 +1,12 @@
 {
-  "name": "tokenmaxxxer-muster",
+  "name": "tokenmaxxxer",
   "owner": {
     "name": "Jung Jiwon & Lee Jongkwan"
   },
   "plugins": [
     {
-      "name": "orchestrate",
-      "source": "./orchestrate",
+      "name": "on-the-record",
+      "source": "./on-the-record",
       "description": "The orchestration loop for contract v3: draft issues from the user's words, spawn role sessions (core plugins + role rulebook, agent account, issue-<n>/<role> branch), explain the PRs that come back, and relay the user's decisions — comments, review Approve, merge — with the user's own account, per conversation."
     },
     {
