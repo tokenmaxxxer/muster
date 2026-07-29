@@ -918,6 +918,14 @@ def ownership_report(cwd: str, role: str, delta: list) -> list[str]:
             f"세션 안의 게이트가 안 돌았다는 뜻이다 (계약 §11):"] + bad
 
 
+def _git_head(cwd: str) -> str | None:
+    """현재 HEAD 커밋. 아직 커밋이 없는 새 레포면 None (에러로 취급하지
+    않는다 — 커밋이 없는 상태도 유효한 시작점이다)."""
+    c = subprocess.run(["git", "-C", cwd, "rev-parse", "HEAD"],
+                       capture_output=True, text=True)
+    return c.stdout.strip() if c.returncode == 0 else None
+
+
 def board_snapshot(cwd: str) -> dict[str, str]:
     """보드 파일들의 내용 해시. 세션 전후를 비교해 §6 의 '바뀐 보드'를 잰다.
 
@@ -972,6 +980,30 @@ def classify(rc: int, result: dict, delta: list, blocked: list) -> str:
     if result.get("permission_denials"):
         return "refused"
     return "silent-failure"
+
+
+def fail_closed_downgrade(outcome: str, issue: int | None, blocked: list,
+                          new_commit: bool, uncommitted: list) -> str:
+    """`classify()` 뒤에 붙는 별도 단계 — git 상태로 `progressed` 를
+    검증한다. `classify()` 자체는 손대지 않는다: git 상태를 모르고, 기존
+    계약(rc/result/delta/blocked)과 기존 테스트를 그대로 둔다.
+
+    `issue is not None` 스폰만 대상이다 — 전용 git 워크스페이스가 있는
+    경로만 커밋 여부를 검사할 수 있다.
+
+    `blocked` 를 먼저 확인한다 (hunt-phase1 발견 반영): `classify()` 는
+    delta 를 blocked 보다 먼저 보므로, 보드가 움직였고 동시에 사람 게이트가
+    아직 서 있는 run 은 오늘도 "progressed" 로 분류된다. 그런 run 을 커밋이
+    없다고 FAILED 로 깎으면 정직한 blocked 신호를 완전히 지워버린다 — 그래서
+    `blocked` 가 비어있지 않으면 이 다운그레이드는 아예 건드리지 않는다.
+    """
+    if outcome != "progressed" or issue is None:
+        return outcome
+    if blocked:
+        return outcome
+    if new_commit and not uncommitted:
+        return outcome
+    return "failed-no-commit"
 
 
 ROSTER = ROOT / "runs" / "active.json"
@@ -1625,7 +1657,11 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                 f"완료의 정의: 변경이 이 브랜치에 **커밋**되고 push 되어 PR 로\n"
                 f"제출된 상태다. 미커밋 변경은 존재하지 않는 것과 같다 —\n"
                 f"세션을 끝내기 전에 반드시 커밋하라. push/PR 이 네트워크로\n"
-                f"막히면 커밋까지는 해 둬라: on-the-record 가 밖에서 릴레이한다.\n\n") + task
+                f"막히면 커밋까지는 해 둬라: on-the-record 가 밖에서 릴레이한다.\n"
+                f"경고: 이 턴은 headless 이고 단발이다 — 세션이 끝나면 이 프로세스도\n"
+                f"끝난다. run_in_background 로 넘긴 작업은 부모 턴이 끝나는 순간 함께\n"
+                f"죽는다(백그라운드 워커가 커밋·push 를 대신 끝내줄 것이라고 가정하지\n"
+                f"마라 — 실측된 실패 패턴이다). 모든 작업은 이 턴 안에서 직접 끝내라.\n\n") + task
     plugins = plugin_dirs(role, spec)
     s = role_settings(role)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
@@ -1657,6 +1693,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             if proxy:
                 extra_env["GOPROXY"] = proxy
         before = board_snapshot(cwd)
+        before_head = _git_head(cwd) if issue is not None else None
         # 이 세션이 답하러 가는 줄들. 세션이 보드를 실제로 바꾼 뒤에만 소비로
         # 적는다 — §6 은 wake 가 **결과 기록**으로 소비된다고 말한다.
         try:
@@ -1716,7 +1753,9 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         blocked = []       # 분류 보조일 뿐, 평가 실패로 스폰 결과를 잃지 않는다
 
     uncommitted = []
+    after_head = None
     if issue is not None:
+        after_head = _git_head(cwd)
         st = subprocess.run(["git", "-C", cwd, "status", "--porcelain"],
                             capture_output=True, text=True)
         uncommitted = [l for l in st.stdout.splitlines() if l.strip()]
@@ -1731,6 +1770,17 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     outcome = classify(rc, result, delta, blocked)
     if outcome == "silent-failure" and uncommitted:
         outcome = "uncommitted-work"
+    new_commit = issue is not None and after_head is not None and after_head != before_head
+    downgraded = fail_closed_downgrade(outcome, issue, blocked, new_commit, uncommitted)
+    if downgraded != outcome:
+        print(f"[{role}] 페일-클로즈드: progressed 로 자기보고 했지만 "
+              f"새 커밋이 없고(before {before_head}, after {after_head})"
+              + (f" 미커밋 변경 {len(uncommitted)}건도 남았다" if uncommitted else "")
+              + f" — {outcome} 를 failed-no-commit 으로 깎는다. 기대한 것: "
+              f"이 세션이 끝나기 전에 실제 커밋. 관찰한 것: 커밋 없음"
+              + (" + 더러운 트리" if uncommitted else "") + ".",
+              file=sys.stderr)
+        outcome = downgraded
     denials = result.get("permission_denials") or []
     if outcome == "progressed":
         # 계약 §6: wake 는 그 결과 기록이 쓰여야 소비된다. 아무것도 안 썼으면
