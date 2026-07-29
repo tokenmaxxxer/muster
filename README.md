@@ -367,6 +367,35 @@ run arbitrary published code from that registry. This is accepted
 deliberately, scoped to official registries only — no wildcards, no mirrors,
 no CDNs beyond the registry's own asset host.
 
+### Web-access allowlist (issue #58)
+
+Every role's sandbox allowlist only covered 3 hosts (`api.anthropic.com`,
+`*.github.com`, `github.com`) plus the registry hosts above, so `WebSearch`
+and `WebFetch` were silently denied for every role — the target of a search
+or an in-context URL is not knowable in advance, so no fixed host list can
+cover it (issue #43 hit this: 3/6 survey targets went unverified).
+`role_settings()` addresses this the same way it addresses the registry
+case:
+
+1. **Web-access domain merge.** `WEB_ACCESS_DOMAINS` (a single `["*"]`
+   entry — confirmed against the running Claude Code sandbox's domain
+   matcher, which treats a literal `"*"` as matching every host) is merged
+   into every sandboxed role's `sandbox.network.allowedDomains`, the same
+   additive, dedup-safe way `PACKAGE_REGISTRY_HOSTS` is merged just above.
+   This applies to all roles uniformly (operator decision: option B, not a
+   per-role opt-in).
+
+**Trade-off, explicit:** unlike the registry allowlist, this reopens
+outbound network to arbitrary hosts, not a fixed set — a `WebFetch`
+against any URL can return content, and that content can carry text
+crafted to look like instructions aimed at the agent (prompt injection).
+No technical content filter or sanitizer is added on fetched web content.
+The compensating control is muster's existing human gate chain: a
+phase-1 proposal is written before code changes, a human must Approve it,
+the resulting PR diff is reviewed, and a human merges it — that chain, not
+a filter on fetched content, is the final defense against an injected
+instruction turning into a landed change.
+
 ## Gates
 
 After a session ends, look deterministically at **what that session touched.** Zero LLM
