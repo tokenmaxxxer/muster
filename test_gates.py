@@ -18,9 +18,9 @@ import wakes
 
 
 def _board(td: str, subject: str, **roles: str) -> Path:
-    """계약 v2 §10 의 블랙보드를 만든다: docs/reports/records/<subject>/<역할>.md"""
+    """계약 v3 §10 의 블랙보드를 만든다: docs/issue-<n>/reports/<역할>.md"""
     root = Path(td) / "repo"
-    d = root / spawn.BOARD / subject
+    d = root / spawn.BOARD / subject / "reports"
     d.mkdir(parents=True)
     for role, fm in roles.items():
         (d / f"{role}.md").write_text(f"---\n{fm}\n---\n\n본문\n")
@@ -37,13 +37,13 @@ def t_slug_is_directory_name():
 
 def t_board_reads_loop_state():
     with tempfile.TemporaryDirectory() as td:
-        root = _board(td, "2026-07-26-wash",
+        root = _board(td, "issue-26",
                       product="kind: product-record\nloop_state: measuring",
                       feasibility="kind: feasibility-record\nloop_state: verdict\nverdict: go")
         b = spawn.board(root)
-        assert list(b) == ["2026-07-26-wash"], b
-        assert b["2026-07-26-wash"]["product"]["loop_state"] == "measuring"
-        assert b["2026-07-26-wash"]["feasibility"]["verdict"] == "go"
+        assert list(b) == ["issue-26"], b
+        assert b["issue-26"]["product"]["loop_state"] == "measuring"
+        assert b["issue-26"]["feasibility"]["verdict"] == "go"
         line = "\n".join(spawn.status(str(root)))
         assert "loop_state: measuring" in line, line
         assert "verdict: go" in line, line
@@ -54,9 +54,9 @@ def t_board_reads_loop_state():
 def t_board_tolerates_trailing_comment():
     """§2: 주석을 못 읽는 파서는 **게이트 결함이지 기록의 위반이 아니다**."""
     with tempfile.TemporaryDirectory() as td:
-        root = _board(td, "s", coding="kind: build-proposal  # re-scoped\n"
+        root = _board(td, "issue-1", coding="kind: build-proposal  # re-scoped\n"
                                       "loop_state: approved   # 사람이 승인함")
-        fm = spawn.board(root)["s"]["coding"]
+        fm = spawn.board(root)["issue-1"]["coding"]
         assert fm["kind"] == "build-proposal", fm
         assert fm["loop_state"] == "approved", fm
 
@@ -64,9 +64,9 @@ def t_board_tolerates_trailing_comment():
 def _wake_repo(td: str) -> Path:
     """hypothesis 하나를 커밋해 둔 레포. sha 비교가 필요하므로 진짜 git 이어야 한다."""
     root = Path(td) / "repo"
-    (root / "docs" / "proposals").mkdir(parents=True)
-    (root / spawn.BOARD / "s").mkdir(parents=True)
-    (root / "docs/proposals/h.md").write_text(
+    (root / "docs" / "issue-5" / "proposals").mkdir(parents=True)
+    (root / spawn.BOARD / "issue-5" / "reports").mkdir(parents=True)
+    (root / "docs/issue-5/proposals/h.md").write_text(
         "---\nkind: hypothesis\nsubject: s\nloop_state: hypothesis-registered\n---\n")
     run = lambda *a: subprocess.run(["git", "-C", str(root), *a], capture_output=True, check=True)
     run("init", "-q")
@@ -96,11 +96,11 @@ def t_wake_acknowledged_hypothesis_goes_quiet():
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
         sha = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%H",
-                              "--", "docs/proposals/h.md"],
+                              "--", "docs/issue-5/proposals/h.md"],
                              capture_output=True, text=True).stdout.strip()
-        (root / spawn.BOARD / "s" / "feasibility.md").write_text(
+        (root / spawn.BOARD / "issue-5" / "reports" / "feasibility.md").write_text(
             "---\nkind: feasibility-record\nloop_state: probing\n"
-            f"upstream:\n  - path: docs/proposals/h.md\n    sha: {sha}\n---\n")
+            f"upstream:\n  - path: docs/issue-5/proposals/h.md\n    sha: {sha}\n---\n")
         assert "feasibility" not in _woken(root), _woken(root)
 
 
@@ -112,7 +112,7 @@ def t_wake_first_build_needs_scope_approval():
     영영 안 움직인다 — 그래서 blocked 로 따로 나온다."""
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
-        rec = root / spawn.BOARD / "s" / "feasibility.md"
+        rec = root / spawn.BOARD / "issue-5" / "reports" / "feasibility.md"
         rec.write_text("---\nkind: feasibility-record\nloop_state: verdict\n"
                        "verdict: go\n---\n")
         assert "coding" not in _woken(root), _woken(root)
@@ -129,9 +129,9 @@ def t_wake_rebuild_is_not_gated():
     finding 하나 고치는 데도 사람 승인이 필요해져 루프가 안 돈다."""
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
-        (root / spawn.BOARD / "s" / "feasibility.md").write_text(
+        (root / spawn.BOARD / "issue-5" / "reports" / "feasibility.md").write_text(
             "---\nkind: feasibility-record\nloop_state: verdict\nverdict: go\n---\n")
-        (root / spawn.BOARD / "s" / "coding.md").write_text(
+        (root / spawn.BOARD / "issue-5" / "reports" / "coding.md").write_text(
             "---\nkind: coding-record\nloop_state: landed\n---\n")
         assert "coding" in _woken(root), _woken(root)
 
@@ -140,7 +140,7 @@ def t_wake_finding_wakes_the_addressed_role():
     """§5 의 되돌이 간선. finding 은 frontmatter 가 아니라 **본문 안에** 산다."""
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
-        (root / spawn.BOARD / "s" / "review.md").write_text(
+        (root / spawn.BOARD / "issue-5" / "reports" / "review.md").write_text(
             "---\nkind: review-record\nloop_state: reported\n---\n\n"
             "## finding\nrequirement: R1\nverdict: Incorrect\n"
             "addressed_to: qa\nseverity: blocking\n")
@@ -251,25 +251,30 @@ def t_wake_never_reports_judgement_rows_as_unwoken():
         assert "못 재는 것이다" in text, text
 
 
-def t_missing_contract_stops_the_spawn():
-    """실측 A/B: 레포에 계약이 없으면 역할이 계약 헤더 없이 기록을 쓰고, 보드에
-    아무것도 안 올라가고, 세션은 성공으로 끝난다. 경고로는 안 되는 이유가 그
-    조용함이다 — 한 세션을 통째로 버린다."""
+def t_missing_board_marker_stops_the_spawn():
+    """실측 A/B: 레포에 보드 표식(approvers.md)이 없으면 역할이 아무 기록도 못
+    올리고, 세션은 성공으로 끝난다. 경고로는 안 되는 이유가 그 조용함이다 —
+    한 세션을 통째로 버린다. v3 의 계약 검문은 require_board() 다."""
     with tempfile.TemporaryDirectory() as td:
         root = Path(td) / "repo"
         (root / "docs" / "specs").mkdir(parents=True)
+
+        # (a) marker 표식 있음 → 통과 (예외 없이 반환)
+        (root / spawn.MARKER).write_text("- u\n")
+        spawn.require_board(str(root), override=False)
+        (root / spawn.MARKER).unlink()
+
+        # (b) marker 표식 없음, override=True → 명시적 opt-out 은 통과.
+        # 사고가 아니라 결정이어야 한다.
+        spawn.require_board(str(root), override=True)
+
+        # (c) marker 표식 없음, override=False → 세션을 멈춘다
         try:
-            spawn.require_contract(str(root), override=False)
+            spawn.require_board(str(root), override=False)
         except SystemExit as e:
-            assert spawn.CONTRACT in str(e), e
+            assert spawn.MARKER in str(e), e
         else:
-            raise AssertionError("계약이 없는데 통과시켰다")
-
-        # 명시적 opt-out 은 통과. 사고가 아니라 결정이어야 한다.
-        spawn.require_contract(str(root), override=True)
-
-        (root / spawn.CONTRACT).write_text("# contract\n")
-        spawn.require_contract(str(root), override=False)
+            raise AssertionError("보드 표식이 없는데 통과시켰다")
 
 
 def t_rulebook_version_is_recorded():
@@ -380,25 +385,11 @@ def t_rulebook_falls_back_to_github():
         raise AssertionError("소스가 없는데 통과시켰다")
 
 
-def t_contract_drift_is_detected_by_content():
-    """계약 frontmatter 는 `status: final` 뿐이고 **버전이 없다.** 그래서 두 판이
-    나란히 final 을 선언하며 188줄 다를 수 있었다(2026-07-26 실측). 버전이 없으면
-    내용 해시가 유일한 판별 수단이다."""
-    with tempfile.TemporaryDirectory() as td:
-        root = Path(td) / "repo"
-        (root / "docs" / "specs").mkdir(parents=True)
-        assert spawn.contract_drift(str(root)) is None, "계약이 없으면 갈라짐도 없다"
-
-        assert spawn.init_contract(str(root)) == 0
-        assert spawn.contract_drift(str(root)) is None, "심은 직후는 정본과 같다"
-
-        (root / spawn.CONTRACT).write_text("---\nstatus: final\n---\n다른 판\n")
-        drift = spawn.contract_drift(str(root))
-        assert drift and "정본" in drift, drift
-
-        # 다른 판을 **덮어쓰지 않는다** — 의도적으로 다를 수 있다.
-        assert spawn.init_contract(str(root)) == 1
-        assert "다른 판" in (root / spawn.CONTRACT).read_text()
+# v3 abolished the per-repo contract copy (commit 613a5fbced1b08b48c4c8215a
+# 241d0b8a823dbcc: "init writes approvers.md, not a contract copy; require_board
+# replaces require_contract"). The two spawn.py functions this test exercised
+# for content-hash-based drift detection and copy-seeding no longer exist, so
+# there is nothing left to drift — do not restore this test.
 
 
 def t_new_roles_resolve_without_a_local_checkout():
