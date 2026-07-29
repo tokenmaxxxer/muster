@@ -1,8 +1,8 @@
 # Issue #89 — Coding Record
 
-loop_state: phase2-started
+loop_state: phase2-complete
 
-code_under_review: (pending — will be updated to the final code commit sha)
+code_under_review: 351007c
 
 ## Upstream basis
 
@@ -28,19 +28,75 @@ commit and/or a dirty tree — while exempting any run with a non-empty
 
 ## What was done
 
-(updated as work proceeds)
+In `spawn.py`:
+
+- Extended the `issue is not None` task preamble in `_spawn_one`
+  (spawn.py:1623-1632) with a new paragraph stating the turn is
+  headless/single-turn, that `run_in_background` work dies when the
+  parent turn ends, and that all work must be completed directly within
+  the turn — placed adjacent to the existing "commit before ending the
+  session" language so both read as one completion-of-turn rule.
+- Added `_git_head(cwd)` — returns the current `HEAD` sha, or `None` for
+  a repo with no commits yet (not treated as an error).
+- Added `fail_closed_downgrade(outcome, issue, blocked, new_commit,
+  uncommitted)` next to `classify()`: a standalone, independently
+  testable post-classification step. It downgrades `"progressed"` to
+  `"failed-no-commit"` only when `issue is not None`, `blocked` is
+  empty, and either no new commit landed or the tree is dirty.
+  `classify()` itself is untouched, per the proposal's explicit
+  constraint.
+- In `_spawn_one`: capture `before_head = _git_head(cwd)` alongside the
+  existing `before = board_snapshot(cwd)`, and `after_head = _git_head(cwd)`
+  alongside the existing post-run `uncommitted` computation (both gated
+  on `issue is not None`). After `outcome = classify(...)`, compute
+  `new_commit` and call `fail_closed_downgrade`, printing a stderr
+  reason line (expected: a real commit; observed: none / dirty tree)
+  when a downgrade fires. This runs before `wakes.consume(...)` and
+  `ledger_write(...)`, so a downgraded run neither consumes the wake row
+  nor is durably recorded as `progressed`.
+
+In `test_spawn.py`:
+
+- `FailClosedDowngrade`: unit tests against `fail_closed_downgrade`
+  covering no-commit+clean, no-commit+dirty, commit+dirty (still
+  downgraded), commit+clean (left alone — no false positive on the
+  honest-success path), the blocked-signal exemption (hunt-phase1), all
+  non-`progressed` outcomes untouched, and the `issue is None`
+  out-of-scope case.
+- `GitHead`: `_git_head` on an empty repo (`None`) and a repo with one
+  commit (a 40-char sha).
+- `PreambleWarning`: reads the `spawn.py` source directly (not a
+  reimplementation) and asserts the assembled preamble block contains
+  both `"headless"` and `"run_in_background"`.
+- The pre-existing `IssueScopedPrompt.test_preparation_and_preamble_happen_once`
+  integration test (which drives `_spawn_one` end-to-end against a real
+  git workspace) continued to pass unmodified, confirming no regression
+  to the already-covered `_spawn_one` path.
 
 ## What did not work
 
-(none yet)
+(none — all planned changes landed and the test run below passed
+cleanly on the first attempt)
 
 ## Open findings
 
-None raised against this work yet.
+None raised against this work. The phase-1 hunt-phase1.md finding
+(blocked signal shadowed by board delta in `classify()`) was addressed
+by design: `fail_closed_downgrade` checks `blocked` directly rather than
+relying solely on `outcome`, so a `progressed` run with an open human
+gate is exempted from the downgrade even though `classify()` itself
+still reports it as `progressed`.
 
 ## Next steps
 
-(updated as work proceeds)
+None — proposal scope executed:
+1. Headless single-turn warning: done.
+2. Fail-closed post-exit verification with blocked-signal exemption: done.
+3. Tests: done, all passing.
+4. This record: done.
+Out-of-scope items from the proposal (ad-hoc `issue is None` spawns,
+mid-run watchdog, `classify()` signature changes) were left untouched,
+as specified.
 
 ## Open-finding resolution path
 
@@ -54,4 +110,17 @@ resolved_findings before further commits, per the coding-progress gate.
 
 ## closed_checks
 
-(pending — filled in once code_under_review is set to the final sha)
+closed_checks:
+  - check: python3 -m unittest test_spawn -v
+    code_sha: 351007c
+    result: pass — 66 tests, 0 failures, 0 errors (includes 12 new
+      FailClosedDowngrade/GitHead/PreambleWarning tests plus the full
+      pre-existing suite run unmodified, including the real-git-workspace
+      IssueScopedPrompt integration test)
+  - check: hunt-phase1.md finding re-check — blocked exemption in
+      fail_closed_downgrade
+    code_sha: 351007c
+    result: pass — spawn.fail_closed_downgrade("progressed", 3,
+      [("coding","§19")], False, []) returns "progressed", not
+      "failed-no-commit", confirmed by
+      test_blocked_signal_exempts_progressed_from_downgrade
