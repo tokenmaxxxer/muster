@@ -1086,6 +1086,118 @@ def roster_ps() -> int:
     return 0
 
 
+WATCHDOG_STATE = ROOT / "runs" / "watchdog_state.json"
+WATCHDOG_SILENCE_MIN = 90     # 이슈 #90 proposal, signal 1
+WATCHDOG_NO_COMMIT_MIN = 71   # 이슈 #90 proposal, signal 4 (0.5 * p90 ≈ 142.6)
+WATCHDOG_DENIAL_THRESHOLD = 3 # 이슈 #90 proposal, signal 3
+_DELEGATION_RE = re.compile(
+    r"run_in_background|백그라운드|delegate|background worker", re.IGNORECASE)
+_DENIAL_RE = re.compile(r"permission_denial|denied", re.IGNORECASE)
+
+
+def _watchdog_state_load() -> dict:
+    try:
+        return json.loads(WATCHDOG_STATE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _watchdog_state_save(d: dict) -> None:
+    WATCHDOG_STATE.parent.mkdir(exist_ok=True)
+    WATCHDOG_STATE.write_text(json.dumps(d, indent=2, ensure_ascii=False))
+
+
+def watchdog_check_one(key: str, entry: dict, now: float | None = None,
+                       state: dict | None = None) -> list[str]:
+    """이슈 #90 phase-2: 살아있는 세션 하나에 대해 관찰만 하는(observe-only)
+    이상 신호 목록을 돌려준다. 세션의 프로세스·프롬프트·워크트리는 건드리지
+    않는다 — 로그 mtime/내용, 로스터 필드, git 상태만 읽는다.
+
+    `state` 를 넘기면 그 dict 를 제자리에서 갱신하고 저장하지 않는다(테스트
+    용). 생략하면 `runs/watchdog_state.json` 을 읽고 쓴다.
+    """
+    now = time.time() if now is None else now
+    anomalies: list[str] = []
+    log_path = Path(entry["log"]) if entry.get("log") else None
+    work = entry.get("work")
+    ts = entry.get("ts", 0)
+    elapsed_min = (now - ts) / 60
+
+    # signal 1: 로그 무응답 — 프로포절 §Anomaly-signal-list #1
+    if log_path is not None and log_path.exists():
+        mtime = log_path.stat().st_mtime
+        silent_min = (now - mtime) / 60
+        if silent_min > WATCHDOG_SILENCE_MIN:
+            anomalies.append(
+                f"log-silence: {int(silent_min)}분째 로그 무응답 ({log_path})")
+
+    # 마지막 스캔 이후 새로 쓰인 로그 내용만 본다 — 신호 2/3
+    own_state = state if state is not None else _watchdog_state_load()
+    st = own_state.get(key, {"offset": 0})
+    text = ""
+    new_offset = st.get("offset", 0)
+    if log_path is not None and log_path.exists():
+        with log_path.open("r", encoding="utf-8", errors="replace") as fh:
+            fh.seek(st.get("offset", 0))
+            text = fh.read()
+            new_offset = fh.tell()
+    own_state[key] = {"offset": new_offset}
+    if state is None:
+        _watchdog_state_save(own_state)
+
+    # signal 2: 백그라운드-위임 언급 — 시점 무관, 매치 즉시 신고
+    if _DELEGATION_RE.search(text):
+        anomalies.append(f"background-delegation-phrasing: {log_path}")
+
+    # signal 3: 반복된 거부된 도구 호출 (이번 스캔 구간 내)
+    new_denials = len(_DENIAL_RE.findall(text))
+    if new_denials >= WATCHDOG_DENIAL_THRESHOLD:
+        anomalies.append(
+            f"denied-tool-calls: 이번 스캔 구간에 {new_denials}건")
+
+    # signal 4: 반환점 지났는데 커밋 없음 — 이슈 스코프 스폰만 (before_head 필요)
+    before_head = entry.get("before_head")
+    if work and before_head and elapsed_min > WATCHDOG_NO_COMMIT_MIN:
+        r = subprocess.run(
+            ["git", "-C", str(work), "rev-list", "--count",
+             f"{before_head}..HEAD"],
+            capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip() == "0":
+            anomalies.append(
+                f"no-commits-late: {int(elapsed_min)}분 경과, "
+                f"{before_head} 이후 커밋 0건")
+
+    return anomalies
+
+
+def roster_watchdog() -> int:
+    """`spawn.py watchdog` — 살아있는 모든 역할 세션을 한 번 스캔해서 이상
+    신호를 사람이 읽을 수 있게 출력한다. observe-only: 아무 것도 고치거나
+    죽이지 않는다. 오케스트레이터가 10-15분 간격으로 반복 호출한다
+    (이슈 #90 phase-2 프로포절)."""
+    d = _roster_load()
+    if not d:
+        print("돌고 있는 역할 세션 없음")
+        return 0
+    state = _watchdog_state_load()
+    found_any = False
+    for key, e in sorted(d.items()):
+        if not _alive(e.get("pid", 0)):
+            continue
+        anomalies = watchdog_check_one(key, e, state=state)
+        if anomalies:
+            found_any = True
+            print(f"[watchdog] {key}: 이상 신호 {len(anomalies)}건")
+            for a in anomalies:
+                print(f"  - {a}")
+        else:
+            print(f"[watchdog] {key}: 정상")
+    _watchdog_state_save(state)
+    if not found_any:
+        print("이상 신호 없음")
+    return 0
+
+
 def roster_kill(issue: int, role: str) -> int:
     d = _roster_load()
     key = f"issue-{issue}/{role}"
@@ -1405,6 +1517,8 @@ def main() -> int:
         return init_board(a.cwd, a.login)
     if a.role == "ps":
         return roster_ps()
+    if a.role == "watchdog":
+        return roster_watchdog()
     if a.role == "kill":
         if not a.task or a.issue is None:
             sys.exit("사용법: spawn.py kill <역할> --issue <n>")
@@ -1740,6 +1854,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             "pid": proc.pid, "role": role,
             "issue": issue, "ts": int(time.time()),
             "work": str(cwd), "log": str(log_path),
+            "before_head": before_head,  # 이슈 #90 watchdog signal 4 재료
         })
         try:
             proc.stdin.write(task)

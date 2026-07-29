@@ -3,8 +3,10 @@
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -936,6 +938,126 @@ class Clean(unittest.TestCase):
             self.assertTrue(live_ws.is_dir())
             self.assertIn("실행 중인 세션 있음", out)
             self.assertFalse(dead_ws.exists())
+
+
+class Watchdog(unittest.TestCase):
+    """이슈 #90 phase-2: observe-only 이상 신호 네 가지."""
+
+    def _entry(self, log, work=None, ts=None, before_head=None):
+        return {"log": str(log), "work": work, "ts": ts or int(time.time()),
+                "before_head": before_head}
+
+    def test_silence_signal_fires_past_threshold(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text"}\n')
+            stale = time.time() - (spawn.WATCHDOG_SILENCE_MIN + 5) * 60
+            os.utime(log, (stale, stale))
+            out = spawn.watchdog_check_one("k", self._entry(log), state={})
+            self.assertTrue(any("log-silence" in a for a in out))
+
+    def test_no_silence_signal_within_threshold(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text"}\n')
+            out = spawn.watchdog_check_one("k", self._entry(log), state={})
+            self.assertFalse(any("log-silence" in a for a in out))
+
+    def test_delegation_phrasing_signal(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text","text":"run_in_background 로 넘겼다"}\n')
+            out = spawn.watchdog_check_one("k", self._entry(log), state={})
+            self.assertTrue(any("background-delegation-phrasing" in a for a in out))
+
+    def test_no_delegation_signal_on_clean_log(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text","text":"평범한 진행 로그"}\n')
+            out = spawn.watchdog_check_one("k", self._entry(log), state={})
+            self.assertFalse(any("background-delegation-phrasing" in a for a in out))
+
+    def test_denied_tool_calls_signal_fires_at_threshold(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text("permission_denial\n" * spawn.WATCHDOG_DENIAL_THRESHOLD)
+            out = spawn.watchdog_check_one("k", self._entry(log), state={})
+            self.assertTrue(any("denied-tool-calls" in a for a in out))
+
+    def test_denied_tool_calls_signal_silent_below_threshold(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text("permission_denial\n" * (spawn.WATCHDOG_DENIAL_THRESHOLD - 1))
+            out = spawn.watchdog_check_one("k", self._entry(log), state={})
+            self.assertFalse(any("denied-tool-calls" in a for a in out))
+
+    def test_only_new_log_content_is_scanned_each_call(self):
+        # 이미 스캔한 구간은 다음 호출에서 다시 세지 않는다 (오프셋 추적).
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text("permission_denial\n" * spawn.WATCHDOG_DENIAL_THRESHOLD)
+            state = {}
+            first = spawn.watchdog_check_one("k", self._entry(log), state=state)
+            self.assertTrue(any("denied-tool-calls" in a for a in first))
+            second = spawn.watchdog_check_one("k", self._entry(log), state=state)
+            self.assertFalse(any("denied-tool-calls" in a for a in second))
+
+    def test_no_commits_late_signal_fires(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "work"
+            work.mkdir()
+            subprocess.run(["git", "init", "-q", str(work)])
+            subprocess.run(["git", "-C", str(work), "config", "user.email", "t@t.t"])
+            subprocess.run(["git", "-C", str(work), "config", "user.name", "t"])
+            (work / "f").write_text("x")
+            subprocess.run(["git", "-C", str(work), "add", "f"])
+            subprocess.run(["git", "-C", str(work), "commit", "-q", "-m", "init"])
+            head = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+            log = Path(td) / "s.log"
+            log.write_text("")
+            ts = time.time() - (spawn.WATCHDOG_NO_COMMIT_MIN + 5) * 60
+            out = spawn.watchdog_check_one(
+                "k", self._entry(log, work=str(work), ts=ts, before_head=head),
+                state={})
+            self.assertTrue(any("no-commits-late" in a for a in out))
+
+    def test_no_commits_late_signal_silent_before_threshold(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "work"
+            work.mkdir()
+            subprocess.run(["git", "init", "-q", str(work)])
+            subprocess.run(["git", "-C", str(work), "config", "user.email", "t@t.t"])
+            subprocess.run(["git", "-C", str(work), "config", "user.name", "t"])
+            (work / "f").write_text("x")
+            subprocess.run(["git", "-C", str(work), "add", "f"])
+            subprocess.run(["git", "-C", str(work), "commit", "-q", "-m", "init"])
+            head = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+            log = Path(td) / "s.log"
+            log.write_text("")
+            out = spawn.watchdog_check_one(
+                "k", self._entry(log, work=str(work), ts=time.time(), before_head=head),
+                state={})
+            self.assertFalse(any("no-commits-late" in a for a in out))
+
+    def test_roster_watchdog_reports_no_anomaly_on_empty_roster(self):
+        with tempfile.TemporaryDirectory() as td:
+            roster_path = Path(td) / "active.json"
+            old_roster = spawn.ROSTER
+            old_state = spawn.WATCHDOG_STATE
+            spawn.ROSTER = roster_path
+            spawn.WATCHDOG_STATE = Path(td) / "watchdog_state.json"
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                spawn.roster_watchdog()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                spawn.WATCHDOG_STATE = old_state
+            self.assertIn("돌고 있는 역할 세션 없음", buf.getvalue())
 
 
 if __name__ == "__main__":
