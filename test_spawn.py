@@ -1002,6 +1002,23 @@ class Watchdog(unittest.TestCase):
             second = spawn.watchdog_check_one("k", self._entry(log), state=state)
             self.assertFalse(any("denied-tool-calls" in a for a in second))
 
+    def test_stale_offset_survives_log_truncation_on_respawn(self):
+        # spawn() 은 같은 로그 경로를 "w" 로 다시 열어 재시작 시 truncate
+        # 한다. 이전 세션에서 쌓인 오프셋이 새 로그(더 짧음)에 그대로 남아
+        # 있으면 새 세션의 신호 2/3 이 로그가 옛 길이를 다시 넘어설 때까지
+        # 조용히 안 잡힌다 — 재시작 직후 첫 스캔에서 바로 잡혀야 한다.
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text("permission_denial\n" * (spawn.WATCHDOG_DENIAL_THRESHOLD + 5))
+            state = {}
+            first = spawn.watchdog_check_one("k", self._entry(log), state=state)
+            self.assertTrue(any("denied-tool-calls" in a for a in first))
+            self.assertGreater(state["k"]["offset"], 0)
+            # respawn: 로그가 truncate 되어 이전 오프셋보다 짧아진다
+            log.write_text("permission_denial\n" * spawn.WATCHDOG_DENIAL_THRESHOLD)
+            second = spawn.watchdog_check_one("k", self._entry(log), state=state)
+            self.assertTrue(any("denied-tool-calls" in a for a in second))
+
     def test_no_commits_late_signal_fires(self):
         with tempfile.TemporaryDirectory() as td:
             work = Path(td) / "work"
