@@ -613,6 +613,74 @@ class GitHead(unittest.TestCase):
             self.assertEqual(len(head), 40)
 
 
+class IsNewCommit(unittest.TestCase):
+    def test_fresh_repo_first_commit_is_new(self):
+        self.assertTrue(spawn._is_new_commit("ignored", None, "abc123"))
+
+    def test_no_after_head_is_not_new(self):
+        self.assertFalse(spawn._is_new_commit("ignored", "abc123", None))
+
+    def test_unchanged_head_is_not_new(self):
+        self.assertFalse(spawn._is_new_commit("ignored", "abc123", "abc123"))
+
+    def test_checkout_of_preexisting_branch_is_not_new_commit(self):
+        # Reproduces hunt-phase2 finding: a session that checks out an
+        # unrelated pre-existing branch (no new commit created) must not be
+        # counted as new_commit, even though HEAD moved.
+        with tempfile.TemporaryDirectory() as td:
+            import subprocess
+
+            def git(*a):
+                return subprocess.run(["git", "-C", td, *a],
+                                       capture_output=True, text=True, check=True)
+
+            git("init", "-q")
+            git("config", "user.email", "t@t.t")
+            git("config", "user.name", "t")
+            (Path(td) / "a.txt").write_text("x")
+            git("add", "a.txt")
+            git("commit", "-q", "-m", "init")
+            init_branch = subprocess.run(
+                ["git", "-C", td, "symbolic-ref", "--short", "HEAD"],
+                capture_output=True, text=True).stdout.strip()
+            # Orphan branch with unrelated history — not a descendant of
+            # init_branch — so its tip is a pre-existing commit that is in
+            # no ancestry relationship with before_head at all.
+            git("checkout", "-q", "--orphan", "other")
+            (Path(td) / "b.txt").write_text("y")
+            git("add", "b.txt")
+            git("commit", "-q", "-m", "pre-existing unrelated commit")
+            git("checkout", "-q", init_branch)
+
+            before_head = spawn._git_head(td)
+            git("checkout", "-q", "other")  # no new commit — just a checkout
+            after_head = spawn._git_head(td)
+
+            self.assertNotEqual(before_head, after_head)
+            self.assertFalse(spawn._is_new_commit(td, before_head, after_head))
+
+    def test_real_new_commit_is_new(self):
+        with tempfile.TemporaryDirectory() as td:
+            import subprocess
+
+            def git(*a):
+                return subprocess.run(["git", "-C", td, *a],
+                                       capture_output=True, text=True, check=True)
+
+            git("init", "-q")
+            git("config", "user.email", "t@t.t")
+            git("config", "user.name", "t")
+            (Path(td) / "a.txt").write_text("x")
+            git("add", "a.txt")
+            git("commit", "-q", "-m", "init")
+            before_head = spawn._git_head(td)
+            (Path(td) / "a.txt").write_text("y")
+            git("add", "a.txt")
+            git("commit", "-q", "-m", "progress")
+            after_head = spawn._git_head(td)
+            self.assertTrue(spawn._is_new_commit(td, before_head, after_head))
+
+
 class Ledger(unittest.TestCase):
     def test_appends_jsonl(self):
         with tempfile.TemporaryDirectory() as td:

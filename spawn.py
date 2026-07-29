@@ -926,6 +926,28 @@ def _git_head(cwd: str) -> str | None:
     return c.stdout.strip() if c.returncode == 0 else None
 
 
+def _is_new_commit(cwd: str, before_head: str | None, after_head: str | None) -> bool:
+    """`after_head` 가 `before_head` 위에 실제로 새 커밋을 얹었는지 판단한다.
+
+    단순히 `after_head != before_head` 로는 부족하다 — 기존에 있던 브랜치나
+    커밋으로 체크아웃만 해도 HEAD 는 바뀌지만 새 커밋은 없다. before_head 가
+    after_head 의 조상(ancestor)인지까지 확인해야 "진짜 새 커밋"이라고 말할 수
+    있다. before_head 가 None (아직 커밋이 없던 새 레포)이면 after_head 가
+    있는 것만으로 새 커밋이다.
+    """
+    if after_head is None:
+        return False
+    if before_head is None:
+        return True
+    if before_head == after_head:
+        return False
+    c = subprocess.run(
+        ["git", "-C", cwd, "merge-base", "--is-ancestor", before_head, after_head],
+        capture_output=True, text=True,
+    )
+    return c.returncode == 0
+
+
 def board_snapshot(cwd: str) -> dict[str, str]:
     """보드 파일들의 내용 해시. 세션 전후를 비교해 §6 의 '바뀐 보드'를 잰다.
 
@@ -1770,7 +1792,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     outcome = classify(rc, result, delta, blocked)
     if outcome == "silent-failure" and uncommitted:
         outcome = "uncommitted-work"
-    new_commit = issue is not None and after_head is not None and after_head != before_head
+    new_commit = issue is not None and _is_new_commit(cwd, before_head, after_head)
     downgraded = fail_closed_downgrade(outcome, issue, blocked, new_commit, uncommitted)
     if downgraded != outcome:
         print(f"[{role}] 페일-클로즈드: progressed 로 자기보고 했지만 "
