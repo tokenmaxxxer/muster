@@ -2,7 +2,7 @@
 
 loop_state: phase2-complete
 
-code_under_review: PENDING (set to the commit sha created for this delivery)
+code_under_review: 48b7ab4
 
 ## Upstream basis
 
@@ -84,17 +84,17 @@ resolved_findings before further commits, per the coding-progress gate.
 
 closed_checks:
   - check: bash -n on-the-record/hooks/directive.sh
-    code_sha: PENDING (see code_under_review)
+    code_sha: 48b7ab4
     result: pass (no syntax errors)
   - check: bash -n on-the-record/hooks/self-update.sh
-    code_sha: PENDING (see code_under_review)
+    code_sha: 48b7ab4
     result: pass (no syntax errors)
   - check: grep -rn muster on-the-record/hooks/ (post-edit)
-    code_sha: PENDING (see code_under_review)
+    code_sha: 48b7ab4
     result: only the intentional old-path fallback string
       (`$HOME/.claude/tokenmaxxxer/muster`) in both edited hooks, and one
       unrelated comment in the out-of-write-set `deliverable-guard.sh`; no
       `_muster_resolve`/`MUSTER` identifiers remain
   - check: grep -rn 'tokenmaxxxer/on-the-record' on-the-record/hooks/ (post-edit)
-    code_sha: PENDING (see code_under_review)
+    code_sha: 48b7ab4
     result: clone URL and fallback path present in both hooks as expected
