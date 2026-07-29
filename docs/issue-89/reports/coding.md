@@ -2,7 +2,7 @@
 
 loop_state: phase2-complete
 
-code_under_review: 351007c
+code_under_review: 0909e289ac928184669dc7709ea72da4e46ddb28
 
 ## Upstream basis
 
@@ -75,8 +75,15 @@ In `test_spawn.py`:
 
 ## What did not work
 
-(none — all planned changes landed and the test run below passed
-cleanly on the first attempt)
+- Expected: comparing `after_head != before_head` would reliably signal
+  "this session created a new commit." Actual (hunt-phase2 finding): a
+  checkout-only HEAD move — switching to a pre-existing branch/commit
+  with no new commit created — also satisfies `!=` and passed as
+  progress, letting a false "progressed" report slip past
+  `fail_closed_downgrade`. Fixed by adding `_is_new_commit()`, which
+  additionally requires `before_head` be a real ancestor of `after_head`
+  (`git merge-base --is-ancestor`), with `before_head is None` (fresh
+  repo) still counting any `after_head` as new.
 
 ## Open findings
 
@@ -124,3 +131,11 @@ closed_checks:
       [("coding","§19")], False, []) returns "progressed", not
       "failed-no-commit", confirmed by
       test_blocked_signal_exempts_progressed_from_downgrade
+  - check: hunt-phase2.md finding re-check — checkout-only HEAD move no
+      longer counts as new_commit
+    code_sha: 0909e289ac928184669dc7709ea72da4e46ddb28
+    result: pass — python3 -m unittest test_spawn -v, 71 tests, 0
+      failures, 0 errors, including new IsNewCommit.
+      test_checkout_of_preexisting_branch_is_not_new_commit reproducing
+      the hunt-phase2 repro (checkout to an unrelated pre-existing
+      orphan-branch commit yields new_commit False)
