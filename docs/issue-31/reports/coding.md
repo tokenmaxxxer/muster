@@ -1,15 +1,77 @@
 ---
 kind: coding-record
-loop_state: scope-approved
-what-was-done: "Surveyed spawn.py's role-session command builder, the doctor() haiku probe, README's MUSTER_AGENT_GH_TOKEN section, and the existing os.environ.get() pattern used for optional config; wrote this survey and a companion build proposal for adding MUSTER_ROLE_MODEL."
-why: "Phase-1 of the coding role (research/survey/proposal) precedes any src edit per contract v3 s11 - a build proposal needs a grounded current-state survey and a frozen write set before implementation starts."
-upstream-basis: "Issue #31 (coding subject); could not be fetched via gh issue view 31 in this session (Bash permission denied for that call) - scope taken from the task brief (MUSTER_ROLE_MODEL pinning for spawned role sessions)."
-open-findings: "The brief names the target function _session_cmd, but no such function exists in spawn.py - the actual function is spawn_cmd (spawn.py:1139). Proceeding against spawn_cmd as the real target; flagging the naming mismatch for whoever reviews scope."
-next-steps: "Await human Approve on docs/issue-31/proposals/coding.md, then implement: add MUSTER_ROLE_MODEL read + --model append in spawn_cmd (spawn.py:1139-1188), document it in README.md near line 43-46, add a test_spawn.py case, and land by PR."
-open-finding-resolution-path: "Confirm with the human reviewer during Approve that spawn_cmd (spawn.py:1139) is the intended target of the brief's _session_cmd reference; if not, re-scope before phase-2 edits any file."
+loop_state: implemented-tested-pending-commit
+what-was-done: "Phase-2 implementation of MUSTER_ROLE_MODEL per approved docs/issue-31/proposals/coding.md: spawn_cmd appends --model <value> when the env var is set, README documents it next to MUSTER_AGENT_GH_TOKEN, test_spawn.py SpawnCmd gains three covering cases. Tests pass (33/33). Verified via direct spawn.spawn_cmd calls that --dry-run does not exercise spawn_cmd in this codebase."
+why: "Proposal approved; implementing exactly the frozen write set (spawn.py, README.md, test_spawn.py) with no scope drift."
+upstream-basis: "docs/issue-31/proposals/coding.md (approved build proposal) and this file's own phase-1 survey below."
+code_under_review: "TBD - filled in after commit"
+next-steps: "Commit and push to issue-31/coding (updates PR #32)."
 ---
 
-# Issue 31 - survey: pin model for spawned role sessions
+# Issue 31 - phase 2: MUSTER_ROLE_MODEL implementation
+
+## What was done (phase 2)
+
+- `spawn.py` (`spawn_cmd`, inserted right after the `--plugin-dir` loop,
+  before the base `env` dict is built): read `MUSTER_ROLE_MODEL` via
+  `os.environ.get`; if truthy, append `["--model", role_model]` to `cmd`.
+  Unset/empty -> `cmd` is unchanged, matching prior behavior byte-for-byte.
+  `doctor()`'s haiku probe (`spawn.py:1095-1136`, hardcoded
+  `"--model", "haiku"`) was not touched.
+- `README.md`: added a short paragraph right after the existing
+  "Optional hardening" / `MUSTER_AGENT_GH_TOKEN` paragraph, documenting
+  `MUSTER_ROLE_MODEL=<model>` and noting it does not affect the haiku
+  probe.
+- `test_spawn.py`: added three cases to the `SpawnCmd` class -
+  `test_role_model_unset_is_unchanged`, `test_role_model_set_appends_flag`,
+  `test_role_model_does_not_affect_haiku_probe` - each saving/restoring
+  `os.environ["MUSTER_ROLE_MODEL"]` around the mutation, following the
+  existing `test_core_dir_resolves_or_halts` pattern.
+
+## Test run (phase 2)
+
+Command: `python3 -m pytest test_spawn.py -q`
+Result: `33 passed in 0.20s` (all existing `SpawnCmd` cases plus the three
+new ones).
+
+## --dry-run acceptance (issue #31)
+
+`gh issue view 31` was readable this session. Its acceptance criterion
+reads: `MUSTER_ROLE_MODEL=sonnet python3 spawn.py <role> "<task>" --dry-run`
+should show `--model sonnet` in the composed command. Checked
+`spawn.py`'s `--dry-run` branch (`spawn.py:1298-1300`): it prints
+`role_settings(a.role)` (the merged role JSON settings) and returns
+without ever calling `spawn_cmd` - `--dry-run` does not exercise the argv
+this issue is about, in this codebase, today. This is a pre-existing gap
+between the issue's acceptance wording and what `--dry-run` actually
+inspects; not something phase-2 introduced or was scoped to fix (out of
+scope per the approved proposal, which names `spawn.spawn_cmd(...)` calls
+as the equivalent/actual acceptance mechanism instead).
+
+Verified directly via `spawn.spawn_cmd`, per the proposal's own
+"How we'll know it worked" wording:
+
+```
+$ python3 -c '<script calling spawn.spawn_cmd with MUSTER_ROLE_MODEL set/unset>'
+set:    [..., '--verbose', '--model', 'sonnet']
+unset:  [..., '--verbose']
+```
+
+Full argv with `MUSTER_ROLE_MODEL=sonnet`:
+`['claude', '-p', '--settings', '/tmp/s.json', '--permission-mode', 'acceptEdits', '--output-format', 'stream-json', '--verbose', '--model', 'sonnet']`
+
+Full argv unset:
+`['claude', '-p', '--settings', '/tmp/s.json', '--permission-mode', 'acceptEdits', '--output-format', 'stream-json', '--verbose']`
+
+Both match the proposal's acceptance criteria exactly.
+
+## What did not work (phase 2)
+
+none
+
+---
+
+# Issue 31 - survey: pin model for spawned role sessions (phase 1, unchanged below)
 
 ## What was done
 
