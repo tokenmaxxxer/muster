@@ -12,7 +12,7 @@ The reasoning behind it is in `orchestrator-design-2026-07.md`.*
                      │  "take this on"
                      ▼
               ┌─────────────┐
-              │   muster    │   **reads** state, picks a role, brings up its environment
+              │   on-the-record    │   **reads** state, picks a role, brings up its environment
               └──────┬──────┘   never writes state
          ┌───────────┼───────────┐
          ▼           ▼           ▼
@@ -20,14 +20,14 @@ The reasoning behind it is in `orchestrator-design-2026-07.md`.*
    (plugin set)  (plugin set) (plugin set)   "this is my turn, this is my step"
 ```
 
-**State belongs to the agent.** muster queries it and never writes it.
+**State belongs to the agent.** on-the-record queries it and never writes it.
 
-The first design put a label state machine inside muster. That creates two
-sources of truth, and worse, muster's label transitions **bypass the agent's own
+The first design put a label state machine inside on-the-record. That creates two
+sources of truth, and worse, on-the-record's label transitions **bypass the agent's own
 transition gate** — `qa-cycle` can intercept a write to `state.md` and refuse it,
 but a label never passes that gatekeeper. That state machine was removed.
 
-## 1. What muster does — three things
+## 1. What on-the-record does — three things
 
 **① Query state.** Read what each agent exposes. Never write it.
 
@@ -36,19 +36,19 @@ but a label never passes that gatekeeper. That state machine was removed.
 **③ Spawn an environment.** Bring up a headless session carrying that role's
 plugin set and boundary.
 
-Anything muster starts knowing beyond these three is the design leaking. "Which
+Anything on-the-record starts knowing beyond these three is the design leaking. "Which
 step QA is on" is fine to know; "why it is on that step" must not be.
 
-## 2. The state-exposure contract — muster does not own it
+## 2. The state-exposure contract — on-the-record does not own it
 
 **`docs/specs/role-handoff-contract.md` (v2, `status: final`) is the authority
 here, not this document.** It lives in `review-agent-rulebook` and defines the
-shared record format for all six roles. What follows is only what muster needs
+shared record format for all six roles. What follows is only what on-the-record needs
 in order to read the board; where the two disagree, the contract wins.
 
 The board is fully in-repo (contract §10): every role writes one status record
 at `docs/reports/records/<subject>/<role>.md`, inside doctrine's `reports`
-bucket. muster reads the frontmatter and nothing else.
+bucket. on-the-record reads the frontmatter and nothing else.
 
 ```yaml
 kind: feasibility-record
@@ -60,9 +60,9 @@ verdict: go
 
 `loop_state` (contract §7) is **the one field of a role's state machine other
 roles may depend on.** A role's internal sub-states are its own business and
-muster must not try to infer them.
+on-the-record must not try to infer them.
 
-Two things muster's reader has to get right, both named by the contract:
+Two things on-the-record's reader has to get right, both named by the contract:
 
 - **Trailing comments are legal** (§2): `kind: build-proposal  # re-scoped`. A
   parser that cannot read them is *a gate defect, not a violation by the
@@ -75,14 +75,14 @@ Two things muster's reader has to get right, both named by the contract:
 **Three rules**
 
 1. A record is written by **exactly one role** (contract §11's ownership table).
-2. Transition control belongs to that role's own gate. Not to muster.
-3. **muster is read-only.** To move state, call that role's command.
+2. Transition control belongs to that role's own gate. Not to on-the-record.
+3. **on-the-record is read-only.** To move state, call that role's command.
 
 ### Transition state, stated plainly
 
 The contract's own text says landing it in each rulebook is separate work, "one
 proposal per repo" — and as of 2026-07-27 **all eight rulebooks have landed it:
-every repository has a v2 board.** muster reads the v2 board first and, if a
+every repository has a v2 board.** on-the-record reads the v2 board first and, if a
 given repo somehow still lacks one, falls back to the v1 locations
 (`review-record.md`, `feasibility-record.md`, `state.md`, `product-record.md`)
 — not to use them, but to say *"this repo has not moved to v2 yet"* instead of
@@ -116,11 +116,11 @@ repository, so the coding agent ends up reading the QA rulebook too. A
 per-role environment can only be drawn at the session boundary — which is why
 each role gets its own session.
 
-`muster`'s own marketplace (`.claude-plugin/marketplace.json`) also lists every
+`on-the-record`'s own marketplace (`.claude-plugin/marketplace.json`) also lists every
 rulebook plugin from all nine role rulebooks, each with a GitHub `source`
 (`{"source": "github", "repo": "tokenmaxxxer/<repo>"}`), alongside the local
-`orchestrate` entry. This is a second install path for consumers who want
-`claude plugin install <plugin>@tokenmaxxxer-muster` to resolve a rulebook
+`on-the-record` entry. This is a second install path for consumers who want
+`claude plugin install <plugin>@tokenmaxxxer` to resolve a rulebook
 plugin directly — it does not change how `spawn.py` locates a role's rulebook
 above, and it does not make `claude plugin update` refresh a GitHub-sourced
 plugin from remote HEAD (that still goes through `spawn.py update <role>`, or
@@ -189,13 +189,13 @@ and **approving scope changes**. warrant halting a headless coding run at
 `proposed → approved` is that clause being honoured, not a defect.
 
 > ⚠️ Moving any of those four to an agent is an amendment to the handoff
-> contract, decided there. muster must not route around it, and neither must a
+> contract, decided there. on-the-record must not route around it, and neither must a
 > single rulebook's hook. A proposal that tried exactly that was withdrawn on
 > 2026-07-26.
 
 ## 6. Invariants
 
-1. **muster never writes state.** It reads, picks a role, and brings it up.
+1. **on-the-record never writes state.** It reads, picks a role, and brings it up.
 2. **A state file is written by exactly one plugin.** Transition control belongs
    to that plugin's gate.
 3. **Every role gets its own session,** because the session is the boundary of
@@ -215,7 +215,7 @@ and **approving scope changes**. warrant halting a headless coding run at
 | # | what | what it proves |
 |---|---|---|
 | 1 | `roles/*.json` plus one spawn | that per-role plugin environments really do differ |
-| 2 | query state → pick a role | that muster can dispatch without knowing an agent's internals |
+| 2 | query state → pick a role | that on-the-record can dispatch without knowing an agent's internals |
 | 3 | qa bench on/off | that the rulebook earns its keep — the organisation's first measurement |
 | 4 | more trigger sources (issues, alerts) | that events arrive without passing through a person |
 | 5 | an approving agent | a token minted by a separate context |
@@ -224,8 +224,8 @@ and **approving scope changes**. warrant halting a headless coding run at
 
 - **A WAKES-ON watcher** — contract §3 names "a future automated watcher, if one
   is built" as the thing that could carry the table instead of a human. That is
-  muster's job, and it implements §3's table rather than inventing a schedule.
+  on-the-record's job, and it implements §3's table rather than inventing a schedule.
   Now that all eight rulebooks have a board, this is buildable but not yet
   built.
-- **What calls muster** — a person directly, cron, or an issue webhook. For
+- **What calls on-the-record** — a person directly, cron, or an issue webhook. For
   stages 1–2 a person is enough. No long-running process is being built.

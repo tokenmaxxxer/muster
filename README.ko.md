@@ -1,17 +1,17 @@
-# tokenmaxxxer / muster
+# tokenmaxxxer / on-the-record
 
 *[English](README.md)*
 
 역할을 소집한다 — 그 역할의 룰북만 깔린 샌드박스 세션 하나를 띄운다.
 
-배차 기사가 아니라 콘센트다. **상태는 각 역할이 갖고, muster 는 읽기만 한다.**
+배차 기사가 아니라 콘센트다. **상태는 각 역할이 갖고, on-the-record 는 읽기만 한다.**
 
 ```
-protocol.md   규약 — muster 가 하는 일 셋, 상태 노출 계약, 격리
+protocol.md   규약 — on-the-record 가 하는 일 셋, 상태 노출 계약, 격리
               (protocol.ko.md 가 같은 규약의 한국어판)
 roles/        역할 하나 = 파일 하나. 룰북 번들 + 샌드박스 경계
 spawn.py      상태를 읽고, 역할 환경으로 세션을 띄운다
-orchestrate/  그걸 대화에서 부르는 플러그인 (/orchestrate:run)
+on-the-record/  그걸 대화에서 부르는 플러그인 (/on-the-record:run)
 wakes.py      계약 §3 의 WAKES-ON 표를 평가한다 — 보드가 누구를 깨우는가
 bench/        ablation 러너 — 룰북 on/off 를 같은 표적에 돌린다
 gates/        결정론 검사. 세션이 끝나면 spawn.py 가 부른다. LLM 0회
@@ -26,7 +26,7 @@ ledger/       성적표
 
 레포의 `.claude/settings.json` 을 고치면 그 레포에서 일하는 **모든** 에이전트에
 적용된다 — 코딩 에이전트가 QA 룰북까지 읽는다. 플러그인 스코핑의 경계는 **세션**
-이므로, 역할마다 세션을 따로 띄우는 수밖에 없다. 그게 muster 다.
+이므로, 역할마다 세션을 따로 띄우는 수밖에 없다. 그게 on-the-record 다.
 
 ## 역할
 
@@ -56,34 +56,34 @@ doctrine 의 SessionStart 훅이 안 돌아 `docs/` 버킷이 안 생겼고, 개
 ### 설치
 
 ```
-/plugin marketplace add tokenmaxxxer/muster
-/plugin install orchestrate@tokenmaxxxer-muster
+/plugin marketplace add tokenmaxxxer/on-the-record
+/plugin install on-the-record@tokenmaxxxer
 ```
 
-`orchestrate` 는 이게 설치의 전부다. muster 자체 마켓플레이스에는 아홉 개 역할
+`on-the-record` 는 이게 설치의 전부다. on-the-record 자체 마켓플레이스에는 아홉 개 역할
 룰북의 플러그인도 전부 올라 있고, 각각 자기 github repo 에서 바로 소스된다
 (`{"source": "github", "repo": "tokenmaxxxer/<repo>"}`) — 그래서 `claude plugin
-install <플러그인>@tokenmaxxxer-muster` 로 아무거나(예: `coding-cycle`,
+install <플러그인>@tokenmaxxxer` 로 아무거나(예: `coding-cycle`,
 `freelunch`, `qa-cycle`) 바로 설치된다. 아홉 개 룰북 레포를 하나씩 마켓플레이스로
 추가할 필요가 없다. 여기에도 룰북 로컬 clone 은 필요 없다 — 룰북을 손으로 clone
 하지 **않는다**: 역할 파일이 자기 repo 를 적고 있고, 그 역할을 처음 띄울 때 없으면
 받아온다. 비공개 레포도 된다(이미 있는 git 자격증명을 쓴다).
 
-muster 마켓플레이스로 설치하는 이 경로는 위의 `spawn.py` 자체 역할별 fetch 와는
+on-the-record 마켓플레이스로 설치하는 이 경로는 위의 `spawn.py` 자체 역할별 fetch 와는
 별개의, 선택적인 경로다 — `spawn.py` 는 첫 스폰에서 자기 마켓플레이스 등록을
 알아서 하므로 마켓플레이스 add 가 아예 필요 없다. `claude plugin install
-<플러그인>@tokenmaxxxer-muster` 는 `spawn.py` 밖에서 룰북 플러그인을 설치하고
+<플러그인>@tokenmaxxxer` 는 `spawn.py` 밖에서 룰북 플러그인을 설치하고
 둘러보고 싶을 때만 쓴다.
 
 **이 목록은 설치를 풀어줄 뿐, 계속되는 갱신을 풀어주지 않는다.** 아래 실측대로
 `claude plugin update` 는 고정된 `version` 문자열만 비교하고 룰북 아홉 개가 전부
-0.1.0 에 머물러 있으므로, `tokenmaxxxer-muster` 로 설치해도 `claude plugin
+0.1.0 에 머물러 있으므로, `tokenmaxxxer` 로 설치해도 `claude plugin
 update` 가 github 원격 최신으로 갱신해주지 않는다. 설치된 룰북을 갱신하려면
 여전히 `spawn.py update <역할>` (또는 재설치)을 거쳐야 한다.
 
 로컬 체크아웃이 있으면 그쪽이 이긴다. `roles/<역할>.json` 의 `path` 는 선택이고,
 그 디렉터리에 `.claude-plugin/marketplace.json` 이 있으면 원격 대신 그걸 쓴다 —
-룰북을 고쳐가며 muster 로 돌려볼 때 커밋·푸시를 먼저 하지 않아도 된다.
+룰북을 고쳐가며 on-the-record 로 돌려볼 때 커밋·푸시를 먼저 하지 않아도 된다.
 
 그 경로는 `$TOKENMAXXXER_RULEBOOKS/<레포>` 로 적혀 있고 `~` 와 `$VAR` 를 펴서
 푼다. 룰북 체크아웃들이 모여 있는 디렉터리를 이 변수에 넣으면 된다:
@@ -97,7 +97,7 @@ update` 가 github 원격 최신으로 갱신해주지 않는다. 설치된 룰�
 
 `TOKENMAXXXER_RULEBOOKS` 는 **선택적 개발용 override** 이지 스폰 시점의 필수
 조건이 아니다: `spawn.py` 의 역할 스폰은 로컬 체크아웃이 없으면 이미 github 에서
-룰북을 풀어오고, 위의 `claude plugin install <플러그인>@tokenmaxxxer-muster` 도
+룰북을 풀어오고, 위의 `claude plugin install <플러그인>@tokenmaxxxer` 도
 마찬가지다. github 왕복 없이 룰북 소스를 직접 고칠 때만 이 변수를 넣는다.
 
 **아무것도 스스로 갱신되지 않고, 클론만 갱신해서는 안 된다.** 세션은 마켓플레이스
@@ -115,7 +115,7 @@ update` 가 github 원격 최신으로 갱신해주지 않는다. 설치된 룰�
 
 - **유령 등록 항목.** 캐시 디렉터리를 지워도 `installed_plugins.json` 의 항목은
   남는다. "설치됨"으로 남은 항목은 재설치를 건너뛰게 하므로 캐시가 영영 안 돌아오고,
-  세션은 룰북 0개로 도는데 muster 는 붙었다고 보고한다. 지목된 항목을 지운다.
+  세션은 룰북 0개로 도는데 on-the-record 는 붙었다고 보고한다. 지목된 항목을 지운다.
 - **local scope 설치.** 어느 프로젝트의 `.claude/settings.local.json` 에 깔린 번들이
   자기 의존 플러그인들을 그 커밋에 묶어 둔다. user scope 의 uninstall 은 성공했다고
   답하면서 항목을 그대로 남긴다. 그 프로젝트에서 `--scope local` 로 번들을 지운다.
@@ -141,7 +141,7 @@ $ python3 spawn.py product "…" -C ~/work/new-app
 python3 spawn.py init -C ~/work/new-app
 ```
 
-정본은 muster 의 `contract/` 에 있고, 이것이 **muster 가 남의 레포에 쓰는 유일한
+정본은 on-the-record 의 `contract/` 에 있고, 이것이 **on-the-record 가 남의 레포에 쓰는 유일한
 경우다** — 보드 기록은 여기서 절대 쓰지 않는다. 그건 역할의 것이고 밖에서 고치면
 전이 게이트를 우회한다. 계약 파일은 상태가 아니라 **전제조건**이다.
 
@@ -182,11 +182,11 @@ product 의 "수용 기준을 흔드는가", ops 의 "내보낼 준비가 됐는
 이미 대화이기 때문이다.
 
 ```
-/plugin marketplace add tokenmaxxxer/muster
-/plugin install orchestrate@tokenmaxxxer-muster
+/plugin marketplace add tokenmaxxxer/on-the-record
+/plugin install on-the-record@tokenmaxxxer
 
-/orchestrate:run                          지금 상태만 본다
-/orchestrate:run qa /testrun:testrun smoke
+/on-the-record:run                          지금 상태만 본다
+/on-the-record:run qa /testrun:testrun smoke
 ```
 
 ### 명령 전부
@@ -208,7 +208,7 @@ python3 spawn.py wake --all                   # 이미 답해진 줄까지 전�
 
 ### 세션이 끝나면
 
-스폰마다 결과 JSON 을 받아 muster 의 `runs/ledger.jsonl` 에 한 줄을 남기고
+스폰마다 결과 JSON 을 받아 on-the-record 의 `runs/ledger.jsonl` 에 한 줄을 남기고
 (세션 id, 비용, 턴 수, 보드 변화, 게이트 보고) 처분을 말한다 — `errored` /
 `progressed`(보드 변화) / `waiting-on-human`(§19 대기) / `silent-failure`
 (exit 0 인데 보드 무변화 — 실측된 침묵-사망 모드가 이제 소리를 낸다).
@@ -268,7 +268,7 @@ Claude Code 의 Bash 샌드박스가 우리에게 필요한 것을 더 잘 준�
   - 존재하지 않는 패키지: lodahs (package.json)
 ```
 
-**막지는 않는다** — 이미 쓴 뒤라 되돌릴 수 없고, muster 는 판정하지 않는다.
+**막지는 않는다** — 이미 쓴 뒤라 되돌릴 수 없고, on-the-record 는 판정하지 않는다.
 대신 조용히 넘어가지도 않는다. 검사 자체가 불가능하면(git 아님, 기본 브랜치 부재)
 "이상 없음"이 아니라 **"검사 불가"**로 보고한다 — 둘은 정반대 처분을 받아야 한다.
 

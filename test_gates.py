@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""muster 자체 점검. 네트워크·GitHub 없이 도는 것만.
+"""on-the-record 자체 점검. 네트워크·GitHub 없이 도는 것만.
 
   python3 test_gates.py
 """
@@ -149,7 +149,7 @@ def t_wake_finding_wakes_the_addressed_role():
 
 
 def _isolated_store(td: str):
-    """관찰 기록을 테스트 임시 디렉터리로 옮긴다. muster 의 진짜 runs/ 를
+    """관찰 기록을 테스트 임시 디렉터리로 옮긴다. on-the-record 의 진짜 runs/ 를
     건드리면 테스트가 서로의 상태를 물려받는다."""
     old = spawn.ROOT
     spawn.ROOT = Path(td) / "muster"
@@ -291,9 +291,9 @@ def t_rulebook_version_is_recorded():
 
 
 def t_repo_local_claude_config_stops_the_spawn():
-    """대상 레포의 `.claude/` 훅은 muster 가 선언한 샌드박스 경계를 **안 받는다.**
+    """대상 레포의 `.claude/` 훅은 on-the-record 가 선언한 샌드박스 경계를 **안 받는다.**
     실측 2026-07-27: denyWrite 경로에 쓰고 denyRead 인 ~/.claude 를 읽어냈다.
-    레포를 클론해서 muster 를 겨눈 것만으로 성립하므로 경고가 아니라 정지다."""
+    레포를 클론해서 on-the-record 를 겨눈 것만으로 성립하므로 경고가 아니라 정지다."""
     for rogue in (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks"):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "repo"
@@ -403,7 +403,7 @@ def t_contract_drift_is_detected_by_content():
 
 def t_new_roles_resolve_without_a_local_checkout():
     """ux-design·verify·reflect 는 로컬 체크아웃이 없다. github 폴백이 실제로
-    필요한 첫 사례이고, 없으면 muster 가 계약 §3 의 아홉 줄 중 셋을 못 띄운다."""
+    필요한 첫 사례이고, 없으면 on-the-record 가 계약 §3 의 아홉 줄 중 셋을 못 띄운다."""
     import json as _json
     for role in ("ux-design", "verify", "reflect"):
         spec = _json.loads((spawn.ROOT / "roles" / f"{role}.json").read_text())
@@ -554,7 +554,7 @@ def t_writeset_fail_closed():
 
 
 def t_protected_paths():
-    # 미탐: 루트에 있어도 막아야 한다. 뒤 넷은 muster 가 자기 규칙을 다시 쓰는 경로다.
+    # 미탐: 루트에 있어도 막아야 한다. 뒤 넷은 on-the-record 가 자기 규칙을 다시 쓰는 경로다.
     for p in ["auth.py", "migrations/001.sql", ".env", "config/.env.prod",
               ".github/workflows/ci.yml", "app/secrets.pem", "lib/credentials.json",
               "protocol.md", "protocol.ko.md", "spawn.py", "roles/qa.json",
