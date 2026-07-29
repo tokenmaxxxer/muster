@@ -1209,6 +1209,28 @@ def doctor() -> int:
     return 1
 
 
+ROLE_MODEL_CONFIG = ROOT / "role_model.txt"
+
+
+def read_role_model_config() -> str:
+    """이슈#60: repo-root role_model.txt 에서 기본 모델 값을 읽는다. 파일이
+    없거나 읽기 오류가 나면 미설정과 동일하게 "" 를 돌려준다."""
+    try:
+        return ROLE_MODEL_CONFIG.read_text().strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def resolved_role_model() -> str:
+    """이슈#60: env > config > none. MUSTER_ROLE_MODEL 이 (strip 후) 비어
+    있지 않으면 그것이 이긴다 — config 는 그때는 아예 안 읽힌 값처럼 무시된다.
+    둘 다 비어 있으면 "" (오늘과 동일, --model 미부착)."""
+    env_value = (os.environ.get("MUSTER_ROLE_MODEL") or "").strip()
+    if env_value:
+        return env_value
+    return read_role_model_config()
+
+
 def spawn_cmd(settings_path: str, role: str, unattended: bool,
               core_plugins: list | None = None,
               plugins: list | None = None) -> tuple[list[str], dict[str, str]]:
@@ -1236,10 +1258,11 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
         cmd += ["--plugin-dir", str(p)]
     for p in (core_plugins or []):
         cmd += ["--plugin-dir", str(p)]
-    # MUSTER_ROLE_MODEL: 역할 세션이 쓰는 모델을 고정한다. 비어있으면(기본)
-    # 오늘과 동일하게 --model 을 붙이지 않는다 — haiku 프로브(doctor())는
-    # 이 함수를 거치지 않으므로 영향 없다.
-    role_model = (os.environ.get("MUSTER_ROLE_MODEL") or "").strip()
+    # MUSTER_ROLE_MODEL / role_model.txt (이슈#60): 역할 세션이 쓰는 모델을
+    # 고정한다. env > config > none. 둘 다 비어있으면(기본) 오늘과 동일하게
+    # --model 을 붙이지 않는다 — haiku 프로브(doctor())는 이 함수를 거치지
+    # 않으므로 영향 없다.
+    role_model = resolved_role_model()
     if role_model:
         cmd += ["--model", role_model]
     env = {"CLAUDE_ROLE": role, "TOKENMAXXXER_SPAWNED": "1"}
@@ -1382,12 +1405,14 @@ def main() -> int:
     require_no_repo_config(a.cwd, a.trust_repo_config)
     if a.dry_run:
         out = role_settings(a.role)
-        # MUSTER_ROLE_MODEL: spawn_cmd 는 이 dry-run 경로를 안 타므로(세션을
-        # 안 띄우니까) --model 부착 여부가 여기 안 보이면 이슈#31 acceptance
-        # 커맨드(`--dry-run`)로는 이 기능을 검증할 수 없다(실측:
-        # docs/reports/2026-07-29-hunt-muster-role-model-build.md). 비어있으면
-        # (기본) 키를 아예 안 넣어 91aeecb 이전 출력과 동일하게 둔다.
-        role_model = (os.environ.get("MUSTER_ROLE_MODEL") or "").strip()
+        # MUSTER_ROLE_MODEL / role_model.txt (이슈#60): spawn_cmd 는 이
+        # dry-run 경로를 안 타므로(세션을 안 띄우니까) --model 부착 여부가
+        # 여기 안 보이면 이슈#31 acceptance 커맨드(`--dry-run`)로는 이 기능을
+        # 검증할 수 없다(실측:
+        # docs/reports/2026-07-29-hunt-muster-role-model-build.md). resolved_role_model()
+        # 로 spawn_cmd 와 동일한 env > config > none 경로를 태워, 둘 다
+        # 비어있으면(기본) 키를 아예 안 넣어 91aeecb 이전 출력과 동일하게 둔다.
+        role_model = resolved_role_model()
         if role_model:
             out["model"] = role_model
         print(json.dumps(out, indent=2, ensure_ascii=False))
