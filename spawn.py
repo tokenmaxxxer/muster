@@ -36,6 +36,52 @@ USER_SETTINGS = Path.home() / ".claude" / "settings.json"
 MARKETPLACES = Path.home() / ".claude" / "plugins" / "marketplaces"
 KNOWN = MARKETPLACES.parent / "known_marketplaces.json"
 
+# 공식 공개 패키지 레지스트리 호스트 — role_settings() 가 모든 역할의
+# allowedDomains 에 병합한다(이슈 #38). 캐시 미스 시의 폴백 경로이므로
+# 미러/CDN 없이 레지스트리 본체만 좁게 유지한다.
+PACKAGE_REGISTRY_HOSTS = [
+    "registry.npmjs.org",
+    "pypi.org",
+    "files.pythonhosted.org",
+    "proxy.golang.org",
+    "sum.golang.org",
+    "crates.io",
+    "static.crates.io",
+    "repo.maven.apache.org",
+]
+
+# 호스트에 이미 있는 패키지 캐시 디렉터리 후보 — 존재하면 읽기 전용으로
+# 샌드박스에 마운트한다(이슈 #38). (env_var, default_path) 쌍이며, env_var 가
+# os.environ 에 있으면 그 값을, 없으면 default_path 를 role_settings() 와
+# 동일한 방식(os.path.expanduser/os.path.expandvars)으로 해석한다.
+PACKAGE_CACHE_DIRS = [
+    ("GOMODCACHE", "~/go/pkg/mod"),
+    ("NPM_CONFIG_CACHE", "~/.npm"),
+    ("PIP_CACHE_DIR", "~/.cache/pip"),
+    (None, "~/.cargo/registry"),
+    ("MAVEN_REPO", "~/.m2/repository"),
+]
+
+
+def go_proxy_layer(s: dict) -> str | None:
+    """호스트 GOMODCACHE 가 읽기 전용으로 마운트됐으면(이슈 #38) GOPROXY 에 그
+    캐시를 file:// 소스로 앞세운다.
+
+    role_settings() 는 캐시 디렉터리를 sandbox.filesystem.allowRead 에
+    추가할 뿐, spawn() 이 그 뒤 GOMODCACHE 를 워크스페이스로 재지정하므로
+    (spawn.py 의 .muster-cache 리다이렉션) 마운트된 호스트 캐시가 조용히
+    무시된다 — Go 는 GOMODCACHE 를 쓰기 캐시로만 쓰고 두 캐시를 겸하지
+    않기 때문. GOPROXY 는 여러 소스를 순서대로 시도하므로, 호스트 캐시를
+    읽기 전용 첫 소스로 앞세우고 GOMODCACHE 는 워크스페이스에 남겨 쓰기는
+    그대로 승인 없이 돈다.
+    """
+    env_var, default_path = next(p for p in PACKAGE_CACHE_DIRS if p[0] == "GOMODCACHE")
+    host_path = os.path.expanduser(os.path.expandvars(os.environ.get(env_var, default_path)))
+    allow_read = s.get("sandbox", {}).get("filesystem", {}).get("allowRead", [])
+    if host_path not in allow_read:
+        return None
+    return f"file://{host_path}/cache/download,https://proxy.golang.org,direct"
+
 
 def _mkt(d: Path) -> Path:
     return d / ".claude-plugin" / "marketplace.json"
@@ -294,6 +340,32 @@ def role_settings(role: str) -> dict:
                 # 안 풀린 변수를 그대로 넘기면 경계가 존재하지 않는 경로를 가리킨다.
                 sys.exit(f"[{role}] sandbox.filesystem.{key} 의 변수를 풀 수 없다: "
                          f"{', '.join(unresolved)}")
+
+    # 패키지 레지스트리 호스트를 병합한다(이슈 #38) — 샌드박스가 켜진 역할만.
+    # 역할이 선언한 도메인은 지우지 않고, 이미 있는 호스트는 중복 추가하지 않는다.
+    if sb0 := s.get("sandbox", {}):
+        if sb0.get("enabled"):
+            net = sb0.setdefault("network", {})
+            domains = net.setdefault("allowedDomains", [])
+            for host in PACKAGE_REGISTRY_HOSTS:
+                if host not in domains:
+                    domains.append(host)
+
+    # 호스트 패키지 캐시를 읽기 전용으로 마운트한다(이슈 #38). 존재하는
+    # 디렉터리만 추가한다 — 없으면 조용히 건너뛴다(에러도 출력도 없음).
+    # 여기서 쓰는 GOMODCACHE 등은 호스트의 실제 캐시 소스이며, 아래
+    # .muster-cache 쓰기 리다이렉션(spawn_cmd 호출부, 별도 함수)과는
+    # 별개의 관심사다 — 섞지 않는다.
+    if sb0 := s.get("sandbox", {}):
+        if sb0.get("enabled"):
+            for env_var, default_path in PACKAGE_CACHE_DIRS:
+                raw = os.environ.get(env_var, default_path) if env_var else default_path
+                cache_path = os.path.expanduser(os.path.expandvars(raw))
+                if os.path.exists(cache_path):
+                    fs2 = sb0.setdefault("filesystem", {})
+                    allow_read = fs2.setdefault("allowRead", [])
+                    if cache_path not in allow_read:
+                        allow_read.append(cache_path)
 
     # 전역 플러그인은 전부 끈다. 켜야 할 것을 적는 게 아니라 꺼야 할 것을
     # 빠짐없이 적는 쪽이라, 전역에 플러그인이 새로 깔려도 새지 않는다.
@@ -1520,6 +1592,9 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                 "npm_config_cache": os.path.join(wcache, "npm"),
                 "PIP_CACHE_DIR": os.path.join(wcache, "pip"),
             })
+            proxy = go_proxy_layer(s)
+            if proxy:
+                extra_env["GOPROXY"] = proxy
         before = board_snapshot(cwd)
         # 이 세션이 답하러 가는 줄들. 세션이 보드를 실제로 바꾼 뒤에만 소비로
         # 적는다 — §6 은 wake 가 **결과 기록**으로 소비된다고 말한다.
