@@ -460,5 +460,65 @@ class Drive(unittest.TestCase):
             wakes.fresh, wakes.observed, spawn._spawn_one = old_fresh, old_obs, old_spawn
 
 
+class Clean(unittest.TestCase):
+    def _make_clean_repo(self, path: Path, remote: Path) -> None:
+        __import__("subprocess").run(
+            ["git", "init", "-q", "--bare", str(remote)], check=True)
+        path.mkdir(parents=True)
+        run = lambda *args: __import__("subprocess").run(
+            args, cwd=str(path), capture_output=True, text=True, check=True)
+        run("git", "init", "-q")
+        run("git", "config", "user.email", "t@example.com")
+        run("git", "config", "user.name", "t")
+        (path / "f.txt").write_text("x")
+        run("git", "add", "f.txt")
+        run("git", "commit", "-q", "-m", "init")
+        run("git", "remote", "add", "origin", str(remote))
+        run("git", "push", "-q", "-u", "origin", "HEAD:main")
+
+    def test_keeps_live_session_workspace_but_deletes_dead_sibling(self):
+        with tempfile.TemporaryDirectory() as td:
+            wb = Path(td) / "work"
+            wb.mkdir()
+            live_ws = wb / "issue-51-coding"
+            dead_ws = wb / "issue-51-review"
+            self._make_clean_repo(live_ws, Path(td) / "remote-live.git")
+            self._make_clean_repo(dead_ws, Path(td) / "remote-dead.git")
+
+            roster_path = Path(td) / "runs" / "active.json"
+            roster_path.parent.mkdir(parents=True)
+            roster_path.write_text(json.dumps({
+                "issue-51/coding": {
+                    "pid": os.getpid(),
+                    "work": str(live_ws),
+                    "issue": 51,
+                    "role": "coding",
+                }
+            }))
+
+            old_roster = spawn.ROSTER
+            old_argv = sys.argv
+            old_environ = dict(os.environ)
+            spawn.ROSTER = roster_path
+            os.environ["MUSTER_WORK_DIR"] = str(wb)
+            sys.argv = ["spawn.py", "clean"]
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                spawn.main()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                sys.argv = old_argv
+                os.environ.clear()
+                os.environ.update(old_environ)
+
+            out = buf.getvalue()
+            self.assertTrue(live_ws.is_dir())
+            self.assertIn("실행 중인 세션 있음", out)
+            self.assertFalse(dead_ws.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
