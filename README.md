@@ -331,6 +331,42 @@ that way, through a `denyRead` that was supposedly blocking it. `spawn.py` force
 completely, but the macOS keychain entry is tied to the config directory, so
 authentication breaks.
 
+### Package-registry access (issue #38)
+
+A fresh sandboxed workspace has no package cache, so `go build`/`npm
+install`/`pip install`/etc. hit the network boundary on the very first
+dependency fetch. `role_settings()` addresses this two ways:
+
+1. **Read-only host cache mount (default path).** If a well-known host
+   package-cache directory exists (Go modules, npm, pip, cargo, Maven), it is
+   added to `sandbox.filesystem.allowRead` — read-only, never write. This
+   mount is only actively consulted by the ecosystem tooling for **Go**: an
+   issue-scoped spawn also layers a `file://<host GOMODCACHE>/cache/download`
+   source in front of `GOPROXY`, so `go build`/`go test` reads already-cached
+   modules from the host without a write attempt against the read-only mount
+   (`GOMODCACHE` itself stays workspace-local and writable, per the existing
+   `.muster-cache` redirection below). npm/pip/cargo/Maven cache directories
+   are still added to `allowRead` when present, but those tools' own cache
+   env vars (`npm_config_cache`, `PIP_CACHE_DIR`, ...) are unconditionally
+   redirected to the empty workspace `.muster-cache/` — their host caches are
+   mounted but not yet wired into an active read path, so for those
+   ecosystems the registry allowlist below is what actually avoids a
+   network-denial failure today.
+2. **Registry allowlist (fallback for cache misses).** `PACKAGE_REGISTRY_HOSTS`
+   (a fixed list of official registry hostnames — npm, PyPI, Go module proxy,
+   crates.io, Maven Central) is merged into every sandboxed role's
+   `sandbox.network.allowedDomains`, so a role no longer needs to hand-curate
+   these per `roles/*.json`.
+
+**Trade-off, explicit:** the cache mount is read-only and low-risk — a
+compromised build step can read stale packages but cannot write back to the
+host cache. The registry allowlist is higher but bounded risk: it reopens
+outbound network to a fixed set of hosts, and package install is a
+code-execution path, so anything reachable through the allowlist can pull and
+run arbitrary published code from that registry. This is accepted
+deliberately, scoped to official registries only — no wildcards, no mirrors,
+no CDNs beyond the registry's own asset host.
+
 ## Gates
 
 After a session ends, look deterministically at **what that session touched.** Zero LLM
