@@ -1216,7 +1216,7 @@ def read_role_model_config() -> str:
     없거나 읽기 오류가 나면 미설정과 동일하게 "" 를 돌려준다."""
     try:
         return ROLE_MODEL_CONFIG.read_text().strip()
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return ""
 
 
