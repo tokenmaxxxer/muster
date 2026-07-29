@@ -60,7 +60,7 @@ roles/        one role is one file: rulebook bundle plus sandbox boundary
 spawn.py      reads state, brings up a session in a role's environment
               (--issue <n> creates the branch and anchors the prompt)
 on-the-record/  the plugin that drives the loop from a conversation (/on-the-record:run)
-wakes.py      evaluates contract s3's WAKES-ON table: whom does the board wake
+wakes.py      evaluates docs/specs/wake-routing.md's WAKES-ON table: whom does the board wake
 gates/        deterministic checks, run by spawn.py after a session. Zero LLM calls
 ledger/       the scorecard
 ```
@@ -278,7 +278,7 @@ run is not read.
 ### The loop
 
 One call runs one role. After it, ask the board who is up next; `wake` evaluates
-contract §3's WAKES-ON table and names them.
+docs/specs/wake-routing.md's WAKES-ON table and names them.
 
 ```bash
 python3 spawn.py product "build me a car-wash timing app" -C ~/work/new-app
@@ -313,7 +313,7 @@ place where work gets handed over is already the conversation.
 
 ```bash
 python3 spawn.py                              # read the board (read-only)
-python3 spawn.py wake                         # who does the board wake? (contract §3)
+python3 spawn.py wake                         # who does the board wake? (docs/specs/wake-routing.md)
 python3 spawn.py <role> "<task>" -C <repo>    # bring up that role
 python3 spawn.py <role> "x" --dry-run         # print the merged settings only
 python3 spawn.py <role> "x" --no-contract     # skip the contract precondition
@@ -505,9 +505,10 @@ python3 test_gates.py
 - **Six gate families still live once per rulebook.** `state-gate.sh` exists seven
   times and all seven differ. core holds consent and the board gate today; lifting
   the rest in, with their transition tables as data, has not started.
-- **Contract §3's table disagrees with §5.** §5 says every role wakes on a finding
-  addressed to it; the table names findings only in coding's row. `wakes.py`
-  follows §5 — the table alone would leave findings addressed to anyone else unseen.
+- **docs/specs/wake-routing.md resolves a §3/§5 disagreement from an earlier draft.**
+  §5 says every role wakes on a finding addressed to it; an earlier table draft named
+  findings only in coding's row. `wakes.py` follows the resolved behavior — every
+  role wakes on findings addressed to it.
 - **Scoring is manual.** Whether a finding hit an answer-key entry is adjudicated by
   a person (the key's adjudication clause). The runner only builds the scoresheet —
   imitating automatic adjudication is how the ledger starts lying.

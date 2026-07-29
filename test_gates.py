@@ -3,6 +3,7 @@
 
   python3 test_gates.py
 """
+import re
 import json
 import os
 import subprocess
@@ -249,6 +250,16 @@ def t_wake_never_reports_judgement_rows_as_unwoken():
         assert {r for r, _ in judged} == {"product", "ops"}, judged
         text = "\n".join(wakes.report(str(root)))
         assert "못 재는 것이다" in text, text
+
+
+def t_wake_routing_doc_matches_rows():
+    """docs/specs/wake-routing.md 와 wakes.py._rows()/JUDGEMENT 가 어긋나면 안
+    된다 — 문서가 표의 소유권을 넘겨받았으니, 앞으로 갈래가 늘거나 바뀌어도
+    둘이 따로 놀지 않는지 이 테스트가 잡는다."""
+    doc = (Path(__file__).parent / "docs" / "specs" / "wake-routing.md").read_text()
+    tables = re.findall(r"^\|\s*(\S+)\s*\|", doc, re.M)
+    doc_roles = {r for r in tables if r not in ("role", "---")}
+    assert doc_roles == set(spawn.ROLES), (doc_roles, set(spawn.ROLES))
 
 
 def t_missing_board_marker_stops_the_spawn():
