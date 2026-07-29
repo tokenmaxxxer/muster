@@ -1300,9 +1300,21 @@ def main() -> int:
         # 안전한 것만 지운다: 미커밋 변경 없음 + origin 에 없는 커밋 없음.
         base = os.environ.get("MUSTER_WORK_DIR")
         wb = Path(base) if base else Path.home() / ".tokenmaxxxer" / "work"
+        roster = _roster_load()
+        live = {}
+        for e in roster.values():
+            if _alive(e.get("pid", 0)):
+                live[Path(e["work"]).resolve()] = e
         removed = kept = 0
         for w in sorted(wb.glob("*")) if wb.is_dir() else []:
             if not (w / ".git").is_dir():
+                continue
+            e = live.get(w.resolve())
+            if e is not None:
+                print(f"남김 (실행 중인 세션 있음): {w.name}"
+                      f"  [issue-{e.get('issue', '?')}/{e.get('role', '?')}, "
+                      f"pid {e.get('pid', '?')}]")
+                kept += 1
                 continue
             st = subprocess.run(["git", "-C", str(w), "status", "--porcelain"],
                                 capture_output=True, text=True).stdout.strip()
