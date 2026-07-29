@@ -12,6 +12,78 @@ code_under_review: 36ae122a943d73060416d8d580b0e99fb62f9ec5
 
 (in progress — updated per item as landed; see items 1-7 below as they complete)
 
+### Item 1 — `_board()` / `_wake_repo()` rebuilt to v3 shape
+
+`_board()` (test_gates.py:20-27) now builds `docs/<subject>/reports/<role>.md`
+and its two direct callers pass an `issue-<n>`-shaped subject
+(`"issue-26"`, `"issue-1"`). `_wake_repo()`'s board-dir construction
+(test_gates.py:68) now creates `docs/issue-5/reports/` instead of
+`docs/s/`, and the 5 direct record-path sites (feasibility.md x3,
+coding.md, review.md) now build `docs/issue-5/reports/<role>.md`.
+
+RED (isolated `t_board_reads_loop_state`, pre-edit):
+```
+AssertionError: {}
+  test_gates.py:44 in t_board_reads_loop_state
+```
+(exact reproduction of the AssertionError captured in the proposal/issue.)
+
+GREEN (post-edit, each run individually):
+- `t_board_reads_loop_state` -> no output, exits 0 ("OK t_board_reads_loop_state")
+- `t_board_tolerates_trailing_comment` -> "OK t_board_tolerates_trailing_comment"
+- `t_wake_first_build_needs_scope_approval` -> "OK"
+- `t_wake_rebuild_is_not_gated` -> "OK"
+- `t_wake_finding_wakes_the_addressed_role` -> "OK"
+- `t_wake_answered_row_does_not_fire_again` -> "OK"
+- `t_wake_refires_when_its_evidence_changes` -> "OK"
+- `t_wake_report_never_hides_a_suppressed_row` -> "OK"
+- `t_wake_never_reports_judgement_rows_as_unwoken` -> "OK"
+
+(`t_wake_hypothesis_wakes_feasibility` and
+`t_wake_acknowledged_hypothesis_goes_quiet` are covered under item 2 below,
+since they also depend on the hypothesis-fixture path.)
+
+### Item 2 — hypothesis fixture moved under `docs/issue-<n>/proposals/`
+
+`_wake_repo()` now writes the hypothesis fixture at
+`docs/issue-5/proposals/h.md` (was `docs/proposals/h.md`), matching
+`wakes._hypotheses()`'s glob of `docs/issue-*/proposals/*.md`. The two
+references inside `t_wake_acknowledged_hypothesis_goes_quiet`
+(sha lookup + recorded `upstream:` path) were updated to the same path.
+
+RED (isolated `t_wake_hypothesis_wakes_feasibility`, after item 1 landed
+but before item 2):
+```
+AssertionError: {}
+  test_gates.py:91 in t_wake_hypothesis_wakes_feasibility
+```
+
+GREEN: `t_wake_hypothesis_wakes_feasibility` -> "OK".
+
+**Mandatory round-trip on `t_wake_acknowledged_hypothesis_goes_quiet`:**
+- (a) Deliberately corrupted the recorded sha in the `upstream:` block at
+  test_gates.py:103, appending the literal string `CORRUPT` to the real
+  sha, so the recorded acknowledgement no longer matches the hypothesis
+  file's actual head sha.
+- (b) Ran the test in isolation. Observed output (verbatim):
+  ```
+  Traceback (most recent call last):
+    File "<string>", line 1, in <module>
+    File "/Users/jk/.tokenmaxxxer/work/muster-issue-74-coding/test_gates.py", line 104, in t_wake_acknowledged_hypothesis_goes_quiet
+      assert "feasibility" not in _woken(root), _woken(root)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  AssertionError: {'feasibility': 'hypothesis docs/issue-5/proposals/h.md 가 기록된 sha 이후 바뀜'}
+  ```
+  This proves `"feasibility"` DOES appear in `_woken(root)` once the
+  acknowledged sha no longer matches — the test now exercises the
+  suppress-on-matching-evidence path instead of passing vacuously.
+- (c) Reverted the corruption exactly (removed the appended `CORRUPT`
+  suffix, restoring `f"...sha: {sha}\n---\n"`).
+- (d) Re-ran the test in isolation. Observed output (verbatim):
+  ```
+  OK - green after revert
+  ```
+
 ## Why
 
 Upstream basis: issue #74 ("the self-check suite is dead: test_gates.py

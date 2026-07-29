@@ -18,9 +18,9 @@ import wakes
 
 
 def _board(td: str, subject: str, **roles: str) -> Path:
-    """계약 v2 §10 의 블랙보드를 만든다: docs/reports/records/<subject>/<역할>.md"""
+    """계약 v3 §10 의 블랙보드를 만든다: docs/issue-<n>/reports/<역할>.md"""
     root = Path(td) / "repo"
-    d = root / spawn.BOARD / subject
+    d = root / spawn.BOARD / subject / "reports"
     d.mkdir(parents=True)
     for role, fm in roles.items():
         (d / f"{role}.md").write_text(f"---\n{fm}\n---\n\n본문\n")
@@ -37,13 +37,13 @@ def t_slug_is_directory_name():
 
 def t_board_reads_loop_state():
     with tempfile.TemporaryDirectory() as td:
-        root = _board(td, "2026-07-26-wash",
+        root = _board(td, "issue-26",
                       product="kind: product-record\nloop_state: measuring",
                       feasibility="kind: feasibility-record\nloop_state: verdict\nverdict: go")
         b = spawn.board(root)
-        assert list(b) == ["2026-07-26-wash"], b
-        assert b["2026-07-26-wash"]["product"]["loop_state"] == "measuring"
-        assert b["2026-07-26-wash"]["feasibility"]["verdict"] == "go"
+        assert list(b) == ["issue-26"], b
+        assert b["issue-26"]["product"]["loop_state"] == "measuring"
+        assert b["issue-26"]["feasibility"]["verdict"] == "go"
         line = "\n".join(spawn.status(str(root)))
         assert "loop_state: measuring" in line, line
         assert "verdict: go" in line, line
@@ -54,9 +54,9 @@ def t_board_reads_loop_state():
 def t_board_tolerates_trailing_comment():
     """§2: 주석을 못 읽는 파서는 **게이트 결함이지 기록의 위반이 아니다**."""
     with tempfile.TemporaryDirectory() as td:
-        root = _board(td, "s", coding="kind: build-proposal  # re-scoped\n"
+        root = _board(td, "issue-1", coding="kind: build-proposal  # re-scoped\n"
                                       "loop_state: approved   # 사람이 승인함")
-        fm = spawn.board(root)["s"]["coding"]
+        fm = spawn.board(root)["issue-1"]["coding"]
         assert fm["kind"] == "build-proposal", fm
         assert fm["loop_state"] == "approved", fm
 
@@ -64,9 +64,9 @@ def t_board_tolerates_trailing_comment():
 def _wake_repo(td: str) -> Path:
     """hypothesis 하나를 커밋해 둔 레포. sha 비교가 필요하므로 진짜 git 이어야 한다."""
     root = Path(td) / "repo"
-    (root / "docs" / "proposals").mkdir(parents=True)
-    (root / spawn.BOARD / "s").mkdir(parents=True)
-    (root / "docs/proposals/h.md").write_text(
+    (root / "docs" / "issue-5" / "proposals").mkdir(parents=True)
+    (root / spawn.BOARD / "issue-5" / "reports").mkdir(parents=True)
+    (root / "docs/issue-5/proposals/h.md").write_text(
         "---\nkind: hypothesis\nsubject: s\nloop_state: hypothesis-registered\n---\n")
     run = lambda *a: subprocess.run(["git", "-C", str(root), *a], capture_output=True, check=True)
     run("init", "-q")
@@ -96,11 +96,11 @@ def t_wake_acknowledged_hypothesis_goes_quiet():
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
         sha = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%H",
-                              "--", "docs/proposals/h.md"],
+                              "--", "docs/issue-5/proposals/h.md"],
                              capture_output=True, text=True).stdout.strip()
-        (root / spawn.BOARD / "s" / "feasibility.md").write_text(
+        (root / spawn.BOARD / "issue-5" / "reports" / "feasibility.md").write_text(
             "---\nkind: feasibility-record\nloop_state: probing\n"
-            f"upstream:\n  - path: docs/proposals/h.md\n    sha: {sha}\n---\n")
+            f"upstream:\n  - path: docs/issue-5/proposals/h.md\n    sha: {sha}\n---\n")
         assert "feasibility" not in _woken(root), _woken(root)
 
 
@@ -112,7 +112,7 @@ def t_wake_first_build_needs_scope_approval():
     영영 안 움직인다 — 그래서 blocked 로 따로 나온다."""
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
-        rec = root / spawn.BOARD / "s" / "feasibility.md"
+        rec = root / spawn.BOARD / "issue-5" / "reports" / "feasibility.md"
         rec.write_text("---\nkind: feasibility-record\nloop_state: verdict\n"
                        "verdict: go\n---\n")
         assert "coding" not in _woken(root), _woken(root)
@@ -129,9 +129,9 @@ def t_wake_rebuild_is_not_gated():
     finding 하나 고치는 데도 사람 승인이 필요해져 루프가 안 돈다."""
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
-        (root / spawn.BOARD / "s" / "feasibility.md").write_text(
+        (root / spawn.BOARD / "issue-5" / "reports" / "feasibility.md").write_text(
             "---\nkind: feasibility-record\nloop_state: verdict\nverdict: go\n---\n")
-        (root / spawn.BOARD / "s" / "coding.md").write_text(
+        (root / spawn.BOARD / "issue-5" / "reports" / "coding.md").write_text(
             "---\nkind: coding-record\nloop_state: landed\n---\n")
         assert "coding" in _woken(root), _woken(root)
 
@@ -140,7 +140,7 @@ def t_wake_finding_wakes_the_addressed_role():
     """§5 의 되돌이 간선. finding 은 frontmatter 가 아니라 **본문 안에** 산다."""
     with tempfile.TemporaryDirectory() as td:
         root = _wake_repo(td)
-        (root / spawn.BOARD / "s" / "review.md").write_text(
+        (root / spawn.BOARD / "issue-5" / "reports" / "review.md").write_text(
             "---\nkind: review-record\nloop_state: reported\n---\n\n"
             "## finding\nrequirement: R1\nverdict: Incorrect\n"
             "addressed_to: qa\nseverity: blocking\n")
