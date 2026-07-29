@@ -1135,10 +1135,17 @@ def watchdog_check_one(key: str, entry: dict, now: float | None = None,
     own_state = state if state is not None else _watchdog_state_load()
     st = own_state.get(key, {"offset": 0})
     text = ""
-    new_offset = st.get("offset", 0)
+    start_offset = st.get("offset", 0)
+    new_offset = start_offset
     if log_path is not None and log_path.exists():
+        # 로그가 이전 스캔 오프셋보다 짧아졌다면 그 사이 세션이 재시작되며
+        # 로그가 truncate 된 것이다(spawn 은 같은 경로를 "w" 로 다시 연다) —
+        # 옛 오프셋을 그대로 쓰면 새 세션의 신호 2/3 이 로그가 옛 길이를
+        # 다시 넘어설 때까지 조용히 못 잡힌다. 이 경우 처음부터 다시 읽는다.
+        if log_path.stat().st_size < start_offset:
+            start_offset = 0
         with log_path.open("r", encoding="utf-8", errors="replace") as fh:
-            fh.seek(st.get("offset", 0))
+            fh.seek(start_offset)
             text = fh.read()
             new_offset = fh.tell()
     own_state[key] = {"offset": new_offset}
