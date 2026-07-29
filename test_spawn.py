@@ -474,6 +474,70 @@ class Drive(unittest.TestCase):
             wakes.fresh, wakes.observed, spawn._spawn_one = old_fresh, old_obs, old_spawn
 
 
+class IssueScopedPrompt(unittest.TestCase):
+    """이슈 스코프 준비는 정확히 한 번 일어난다.
+
+    프리앰블이 두 번 붙으면 역할은 같은 지시를 두 벌 읽는다 — 모델이 중복을
+    모순으로 읽을 여지를 주는 것도 문제지만, 준비 자체가 두 번 돌면
+    워크스페이스 준비와 브랜치 체크아웃도 두 번 돈다. 세션이 실제로 받는
+    프롬프트를 관측해서 잡는다: 스폰 명령을 `cat` 으로 갈아끼우면 stdin 으로
+    넘어간 맡길 일이 그대로 라이브 로그에 떨어진다.
+    """
+
+    def test_preparation_and_preamble_happen_once(self):
+        import subprocess as sp
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "issue-7-qa"
+            work.mkdir()
+            run = lambda *a: sp.run(a, cwd=str(work), capture_output=True,
+                                    text=True, check=True)
+            run("git", "init", "-q")
+            run("git", "config", "user.email", "t@example.com")
+            run("git", "config", "user.name", "t")
+            (work / "f.txt").write_text("x")
+            run("git", "add", "f.txt")
+            run("git", "commit", "-q", "-m", "init")
+
+            prep = []
+
+            def fake_workspace(cwd, issue, role):
+                prep.append(("workspace", str(cwd)))
+                return str(work)
+
+            def fake_branch(cwd, issue, role):
+                prep.append(("branch", str(cwd)))
+                return f"issue-{issue}-{role}"
+
+            roster = Path(td) / "active.json"
+            old_roster = spawn.ROSTER
+            spawn.ROSTER = roster
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                with mock.patch.object(spawn, "issue_workspace", fake_workspace), \
+                     mock.patch.object(spawn, "checkout_issue_branch", fake_branch), \
+                     mock.patch.object(spawn, "spawn_cmd",
+                                       lambda *a, **k: (["cat"], {})), \
+                     mock.patch.object(spawn, "ensure_pushed",
+                                       lambda *a, **k: None), \
+                     mock.patch.object(spawn, "ledger_write",
+                                       lambda *a, **k: None):
+                    spawn._spawn_one(str(work), "qa", "원래 맡긴 일.\n",
+                                     unattended=True, issue=7)
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+
+            delivered = Path(str(work) + ".session.log").read_text()
+            self.assertEqual(delivered.count("당신의 이슈:"), 1, delivered)
+            self.assertEqual(delivered.count("원래 맡긴 일."), 1, delivered)
+            self.assertEqual([p for p, _ in prep].count("workspace"), 1, prep)
+            self.assertEqual([p for p, _ in prep].count("branch"), 1, prep)
+
+
 class Clean(unittest.TestCase):
     def _make_clean_repo(self, path: Path, remote: Path) -> None:
         __import__("subprocess").run(

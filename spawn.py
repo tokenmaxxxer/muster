@@ -483,18 +483,6 @@ def rulebook_version(role: str) -> str:
     8커밋 뒤처진 채로 반대 결론을 낸 적이 있다(2026-07-26).
     """
     spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
-    if issue is not None:
-        # 격리 작업 클론에서 돈다 — 사용자의 체크아웃은 건드리지 않고,
-        # 동시 스폰들이 서로의 index/브랜치를 밟지 않는다.
-        cwd = issue_workspace(cwd, issue, role)
-        br = checkout_issue_branch(cwd, issue, role)
-        print(f"[{role}] 격리 작업 디렉토리: {cwd}  (브랜치 {br})", file=sys.stderr)
-        task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
-                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n"
-                f"완료의 정의: 변경이 이 브랜치에 **커밋**되고 push 되어 PR 로\n"
-                f"제출된 상태다. 미커밋 변경은 존재하지 않는 것과 같다 —\n"
-                f"세션을 끝내기 전에 반드시 커밋하라. push/PR 이 네트워크로\n"
-                f"막히면 커밋까지는 해 둬라: muster 가 밖에서 릴레이한다.\n\n") + task
     d = rulebook_dir(spec)
     if d is None:
         return "버전 불명 (룰북이 아직 없다)"
@@ -1553,18 +1541,6 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     """
     import wakes          # wakes 가 spawn 을 import 한다 — 여기서만 끌어온다
     spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
-    if issue is not None:
-        # 격리 작업 클론에서 돈다 — 사용자의 체크아웃은 건드리지 않고,
-        # 동시 스폰들이 서로의 index/브랜치를 밟지 않는다.
-        cwd = issue_workspace(cwd, issue, role)
-        br = checkout_issue_branch(cwd, issue, role)
-        print(f"[{role}] 격리 작업 디렉토리: {cwd}  (브랜치 {br})", file=sys.stderr)
-        task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
-                f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n"
-                f"완료의 정의: 변경이 이 브랜치에 **커밋**되고 push 되어 PR 로\n"
-                f"제출된 상태다. 미커밋 변경은 존재하지 않는 것과 같다 —\n"
-                f"세션을 끝내기 전에 반드시 커밋하라. push/PR 이 네트워크로\n"
-                f"막히면 커밋까지는 해 둬라: muster 가 밖에서 릴레이한다.\n\n") + task
     if issue is not None:
         # 격리 작업 클론에서 돈다 — 사용자의 체크아웃은 건드리지 않고,
         # 동시 스폰들이 서로의 index/브랜치를 밟지 않는다.
