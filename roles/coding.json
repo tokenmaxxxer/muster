@@ -8,9 +8,6 @@
       "allowedDomains": [
         "api.anthropic.com",
         "*.github.com",
-        "registry.npmjs.org",
-        "pypi.org",
-        "files.pythonhosted.org",
         "github.com"
       ]
     }
