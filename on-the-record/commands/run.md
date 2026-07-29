@@ -6,7 +6,7 @@ argument-hint: "[역할 [맡길 일]] — 예: coding \"issue 7 진행\" | 비�
 
 인자: $ARGUMENTS
 
-`MUSTER=${CLAUDE_PLUGIN_ROOT}/..` 로 두고, 아래는 전부 `python3 $MUSTER/spawn.py` 를 쓴다.
+`ON_THE_RECORD=${CLAUDE_PLUGIN_ROOT}/..` 로 두고, 아래는 전부 `python3 $ON_THE_RECORD/spawn.py` 를 쓴다.
 
 당신은 조율 세션이다 (contract v3). 역할들은 대상 레포의 이슈에서 깨어나
 `issue-<n>/<역할>` 브랜치에서 일하고 PR 로만 돌아온다. 보드는
@@ -33,13 +33,13 @@ argument-hint: "[역할 [맡길 일]] — 예: coding \"issue 7 진행\" | 비�
    product·ops 관련 요청인데 wake 가 "못 잰다"로 표시하는 판단 줄(아래 3번)이
    걸려 있다면, 이 분류도 그 판단에 근거해 명시적으로 제안한다 — 침묵 통과는
    허용되지 않는다.
-3. **누구를 깨울지.** `python3 $MUSTER/spawn.py wake -C <레포>` 로 보드를
+3. **누구를 깨울지.** `python3 $ON_THE_RECORD/spawn.py wake -C <레포>` 로 보드를
    읽고, WAKES-ON 이 지목하는 역할을 한 문단으로 제안한다. 기계로 판정
    불가한 줄(product·ops 의 내용 판단)은 "못 잰다"로 말한다 — "안 깨어났다"
    로 옮기지 마라. **이런 판단 줄이 나타날 때마다, 매번 구체적인 제안(어느
    역할을 왜 깨울지)을 함께 내야 한다 — "못 잰다"로 끝내고 넘어가는 것은
    절차 위반이다.**
-4. **띄운다 — 반드시 백그라운드로.** `python3 $MUSTER/spawn.py <역할> "<맡길 일>" --issue <n> -C <레포>`
+4. **띄운다 — 반드시 백그라운드로.** `python3 $ON_THE_RECORD/spawn.py <역할> "<맡길 일>" --issue <n> -C <레포>`
    를 run_in_background 로 실행한다. 역할 세션은 수 분 단위이고, 그동안
    대화가 막혀서는 안 된다. 완료 통지가 오면 출력을 읽고 결과(PR 링크
    또는 거부 사유)를 사용자에게 보고한다. 여러 역할 동시 실행 가능 —
@@ -204,7 +204,7 @@ running/waiting/done 세 그룹 중 하나로 정상 분류된다.
      제안하고, 사용자가 좋다고 하면 실행한다.
    - `docs/specs/approvers.md` 가 없으면: 이 레포를 보드로 선언해야 한다고
      말하고, `gh api user --jq .login` 으로 읽은 사용자의 로그인을 승인자로
-     확인받은 뒤 `python3 $MUSTER/spawn.py init -C <레포>` 로 만들고
+     확인받은 뒤 `python3 $ON_THE_RECORD/spawn.py init -C <레포>` 로 만들고
      main 에 커밋·푸시한다 (이 파일 하나는 PR 없이 직접 가도 된다 —
      사용자의 파일을 사용자의 확인 아래 쓰는 것이고, 아직 보드가 아니라
      게이트도 없다). 승인자를 추가하고 싶다면 줄을 더한다.
@@ -216,14 +216,14 @@ running/waiting/done 세 그룹 중 하나로 정상 분류된다.
 
 - 보드 기록을 직접 쓰지 않는다 — 그건 역할의 것이다.
 - 역할 세션의 PR 을 대신 고치지 않는다 — 피드백은 코멘트로, 수정은 역할이.
-- drive 모드: `python3 $MUSTER/spawn.py drive -C <레포>` 는 보드가 지목하는
+- drive 모드: `python3 $ON_THE_RECORD/spawn.py drive -C <레포>` 는 보드가 지목하는
   역할을 직렬로 이어 띄운다. 사람 게이트(승인 대기)에서 자연히 멈춘다.
-- 관리: `python3 $MUSTER/spawn.py ps` 가 돌고 있는 역할 세션 전부(역할,
+- 관리: `python3 $ON_THE_RECORD/spawn.py ps` 가 돌고 있는 역할 세션 전부(역할,
   이슈, 경과, pid, 라이브 로그, 워크스페이스)를 보여준다 — 진행 질문을
   받으면 백그라운드 태스크 기억에 의존하지 말고 이걸 먼저 본다.
   `spawn.py kill <역할> --issue <n>` 은 세션을 끊되 워크스페이스와 로그를
   남긴다(재스폰이 이어받는다). 사후 회계는 runs/ledger.jsonl 에 있다.
-- 정리: 이슈의 PR 이 머지된 뒤 `python3 $MUSTER/spawn.py clean` 을 돌리면
+- 정리: 이슈의 PR 이 머지된 뒤 `python3 $ON_THE_RECORD/spawn.py clean` 을 돌리면
   안전한 워크스페이스(미커밋·미push 작업이 없는 것)만 로그와 함께 지운다.
   미보존 작업이 있으면 이유와 함께 남긴다. 스폰은 항상 원본 레포를 -C 로
   준다 — 워크스페이스를 -C 로 주지 않는다(줘도 이제 중첩되진 않는다).

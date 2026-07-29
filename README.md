@@ -1,4 +1,4 @@
-# tokenmaxxxer / muster
+# tokenmaxxxer / on-the-record
 
 *[한국어](README.ko.md)*
 
@@ -6,20 +6,20 @@ Musters a role — brings up one sandboxed session with only that role's
 rulebook and the tokenmaxxxer-core plugins installed.
 
 Not a dispatcher. A power outlet with a concierge: on contract v3 the
-orchestration session (this marketplace's `orchestrate` plugin) talks to
+orchestration session (this marketplace's `on-the-record` plugin) talks to
 the user, drafts issues the user dictates, spawns role sessions, explains
 the PRs that come back, and relays the user's decisions — comments,
 review Approve, merge — with the user's own account. Role sessions run on
 the AGENT account (`MUSTER_AGENT_GH_TOKEN`), work on `issue-<n>/<role>`
-branches, and return everything by PR. **Each role owns its state; muster
+branches, and return everything by PR. **Each role owns its state; on-the-record
 only reads it.**
 
 ```
-protocol.md   the contract — muster's three jobs, the state-exposure deal, isolation
+protocol.md   the contract — on-the-record's three jobs, the state-exposure deal, isolation
 roles/        one role is one file: rulebook bundle plus sandbox boundary
 spawn.py      reads state, brings up a session in a role's environment
               (--issue <n> creates the branch and anchors the prompt)
-orchestrate/  the plugin that drives the loop from a conversation (/orchestrate:run)
+on-the-record/  the plugin that drives the loop from a conversation (/on-the-record:run)
 wakes.py      evaluates contract s3's WAKES-ON table: whom does the board wake
 gates/        deterministic checks, run by spawn.py after a session. Zero LLM calls
 ledger/       the scorecard
@@ -31,11 +31,11 @@ Once, per machine:
 
 1. `gh auth login` — your own account (this is what approves and merges).
 2. In your conversational session:
-   `claude plugin marketplace add tokenmaxxxer/muster` +
-   `claude plugin install orchestrate@tokenmaxxxer-muster`.
-   No clone needed — the marketplace add IS the clone, and the orchestrate
+   `claude plugin marketplace add tokenmaxxxer/on-the-record` +
+   `claude plugin install on-the-record@tokenmaxxxer`.
+   No clone needed — the marketplace add IS the clone, and the on-the-record
    plugin drives spawn.py from inside it. A manual checkout is only for
-   developing muster itself.
+   developing on-the-record itself.
 (`spawn.py doctor` — the probe that verifies plugin hooks actually fire
 headless on the current CLI version — runs automatically on the first
 spawn after a CLI update; one small probe session. Manual run optional.)
@@ -60,7 +60,7 @@ treated the same as unset (no `--model` flag, today's baseline). `--dry-run`
 reflects the fully resolved value through the same precedence chain.
 
 Rulebooks and tokenmaxxxer-core need NO manual clones: spawn fetches and
-ff-updates them under `muster/runs/rulebooks/` automatically (a local
+ff-updates them under `on-the-record/runs/rulebooks/` automatically (a local
 checkout, if present, wins — that is the development override).
 
 Once, per target repo — and the orchestrator offers to do all of it in
@@ -69,12 +69,12 @@ conversation when it finds a piece missing:
 1. A GitHub remote (`gh repo create --private --source . --push` if
    local-only).
 2. `docs/specs/approvers.md` — the approver allowlist (and board opt-in).
-   `python3 muster/spawn.py init -C <repo>` writes it from your gh login,
-   or the orchestrate session creates it for you after confirming.
+   `python3 on-the-record/spawn.py init -C <repo>` writes it from your gh login,
+   or the on-the-record session creates it for you after confirming.
 3. (Recommended) branch protection on main: PRs required. (Only with the
    optional agent account: invite it as a collaborator.)
 
-Then everything is conversation: `/orchestrate:run`.
+Then everything is conversation: `/on-the-record:run`.
 
 v3 notes: the board is `docs/issue-<n>/reports/<role>.md` in the target
 repo, `main`-merged only; the canonical contract lives ONLY in
@@ -89,7 +89,7 @@ role session via --plugin-dir.
 Editing a repository's `.claude/settings.json` applies to **every** agent working in
 that repository — the coding agent ends up reading the QA rulebook too. The boundary
 of plugin scoping is the **session**, so the only way to give a role its own
-environment is to start its own session. That is muster.
+environment is to start its own session. That is on-the-record.
 
 ## Roles
 
@@ -121,14 +121,14 @@ success** — which contaminates an ablation outright.
 ### Installing
 
 ```
-/plugin marketplace add tokenmaxxxer/muster
-/plugin install orchestrate@tokenmaxxxer-muster
+/plugin marketplace add tokenmaxxxer/on-the-record
+/plugin install on-the-record@tokenmaxxxer
 ```
 
-That is the whole install for `orchestrate`. `muster`'s own marketplace also lists
+That is the whole install for `on-the-record`. `on-the-record`'s own marketplace also lists
 every rulebook plugin from all nine role rulebooks, each sourced straight from its
 own GitHub repo (`{"source": "github", "repo": "tokenmaxxxer/<repo>"}`) — so
-`claude plugin install <plugin>@tokenmaxxxer-muster` resolves any of them (say
+`claude plugin install <plugin>@tokenmaxxxer` resolves any of them (say
 `coding-cycle`, `freelunch`, `qa-cycle`) directly, without adding all nine
 rulebook repos as separate marketplaces one at a time. No local clone of any
 rulebook is required for this: the rulebooks are **not** cloned by hand — each
@@ -136,22 +136,22 @@ role file names its repo, and the first spawn of a role fetches that rulebook's
 marketplace if it is not already on the machine. Private repos work — the fetch
 uses the git credentials already in place.
 
-This install-from-`muster`'s-marketplace path is a separate, optional route from
+This install-from-`on-the-record`'s-marketplace path is a separate, optional route from
 `spawn.py`'s own per-role fetch above — `spawn.py` warms its own marketplace
 registration on first spawn and needs no marketplace add at all. Use `claude
-plugin install <plugin>@tokenmaxxxer-muster` only when you want a rulebook
+plugin install <plugin>@tokenmaxxxer` only when you want a rulebook
 plugin installed and browsable outside of `spawn.py`.
 
 **This listing resolves the install, not ongoing updates.** Per the measured
 behavior below (`claude plugin update` compares only the pinned `version`
 string and every rulebook sits at 0.1.0 forever), installing through
-`tokenmaxxxer-muster` does not make `claude plugin update` refresh a
+`tokenmaxxxer` does not make `claude plugin update` refresh a
 GitHub-sourced rulebook from remote HEAD either. Refreshing an installed
 rulebook still goes through `spawn.py update <role>` (or a reinstall).
 
 A local checkout still wins when one exists. `roles/<role>.json` keeps an optional
 `path`, and if that directory holds a `.claude-plugin/marketplace.json` it is used
-instead of the remote — so editing a rulebook and running it through muster does
+instead of the remote — so editing a rulebook and running it through on-the-record does
 not require a commit and a push first.
 
 That path is written as `$TOKENMAXXXER_RULEBOOKS/<repo>` and is resolved through
@@ -168,7 +168,7 @@ path* rather than as a literal directory name — a path that does not exist is
 `TOKENMAXXXER_RULEBOOKS` is an **optional dev override**, not a spawn-time
 requirement: `spawn.py` role-spawning already resolves each role's rulebook
 from GitHub when no local checkout exists, and so does `claude plugin install
-<plugin>@tokenmaxxxer-muster` above. Set it only to work on a rulebook's own
+<plugin>@tokenmaxxxer` above. Set it only to work on a rulebook's own
 source locally without round-tripping through GitHub.
 
 **Nothing updates itself, and updating the clone is not enough.** A session loads
@@ -188,7 +188,7 @@ rather than silently tolerated:
 - **A ghost registry entry.** `installed_plugins.json` keeps the entry when the
   cache directory is deleted. An entry that says "installed" makes the installer
   skip the plugin, so the cache never comes back and the session loads no rulebook
-  at all while muster reports it as present. Delete the named entry.
+  at all while on-the-record reports it as present. Delete the named entry.
 - **A local-scope install.** A bundle installed into some project's
   `.claude/settings.local.json` holds its dependencies at that commit; the
   user-scope uninstall reports success and leaves the entry in place. Uninstall the
@@ -214,7 +214,7 @@ Seed it once per project (`init` uses your gh login, or pass `--login`):
 python3 spawn.py init -C ~/work/new-app
 ```
 
-This is **the only thing muster writes into someone else's repository** —
+This is **the only thing on-the-record writes into someone else's repository** —
 board records are never written from here, because those belong to a role
 and editing them from outside routes around its gate. The canonical
 role-handoff contract lives only in tokenmaxxxer-core; repos carry no
@@ -259,11 +259,11 @@ Calling it from a conversation is the default. No separate trigger was built —
 place where work gets handed over is already the conversation.
 
 ```
-/plugin marketplace add tokenmaxxxer/muster
-/plugin install orchestrate@tokenmaxxxer-muster
+/plugin marketplace add tokenmaxxxer/on-the-record
+/plugin install on-the-record@tokenmaxxxer
 
-/orchestrate:run                          just show the current state
-/orchestrate:run qa /testrun:testrun smoke
+/on-the-record:run                          just show the current state
+/on-the-record:run qa /testrun:testrun smoke
 ```
 
 ### Every command
@@ -285,7 +285,7 @@ Authentication uses whatever is already logged in. No token, no secret.
 
 ### When a session ends
 
-Every spawn captures the session's result JSON, appends one line to muster's
+Every spawn captures the session's result JSON, appends one line to on-the-record's
 `runs/ledger.jsonl` (session id, cost, turns, board delta, gate report) and
 names the outcome: `errored` / `progressed` (the board changed) /
 `waiting-on-human` (a §19 row stands) / `silent-failure` (exit 0 and an
@@ -440,7 +440,7 @@ calls.
   - package does not exist: lodahs (package.json)
 ```
 
-**It does not block** — the writes already happened and cannot be taken back, and muster
+**It does not block** — the writes already happened and cannot be taken back, and on-the-record
 does not adjudicate. It also does not wave anything through. When the check itself is
 impossible (not a git repository, no default branch) it reports **"cannot check"**, not
 "nothing found" — those two deserve opposite treatment.
