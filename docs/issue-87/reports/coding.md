@@ -80,6 +80,23 @@ resolved_findings before further commits, per the coding-progress gate.
 
 (none)
 
+## Phase-2 pre-completion warrant hunt
+
+- Hunter report: `docs/reports/2026-07-29-hunt-muster-checkout-rename.md`.
+- Finding (open, addressed to verify): the old `TOKENMAXXXER_MUSTER` env
+  override is dropped with no back-compat shim, unlike the filesystem
+  old-path fallback added in the same commit (see the migration probe
+  above). A user who still has `TOKENMAXXXER_MUSTER` exported gets no
+  recognition of it under the new `_checkout_resolve`/`TOKENMAXXXER_CHECKOUT`
+  naming, so their override silently falls through to re-cloning instead of
+  resolving to their pinned checkout.
+  - Not fixed in phase 2: the approved phase-1 proposal mandated removal of
+    all muster-derived identifiers, including the env-var name itself, so
+    adding a same-commit shim for the old env var would conflict with that
+    approved scope. Whether to add an env-var back-compat shim (mirroring
+    the filesystem fallback) is a scope decision left for verify/human
+    review.
+
 ## closed_checks
 
 closed_checks:
