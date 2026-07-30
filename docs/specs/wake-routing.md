@@ -71,6 +71,39 @@ wrote the finding trigger explicitly on coding's row, but every role
 wakes on findings addressed to it. The first-build approval guard
 above applies equally to the finding-return branch.
 
+## Conditional verdict resolution
+
+`roles/feasibility.json` allows a `verdict` of `go`, `no-go`, or
+`conditional`. Nothing above resolves what happens once a
+`conditional` verdict's condition is settled — this section is that
+resolution path, and it is a human-gated edge, same shape as the
+human-only edges above.
+
+- **Who re-raises**: feasibility itself. The role that owns the
+  `verdict` field is the only role that ever edits it — no other role,
+  including coding, may rewrite it on feasibility's behalf. Feasibility
+  wakes to do this the same way it wakes on any other upstream change
+  that makes its own record stale: here, the stale trigger is the
+  human decision settling the condition.
+- **On what evidence**: a human decision already expressed through one
+  of this repo's defined approval channels (`docs/specs/approvers.md`)
+  — a PR review Approve from a qualifying account, or an `APPROVE
+  issue-<n>/<role>` comment in single-account mode — addressing the
+  condition. Feasibility's updated record must cite which PR or
+  comment settled it (path + reference); an unsupported re-raise is
+  not a valid resolution.
+- **Where the narrative lives**: what was conditional, what settled
+  it, and the citation all live in the record body. The `verdict`
+  field itself is rewritten to the literal string `go` — never a
+  compound or annotated string like `"go (조건부 → confirmed ...)"` —
+  so the existing exact-match check in `wakes.py` (`verdict == "go"`)
+  wakes coding without parsing free text. This mirrors the rest of the
+  table: `verdict` is machine-read, narrative is human-read.
+- **Automation**: the re-raise itself is never automated — a human
+  settles the condition through the defined approval channels first;
+  feasibility then performs the record edit. No new mechanically-
+  judged row is added to `_rows()` for this edge.
+
 ## Board vocabulary this doc uses
 
 - `loop_state`: the phase marker a role's report carries (e.g.

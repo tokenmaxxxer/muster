@@ -274,6 +274,8 @@ def _rows(cwd: str) -> tuple[list[Row], list[Row]]:
 
     # ── coding: 세 갈래 중 하나만 서도 깨어난다
     for subject, roles in b.items():
+        # exact-match by design: compound/annotated strings are refused, not parsed.
+        # resolution path for a settled "conditional" -> "go" re-raise: docs/specs/wake-routing.md#conditional-verdict-resolution
         if roles.get("feasibility", {}).get("verdict") == "go":
             wake_coding(subject, "feasibility verdict: go", _rec(subject, "feasibility"))
         if roles.get("qa", {}).get("loop_state") == "handed-off":
