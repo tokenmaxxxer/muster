@@ -47,6 +47,13 @@ HUMAN_ONLY = {
     "사전 승인 게이트": "front record 가 scope-proposed 에 닿으면 사람이 읽고 "
                         "scope-approved 로 올린다. 그 상태로 가는 **유일한** "
                         "경로이고, 어떤 역할도 자기 것이든 남의 것이든 승인하지 못한다",
+    "conditional 검증 재확정": "feasibility 의 verdict: conditional 이 사람의 "
+                                "결정(PR Approve 또는 APPROVE 댓글, "
+                                "docs/specs/approvers.md)으로 풀리면 feasibility "
+                                "자신이 verdict 를 go 로 다시 쓴다. wakes.py 는 "
+                                "GitHub PR/댓글 상태를 읽지 않으므로 이 재기록은 "
+                                "자동화되지 않는다 — docs/specs/wake-routing.md "
+                                "'Conditional verdict resolution' 참고",
 }
 UPSTREAM = re.compile(r"^\s*-\s*path:\s*(\S+)", re.M)
 UP_SHA = re.compile(r"^\s*sha:\s*(\S+)", re.M)
