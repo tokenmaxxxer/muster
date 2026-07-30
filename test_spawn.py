@@ -1196,5 +1196,238 @@ class Watchdog(unittest.TestCase):
             self.assertIn("돌고 있는 역할 세션 없음", buf.getvalue())
 
 
+class SessionEndVerdict(unittest.TestCase):
+    """이슈 #132: session_end_verdict 3분법 — survey.md 사건들 + 벤인 레이스."""
+
+    def _write_events(self, work, lines):
+        Path(str(work) + ".events.jsonl").write_text(
+            "\n".join(json.dumps(l) for l in lines) + "\n")
+
+    def test_no_events_file_is_normal(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            self.assertEqual(spawn.session_end_verdict(str(work)), "normal")
+
+    def test_matched_session_end_is_normal(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            self._write_events(work, [
+                {"type": "session-start", "detail": {"pid": 111, "ts": 1}},
+                {"type": "session-end", "detail": "progressed"},
+            ])
+            self.assertEqual(
+                spawn.session_end_verdict(str(work), alive_fn=lambda pid: False),
+                "normal")
+
+    def test_unmatched_and_dead_is_crashed(self):
+        # survey.md 사건 #2: 크래시가 roster_remove/종료 이벤트 사이에서 나
+        # events.jsonl 에 session-end 가 아예 없다.
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            self._write_events(work, [
+                {"type": "session-start", "detail": {"pid": 111, "ts": 1}},
+            ])
+            self.assertEqual(
+                spawn.session_end_verdict(str(work), alive_fn=lambda pid: False),
+                "crashed")
+
+    def test_benign_race_resolves_to_normal_not_crashed(self):
+        # 벤인 레이스: 워치독의 _alive() 는 죽었다고 보지만 session-end 가
+        # 이미 남았다 — session-end 매치를 먼저 확인하므로 normal 이어야
+        # 한다(가짜 crashed 로 재스폰하지 않는다).
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            self._write_events(work, [
+                {"type": "session-start", "detail": {"pid": 111, "ts": 1}},
+                {"type": "session-end", "detail": "progressed"},
+            ])
+            self.assertEqual(
+                spawn.session_end_verdict(str(work), alive_fn=lambda pid: False),
+                "normal")
+
+    def test_unmatched_alive_stale_log_is_stalled(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            self._write_events(work, [
+                {"type": "session-start", "detail": {"pid": 111, "ts": 1}},
+            ])
+            log = Path(str(work) + ".session.log")
+            log.write_text("still going")
+            stale = time.time() - (spawn.WATCHDOG_SILENCE_MIN + 5) * 60
+            os.utime(log, (stale, stale))
+            self.assertEqual(
+                spawn.session_end_verdict(str(work), alive_fn=lambda pid: True),
+                "stalled")
+
+    def test_unmatched_alive_fresh_log_is_in_progress(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            self._write_events(work, [
+                {"type": "session-start", "detail": {"pid": 111, "ts": 1}},
+            ])
+            log = Path(str(work) + ".session.log")
+            log.write_text("still going")
+            self.assertEqual(
+                spawn.session_end_verdict(str(work), alive_fn=lambda pid: True),
+                "in-progress")
+
+
+class AutoRespawnClaim(unittest.TestCase):
+    """이슈 #132: crashed 한정 최대 2회 재스폰, claim-before-spawn, 상한 코멘트."""
+
+    def _crashed_workspace(self, td, pid=111):
+        work = Path(td) / "w"
+        Path(str(work) + ".events.jsonl").write_text(
+            json.dumps({"type": "session-start", "detail": {"pid": pid, "ts": 1}}) + "\n")
+        Path(str(work) + ".task.txt").write_text("원래 맡길 일")
+        return str(work)
+
+    def test_no_respawn_when_not_crashed(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            Path(str(work) + ".events.jsonl").write_text(
+                json.dumps({"type": "session-start", "detail": {"pid": 111, "ts": 1}})
+                + "\n" + json.dumps({"type": "session-end", "detail": "progressed"}) + "\n")
+            entry = {"work": str(work), "issue": 132, "role": "coding", "log": ""}
+            state = {}
+            called = []
+            orig = spawn._spawn_one
+            spawn._spawn_one = lambda *a, **k: called.append(1)
+            try:
+                spawn._auto_respawn_check("issue-132/coding", entry, state)
+            finally:
+                spawn._spawn_one = orig
+            self.assertEqual(called, [])
+            self.assertEqual(state, {})
+
+    def test_crashed_under_cap_claims_and_respawns(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = self._crashed_workspace(td)
+            entry = {"work": work, "issue": 132, "role": "coding", "log": "l"}
+            state = {}
+            called = []
+            orig = spawn._spawn_one
+            spawn._spawn_one = lambda *a, **k: called.append((a, k))
+            try:
+                spawn._auto_respawn_check("issue-132/coding", entry, state)
+            finally:
+                spawn._spawn_one = orig
+            self.assertEqual(len(called), 1)
+            self.assertEqual(state["issue-132/coding"]["attempts"], 1)
+            events = Path(work + ".events.jsonl").read_text()
+            self.assertIn("respawn-attempt", events)
+
+    def test_already_claimed_session_is_not_respawned_twice(self):
+        # 두 워치독 인스턴스가 같은 crashed 세션을 동시에 본 상황을 흉내:
+        # respawn-attempt 이벤트가 이미 이 session_start_ts 로 남아있으면
+        # 두 번째 호출은 아무 것도 하지 않는다.
+        with tempfile.TemporaryDirectory() as td:
+            work = self._crashed_workspace(td)
+            with open(work + ".events.jsonl", "a") as fh:
+                fh.write(json.dumps({"type": "respawn-attempt",
+                                     "detail": {"session_start_ts": 1, "attempt": 1}}) + "\n")
+            entry = {"work": work, "issue": 132, "role": "coding", "log": "l"}
+            state = {}
+            called = []
+            orig = spawn._spawn_one
+            spawn._spawn_one = lambda *a, **k: called.append(1)
+            try:
+                spawn._auto_respawn_check("issue-132/coding", entry, state)
+            finally:
+                spawn._spawn_one = orig
+            self.assertEqual(called, [])
+            self.assertEqual(state, {})
+
+    def test_concurrent_watchdogs_do_not_double_respawn(self):
+        # warrant-hunter finding (2026-07-30): the events.jsonl-based
+        # already_claimed check is check-then-act with no lock, so two
+        # concurrent `watchdog --auto-respawn` invocations on the same
+        # crashed entry could both pass it and both call _spawn_one.
+        # The atomic O_CREAT|O_EXCL claim file must let exactly one through.
+        import threading
+        with tempfile.TemporaryDirectory() as td:
+            work = self._crashed_workspace(td)
+            entry = {"work": work, "issue": 132, "role": "coding", "log": "l"}
+            called = []
+            lock = threading.Lock()
+            orig = spawn._spawn_one
+            def fake_spawn(*a, **k):
+                with lock:
+                    called.append(1)
+            spawn._spawn_one = fake_spawn
+            try:
+                states = [{}, {}]
+                threads = [threading.Thread(target=spawn._auto_respawn_check,
+                                            args=("issue-132/coding", entry, states[i]))
+                          for i in range(2)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+            finally:
+                spawn._spawn_one = orig
+            self.assertEqual(len(called), 1)
+
+    def test_cap_reached_posts_comment_instead_of_respawning(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = self._crashed_workspace(td)
+            entry = {"work": work, "issue": 132, "role": "coding", "log": "l"}
+            state = {"issue-132/coding": {"attempts": spawn.RESPAWN_MAX_ATTEMPTS}}
+            called = []
+            orig_spawn = spawn._spawn_one
+            orig_comment = spawn._post_crash_comment
+            spawn._spawn_one = lambda *a, **k: called.append(1)
+            spawn._post_crash_comment = lambda *a, **k: called.append(("comment", a))
+            try:
+                spawn._auto_respawn_check("issue-132/coding", entry, state)
+            finally:
+                spawn._spawn_one = orig_spawn
+                spawn._post_crash_comment = orig_comment
+            self.assertEqual(len(called), 1)
+            self.assertEqual(called[0][0], "comment")
+
+
+class PostCrashComment(unittest.TestCase):
+    """이슈 #132: 상한-코멘트 멱등성 — 마커 문자열이 이미 있으면 재포스팅 안 함."""
+
+    def test_skips_when_marker_already_present(self):
+        marker = spawn._CRASH_COMMENT_MARKER.format(key="issue-132/coding",
+                                                     cap=spawn.RESPAWN_MAX_ATTEMPTS)
+        orig_comments = spawn._issue_comments
+        spawn._issue_comments = lambda root, n: [{"login": "bot", "body": marker}]
+        calls = []
+        orig_run = subprocess.run
+        def fake_run(cmd, *a, **k):
+            calls.append(cmd)
+            return orig_run(["true"], capture_output=True, text=True)
+        subprocess.run = fake_run
+        try:
+            spawn._post_crash_comment(Path("."), 132, "issue-132/coding", "w", "l")
+        finally:
+            spawn._issue_comments = orig_comments
+            subprocess.run = orig_run
+        self.assertEqual(calls, [])
+
+    def test_posts_when_marker_absent(self):
+        orig_comments = spawn._issue_comments
+        orig_slug = spawn._repo_slug
+        spawn._issue_comments = lambda root, n: []
+        spawn._repo_slug = lambda root: "acme/repo"
+        calls = []
+        orig_run = subprocess.run
+        def fake_run(cmd, *a, **k):
+            calls.append(cmd)
+            return orig_run(["true"], capture_output=True, text=True)
+        subprocess.run = fake_run
+        try:
+            spawn._post_crash_comment(Path("."), 132, "issue-132/coding", "w", "l")
+        finally:
+            spawn._issue_comments = orig_comments
+            spawn._repo_slug = orig_slug
+            subprocess.run = orig_run
+        self.assertEqual(len(calls), 1)
+        self.assertIn("gh", calls[0])
+
+
 if __name__ == "__main__":
     unittest.main()
