@@ -23,7 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-# 계약 v2 의 보드 자리. subject 마다 한 판씩 있고, 전부 합쳐서 센다.
+# 계약 v3 의 보드 자리(docs/issue-<n>/reports/review.md). subject 마다 한 판씩 있고, 전부 합쳐서 센다.
 BOARD = "docs"
 # v1 은 레포 루트에 한 파일이었다. 아직 안 옮긴 레포를 "리뷰를 돈 적 없다"로
 # 보고하면 원장이 거짓말을 한다 — 없는 것과 옛 자리에 있는 것은 정반대 처분을
@@ -66,7 +66,7 @@ def unresolved(text: str) -> int:
 
 
 def records(repo: Path) -> list[str]:
-    """셀 review 기록들의 레포 상대 경로. v2 를 먼저 보고, 없으면 v1 자리."""
+    """셀 review 기록들의 레포 상대 경로. v3 를 먼저 보고, 없으면 v1 자리."""
     board = repo / BOARD
     if board.is_dir():
         found = sorted(str(p.relative_to(repo))
