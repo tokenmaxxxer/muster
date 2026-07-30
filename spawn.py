@@ -1853,14 +1853,6 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         log_path.parent.mkdir(parents=True, exist_ok=True)
         print(f"[{role}] 라이브 로그: {log_path}", file=sys.stderr)
         result = {}
-        # PR URL 이 스트림 어딘가(tool_result 텍스트 등)에 뜨는 순간 라이브
-        # 로그/스폰 출력에 바로 새긴다 — 세션이 몇 분 뒤 exit 할 때까지
-        # 기다리면 그 사이 열린 PR 은 사용자가 물어보기 전엔 아무도 모른다
-        # (이슈 #114 실측: 제안 PR 이 세션 종료 수분 전에 열렸는데 발견되지
-        # 않았다). 오탐(단순 언급)보다 놓치는 쪽이 더 비싸므로 스트림 전체를
-        # 정규식으로 훑는다.
-        pr_url_re = re.compile(r'https://github\.com/[^\s"\')]+/pull/\d+')
-        seen_pr_urls = set()
         roster_key = f"issue-{issue}/{role}" if issue is not None else f"adhoc/{role}/{os.getpid()}"
         proc = subprocess.Popen(
             cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -1887,14 +1879,6 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                     continue
                 if isinstance(obj, dict) and obj.get("type") == "result":
                     result = obj
-                if isinstance(obj, dict):
-                    for m in pr_url_re.findall(json.dumps(obj)):
-                        if m not in seen_pr_urls:
-                            seen_pr_urls.add(m)
-                            msg = f"[{role}] PR opened mid-run: {m}\n"
-                            lf.write(msg)
-                            lf.flush()
-                            print(msg.rstrip(), file=sys.stderr)
         rc = proc.wait()
         roster_remove(roster_key)
     finally:
