@@ -195,6 +195,15 @@ and **approving scope changes**. warrant halting a headless coding run at
 > single rulebook's hook. A proposal that tried exactly that was withdrawn on
 > 2026-07-26.
 
+The canonical location for the `APPROVE issue-<n>/<role>` signal (contract v3
+s19) is the **issue comment**, not a PR comment or PR review — role sessions
+are told this at session start, and this repo's own relay instructions
+(`on-the-record/commands/run.md`) and README follow the same canon. A PR
+review Approve is only the two-account hardened alternative, when the
+approving account differs from the PR's author. Location drift here already
+caused one missed approval (issue-126); do not reintroduce a second signal
+location without updating all three together.
+
 ## 6. Invariants
 
 1. **on-the-record never writes state.** It reads, picks a role, and brings it up.

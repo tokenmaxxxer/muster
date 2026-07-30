@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent / "gates"))
 sys.path.insert(0, str(Path(__file__).parent))
 import gates
 import spawn
+import pr_reference
 
 
 def _board(td: str, subject: str, **roles: str) -> Path:
@@ -584,6 +585,32 @@ def t_parse_new_deps():
         assert found.get("httpx") == "requirements.txt", found
         assert found.get("left-pad") == "package.json", found
         assert "requests" not in found, "기존 의존성은 새 것으로 잡히면 안 된다"
+
+
+def t_pr_reference_phase1_plain_ref_passes():
+    assert pr_reference.check_body(126, "this fixes stuff, see #126 for context", "phase1") == []
+
+
+def t_pr_reference_phase1_missing_ref_blocks():
+    bad = pr_reference.check_body(126, "no reference here", "phase1")
+    assert bad and "#126" in bad[0], bad
+
+
+def t_pr_reference_phase1_wrong_issue_blocks():
+    bad = pr_reference.check_body(126, "relates to #125", "phase1")
+    assert bad, bad
+
+
+def t_pr_reference_phase2_requires_closes():
+    assert pr_reference.check_body(126, "Closes #126", "phase2") == []
+    assert pr_reference.check_body(126, "closes #126", "phase2") == []
+    assert pr_reference.check_body(126, "Fixes #126", "phase2") == []
+    # 그냥 #126 참조만으로는 phase-2 를 통과시키지 않는다 — 인도 PR은 반드시 닫아야 한다
+    bad = pr_reference.check_body(126, "see #126", "phase2")
+    assert bad, bad
+    # 다른 이슈를 닫는 문구는 이 이슈를 통과시키지 않는다
+    bad2 = pr_reference.check_body(126, "Closes #999", "phase2")
+    assert bad2, bad2
 
 
 if __name__ == "__main__":
