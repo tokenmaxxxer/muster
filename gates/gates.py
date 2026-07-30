@@ -28,6 +28,11 @@ PROTECTED_ROOT_FILES = {"protocol.md", "protocol.ko.md", "spawn.py",
                         "jenkinsfile", ".gitlab-ci.yml"}
 # 역할 정의와 배선. 루트의 것만 — 앱의 src/roles/ 는 정상 자산이다.
 PROTECTED_ROOT_DIRS = {"roles", "gates", "agents", "images", "profiles"}
+# gates.py는 자신이 놓인 on-the-record 체크아웃을 이 파일의 위치로
+# 찾는다 — spawn.py의 ROOT와 같은 자기위치 해석. 검사 대상 레포(work
+# repo)의 경로와는 무관하다: roles/ 는 on-the-record 자산이지 보드
+# 자산이 아니다.
+ON_THE_RECORD_ROOT = Path(__file__).resolve().parent.parent
 # 인증 계열은 좁게(auth.py 는 막고 author.py 는 통과), 자격증명 계열은 넓게.
 # 자격증명의 미탐 비용은 유출이고 오탐 비용은 사람 확인 한 번이다.
 PROTECTED_GLOBS = ["*.pem", "*.key", "*.p12", ".env", ".env.*",
@@ -275,12 +280,13 @@ def record_enums(d: Path, cfg: dict) -> list[str]:
         if not m:
             continue
         role = m.group(1)
-        role_file = root / "roles" / f"{role}.json"
+        role_file = ON_THE_RECORD_ROOT / "roles" / f"{role}.json"
         try:
             role_cfg = json.loads(role_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as e:
             bad.append(f"역할 정의를 읽을 수 없어 enum 을 검사할 수 없다: "
-                       f"{role_file} ({e})")
+                       f"{role_file} (on-the-record 체크아웃: "
+                       f"{ON_THE_RECORD_ROOT}) ({e})")
             continue
         declared = role_cfg.get("record_fields", {})
         record_file = root / f
