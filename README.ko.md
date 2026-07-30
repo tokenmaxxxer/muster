@@ -56,7 +56,6 @@ roles/        역할 하나 = 파일 하나. 룰북 번들 + 샌드박스 경계
 spawn.py      상태를 읽고, 역할 환경으로 세션을 띄운다
               (--issue <n> 가 브랜치를 만들고 프롬프트를 고정한다)
 on-the-record/  그걸 대화에서 부르는 플러그인 (/on-the-record:run)
-wakes.py      계약 §3 의 WAKES-ON 표를 평가한다 — 보드가 누구를 깨우는가
 gates/        결정론 검사. 세션이 끝나면 spawn.py 가 부른다. LLM 0회
 ledger/       성적표
 ```
@@ -252,24 +251,19 @@ python3 spawn.py init -C ~/work/new-app
 
 ### 루프
 
-한 번 부르면 한 역할이 돈다. 끝나면 보드에게 다음이 누구인지 묻는다. `wake` 가
-계약 §3 의 WAKES-ON 표를 평가해 지목한다.
+한 번 부르면 한 역할이 돈다. 끝나면 다음이 누구인지는 표 조회가 아니라 —
+오케스트레이션 대화가 보드(`docs/issue-<n>/` 아래 기록, 각 기록의 `loop_state`)를
+직접 읽고 내리는 판단이다.
 
 ```bash
 python3 spawn.py product "세차 타이밍 앱을 기획해라" -C ~/work/new-app
-python3 spawn.py wake -C ~/work/new-app
-#   [feasibility] hypothesis docs/proposals/…md — feasibility 가 아직 안 읽었다
-python3 spawn.py feasibility "보드가 너를 깨웠다. …" -C ~/work/new-app
-python3 spawn.py wake -C ~/work/new-app
-#   선 것 없음 — feasibility 가 확인했고 지금 작업 중이다
+python3 spawn.py                              -C ~/work/new-app
+#   docs/issue-<n>/reports/*.md 를 읽고 loop_state 로 다음을 판단한다
+python3 spawn.py feasibility "보드를 읽어라: …" -C ~/work/new-app
 ```
 
-**바뀌지 않은 보드는 아무도 깨우지 않는다**(계약 §6). qa↔coding 이 무한 핑퐁하지
-않고 끝나는 것이 이 규칙 덕이다.
-
-`wake` 는 보고만 하고 띄우지 않는다. 여섯 줄 중 둘은 내용 판단이라 —
-product 의 "수용 기준을 흔드는가", ops 의 "내보낼 준비가 됐는가" — **"안 깨어남"이
-아니라 "못 잼"으로 찍힌다.**
+사람 전용 게이트(승인, scope, 라운드 종료)는 영향 없다 — 애초에 wake 로
+자동화된 적이 없다.
 
 ### 대화에서
 
@@ -288,15 +282,13 @@ product 의 "수용 기준을 흔드는가", ops 의 "내보낼 준비가 됐는
 
 ```bash
 python3 spawn.py                              # 보드 조회 (읽기 전용)
-python3 spawn.py wake                         # 보드가 누구를 깨우나 (계약 §3)
 python3 spawn.py <역할> "<맡길 일>" -C <레포>   # 그 역할을 띄운다
 python3 spawn.py <역할> "x" --dry-run          # 합쳐진 설정만 본다
 python3 spawn.py <역할> "x" --no-contract      # 계약 전제조건을 건너뛴다
 python3 spawn.py <역할> "x" --unattended       # 사람 부재: mint 없음, 휴먼 게이트는 선다
 python3 spawn.py doctor                       # 이 CLI 에서 훅 발화를 실측 (버전마다 한 번)
-python3 spawn.py drive -C <레포>               # 보드가 지목하는 역할을 하나씩, 멈출 때까지
+python3 spawn.py drive -C <레포>               # 자동 라우팅 표가 없다 — 즉시 멈춘다
 python3 spawn.py approve <kind> --subject <s>  # 사람이 직접 승인 토큰을 발행 (TTY 필요)
-python3 spawn.py wake --all                   # 이미 답해진 줄까지 전부 본다
 ```
 
 인증은 로그인된 것을 그대로 쓴다. 토큰도 시크릿도 필요 없다.
@@ -465,15 +457,13 @@ python3 test_gates.py
 
 ## 미해결
 
-- **드라이버로 subject 하나를 끝까지 몰아보기.** `spawn.py drive` 가 생겼지만
-  아직 한 역할씩만 실측했다. 여러 역할이 이어지는 라운드를 손으로 한 번 완주해
-  본 다음에 길게 돌리는 게 맞다 — 지금까지 매 단계마다 루프였으면 삼켰을 것이
-  하나씩 나왔다.
+- **다음이 누구인지는 라우팅 표가 아니라 오케스트레이터의 판단이다.**(이슈 #120)
+  `spawn.py drive` 는 더 이상 역할을 자동으로 고르지 않는다 — 매번 즉시
+  멈춘다. subject 하나를 끝까지 몰아가려면 오케스트레이션 대화가 보드
+  (`docs/issue-<n>/reports/*.md`, 각 기록의 `loop_state`)를 직접 읽고 다음
+  역할을 스스로 띄워야 한다.
 - **게이트 여섯 종이 아직 룰북마다 따로 산다.** `state-gate.sh` 는 일곱 벌이고
   일곱이 전부 다르다. core 가 지금 들고 있는 것은 승인과 보드 게이트뿐이고,
   전이 표를 데이터로 받는 형태로 올리는 일은 시작 전이다.
-- **계약 §3 표와 §5 가 어긋난다.** §5 는 모든 역할이 자기 앞 finding 에 깨어난다고
-  하는데, 표는 coding 줄에만 finding 을 적었다. `wakes.py` 는 §5 를 따랐다 — 표만
-  따르면 coding 외 역할에게 온 finding 을 아무도 안 본다.
 - **채점이 수동이다.** 발견이 정답 키를 맞혔는지는 사람이 판정한다(키의 adjudication
   조항). 러너는 채점표만 만든다 — 자동 판정을 흉내 내면 원장이 거짓말을 시작한다.
