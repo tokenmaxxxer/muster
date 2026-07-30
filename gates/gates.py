@@ -231,7 +231,68 @@ def deps(d: Path, cfg: dict) -> list[str]:
     return bad
 
 
-ALL = {"writeset": writeset, "deps": deps}
+RECORD_PATH = re.compile(r"^docs/issue-[^/]+/reports/([^/]+)\.md$")
+
+
+def record_frontmatter(text: str) -> dict[str, str]:
+    """`spawn.frontmatter()` 와 동일한 얕은 `---` 파서. 의존성 없는 gates.py 가
+    spawn.py 를 import 하지 않기 위해 여기서 따로 둔다(모듈 두 개가 서로 다른
+    layout 가정을 갖는 이유는 gates.py 파일 상단 docstring 참고)."""
+    if not text.startswith("---"):
+        return {}
+    body = text.split("---", 2)
+    if len(body) < 3:
+        return {}
+    out = {}
+    for line in body[1].splitlines():
+        k, sep, v = line.partition(":")
+        if sep and k.strip() and not k.startswith((" ", "-", "\t")):
+            out[k.strip()] = v.split("#")[0].strip()
+    return out
+
+
+def record_enums(d: Path, cfg: dict) -> list[str]:
+    """변경된 `docs/issue-<n>/reports/<role>.md` 의 frontmatter 필드가
+    roles/<role>.json 의 record_fields 로 선언한 enum 안에 있는지 검사한다.
+
+    선언되지 않은 필드는 검사하지 않는다(자유 텍스트로 남는다) — 선언된
+    값만 write-time 에 강제하는 것이 요청의 범위다. role 정의를 못 읽으면
+    "검사할 게 없다"가 아니라 "검사할 수 없다": 차단한다."""
+    root = d / "work" if (d / "work").exists() else d
+    try:
+        files = changed_files(root)
+    except RuntimeError as e:
+        return [str(e)]
+    bad = []
+    for f in files:
+        m = RECORD_PATH.match(f)
+        if not m:
+            continue
+        role = m.group(1)
+        role_file = root / "roles" / f"{role}.json"
+        try:
+            role_cfg = json.loads(role_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            bad.append(f"역할 정의를 읽을 수 없어 enum 을 검사할 수 없다: "
+                       f"{role_file} ({e})")
+            continue
+        declared = role_cfg.get("record_fields", {})
+        record_file = root / f
+        fm = record_frontmatter(
+            record_file.read_text(encoding="utf-8-sig", errors="replace")
+            if record_file.exists() else "")
+        for field, allowed in declared.items():
+            if field not in fm:
+                continue
+            value = fm[field]
+            if value not in allowed:
+                bad.append(
+                    f"레코드 enum 위반: {f} 의 {field}={value!r} — "
+                    f"roles/{role}.json 이 선언한 값 ({allowed}) 이 아니다")
+    return bad
+
+
+ALL = {"writeset": writeset, "deps": deps, "record_enums": record_enums}
 
 
 def check(names: list[str], d: Path, cfg: dict) -> list[str]:
