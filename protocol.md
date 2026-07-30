@@ -152,8 +152,15 @@ missing.
 
 ## 4. Isolation — a sandbox, not a container
 
-No containers. Claude Code's Bash sandbox **gives us more of what we need**, and
-on macOS it is Seatbelt, so there is nothing to install.
+No containers. Claude Code's Bash sandbox **gives us more of what we need**.
+
+Per platform, stated rather than implied: on **macOS** it is Seatbelt and there
+is nothing to install — that is where every measurement below was taken. On
+**Linux** the driver runs (`bash`, `fork` and `flock` are all present) but the
+sandbox and the credential store are **unmeasured**; treat the table below as
+unverified there. **Native Windows is out of scope** — the enforcement plane is
+`.sh` hooks and the driver forks, so `spawn.py` fails at import rather than
+starting with no gates. Use WSL.
 
 | requirement | container (hosted CI) | Bash sandbox |
 |---|---|---|
