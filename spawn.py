@@ -774,6 +774,127 @@ def require_no_repo_config(cwd: str, override: bool) -> None:
         f"  고정되어, 같은 내용인 동안은 다시 묻지 않는다.")
 
 
+def _approvers(root: Path) -> set[str]:
+    """`docs/specs/approvers.md` 한 줄에 하나씩 적힌 GitHub 로그인."""
+    p = root / MARKER
+    if not p.is_file():
+        return set()
+    out = set()
+    for line in p.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^\s*-\s*(\S+)", line)
+        if m:
+            out.add(m.group(1))
+    return out
+
+
+def _repo_slug(root: Path) -> str | None:
+    r = subprocess.run(["gh", "repo", "view", "--json", "nameWithOwner",
+                        "-q", ".nameWithOwner"], cwd=root, capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _pr_for_branch(root: Path, branch: str) -> int | None:
+    r = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "all",
+                        "--json", "number", "-q", ".[0].number"],
+                       cwd=root, capture_output=True, text=True)
+    out = r.stdout.strip()
+    return int(out) if r.returncode == 0 and out.isdigit() else None
+
+
+def _issue_comments(root: Path, number: int) -> list[dict]:
+    """`number` 앞으로 달린 코멘트. GitHub 는 이슈든 PR 이든 같은
+    `/issues/<n>/comments` 로 대화 코멘트를 낸다 — PR 리뷰 코멘트가 아니라
+    일반 코멘트가 필요하므로 이 엔드포인트로 충분하다."""
+    slug = _repo_slug(root)
+    if not slug:
+        return []
+    r = subprocess.run(["gh", "api", f"repos/{slug}/issues/{number}/comments"],
+                       cwd=root, capture_output=True, text=True)
+    if r.returncode != 0:
+        return []
+    try:
+        data = json.loads(r.stdout)
+    except ValueError:
+        return []
+    return [{"login": c.get("user", {}).get("login", ""), "body": c.get("body", "")}
+            for c in data]
+
+
+def approve_scope(cwd: str, issue: int) -> int:
+    """s19 의 정확한 문자열 댓글을 승인자 allowlist 로 검증하고, front record 를
+    `scope-approved` 로 올리는 커밋을 직접 쓴다 (이슈 #115).
+
+    승인은 여전히 사람의 몫이다 — 이 함수는 그 결정을 **표현하는 방법**(댓글)에서
+    **기록에 반영하는 방법**(커밋)으로 옮길 뿐, 어느 역할도 스스로 승인하지
+    못한다는 규칙은 그대로 둔다. `docs/specs/wake-routing.md` §First-build
+    approval guard 참고.
+    """
+    root = Path(cwd).resolve()
+    subject = f"issue-{issue}"
+    approvers = _approvers(root)
+    if not approvers:
+        sys.exit(f"승인자 목록이 비어 있다: {root / MARKER}")
+
+    roles = board(root).get(subject)
+    if not roles:
+        sys.exit(f"{subject} 의 보드 기록이 없다: {root / BOARD / subject / 'reports'}")
+
+    import wakes
+    front = wakes._front(root, subject, roles)
+    if not front:
+        sys.exit(f"{subject} 의 front record 를 판별할 수 없다.")
+
+    record_path = root / BOARD / subject / "reports" / f"{front}.md"
+    fm = frontmatter(record_path)
+    state = fm.get("loop_state")
+    if state == "scope-approved":
+        print(f"이미 scope-approved 다: {record_path}")
+        return 0
+    if state != "scope-proposed":
+        sys.exit(f"{record_path} 의 loop_state 가 scope-proposed 가 아니다 "
+                 f"(지금: {state or '(없음)'}) — 승인 대상이 아니다.")
+
+    needle = f"APPROVE {subject}/scope"
+    pr = _pr_for_branch(root, f"{subject}/{front}")
+    comments = _issue_comments(root, issue)
+    if pr:
+        comments += _issue_comments(root, pr)
+    match = next((c for c in comments
+                  if c["body"].strip() == needle and c["login"] in approvers), None)
+    if not match:
+        where = f"이슈 #{issue}" + (f" 또는 PR #{pr}" if pr else "")
+        sys.exit(f"승인 코멘트를 못 찾았다: 정확히 \"{needle}\" 를 "
+                 f"{', '.join(sorted(approvers))} 중 한 계정이 {where} 에 달아야 한다.")
+
+    text = record_path.read_text(encoding="utf-8")
+    new_text = re.sub(r"(?m)^loop_state:.*$", "loop_state: scope-approved", text, count=1)
+    if new_text == text:
+        sys.exit(f"{record_path} 에서 loop_state 줄을 찾지 못해 고치지 못했다.")
+    record_path.write_text(new_text, encoding="utf-8")
+
+    # git add/commit 이 중간에 실패하면(정체성 없음, 훅 거부, 락, 디스크 없음)
+    # 파일은 scope-approved 인데 커밋은 없는 상태가 남는다 — 다음 호출이
+    # idempotency 가드(state == "scope-approved")에 걸려 커밋 없이 성공을
+    # 보고한다(실측: warrant-hunter, 2026-07-30). 파일 쓰기를 되돌려 그 상태를
+    # 만들지 않는다.
+    rel = str(record_path.relative_to(root))
+    try:
+        subprocess.run(["git", "-C", str(root), "add", rel],
+                       check=True, capture_output=True, text=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-m",
+                        f"{subject}: scope-approved (approved by {match['login']} "
+                        f"via spawn.py approve-scope)"],
+                       check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        record_path.write_text(text, encoding="utf-8")
+        sys.exit(f"커밋 실패 — 기록을 되돌렸다({record_path}), 다시 시도해도 된다: "
+                 f"{e.stderr.strip() if e.stderr else e}")
+
+    print(f"{subject}: {front} 기록을 scope-approved 로 올리고 커밋했다 — "
+          f"{match['login']} 의 승인. push 는 별도로 한다.")
+    return 0
+
+
 def frontmatter(p: Path) -> dict[str, str]:
     """맨 앞 `---` 블록만 얕게 읽는다. 값의 트레일링 주석은 떼어낸다 —
     계약 §2: 주석을 허용하지 않는 파서는 **게이트 결함이지 기록의 위반이 아니다**."""
@@ -1588,6 +1709,10 @@ def main() -> int:
     if a.role == "approve":
         sys.exit("v3: 승인은 파일 발행이 아니라 GitHub 행위다 — 오케스트레이터가\n"
                  "  사용자와의 대화에서 gh pr review --approve / gh pr merge 로 중계한다.")
+    if a.role == "approve-scope":
+        if a.issue is None:
+            sys.exit("사용법: spawn.py approve-scope --issue <n> [-C <레포>]")
+        return approve_scope(a.cwd, a.issue)
     if a.role == "drive":
         # 보드가 지목하는 역할을 하나씩, 멈출 때까지.
         require_board(a.cwd, a.no_contract)

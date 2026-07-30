@@ -56,11 +56,17 @@ unimplemented (see `HUMAN_ONLY` in `wakes.py`):
 
 `coding`'s first entry into build on any subject is gated: it does not
 wake on its own funnels until the subject's front record reaches
-`scope-approved` (the sole path there is a human reading the
-`scope-proposed` state and approving it — no role, including coding
-itself, can self-approve). This guard applies uniformly across all
-four of coding's wake-branches, including the finding-return edge
-below, so none of them can bypass it individually.
+`scope-approved`. The decision stays human-only — a human reading the
+`scope-proposed` state and expressing approval as an `APPROVE
+issue-<n>/scope` comment from a `docs/specs/approvers.md` account (no
+role, including coding itself, can self-approve). The mechanics of
+reflecting that decision into the record are tool-owned: `spawn.py
+approve-scope --issue <n>` verifies the comment against the approvers
+allowlist and writes the promotion commit itself (issue #115) — no
+hand-edit, by human or orchestrator, is ever required or accepted.
+This guard applies uniformly across all four of coding's wake-branches,
+including the finding-return edge below, so none of them can bypass it
+individually.
 
 ## Finding-return edge
 
