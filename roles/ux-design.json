@@ -13,7 +13,7 @@
   },
   "decides": "문제가 화면·플로우로 어떻게 구현될지",
   "use_when": "product 스펙이 있고 사용자 인터페이스가 필요할 때",
-  "produces": "screen/flow/wireframe 스펙 (reviewed 가 coding 을 깨운다)",
+  "produces": "screen/flow/wireframe 스펙",
   "record_fields": {
     "loop_state": ["reviewed"]
   }
