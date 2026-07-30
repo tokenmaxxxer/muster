@@ -26,6 +26,8 @@ def check(repo: Path) -> list[str]:
     bad = [f"보호 경로 변경: {f}" for f in gates.changed_files(repo)
            if gates.is_protected(f)]
     bad += gates.record_enums(repo, {})
+    bad += gates.record_wellformed_in(repo)
+    bad += gates.record_no_tool_residue_in(repo)
 
     # ponytail: gates.deps() 와 같은 판정을 반복한다. gates.deps 가 라우터의
     # 디렉터리 배치(d/"work")를 전제해서 그대로 못 부른다. 라우터 은퇴 시
