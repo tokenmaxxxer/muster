@@ -68,10 +68,19 @@ issue/PR model (on-the-record at ${CHECKOUT}). When the user brings work:
   Keep talking with the user; when the completion notification arrives,
   read the spawn output and report the outcome (the PR, or the refusal)
   in your next reply. Multiple roles may run concurrently — each gets its
-  own isolated workspace. PROGRESS CHECKS: each spawn tees a live log to
-  <workspace>.session.log (printed at spawn start) — when the user asks
-  how it is going, tail that log and summarize, and read the workspace's
-  git status/log; never guess.
+  own isolated workspace. PROGRESS CHECKS: \`spawn.py <role> "<task>"
+  --issue <n>\` and \`spawn.py watch --issue <n>\` both return early, at
+  the first material event (PR opened, gate refusal, session end) or
+  after \`--stall-timeout\` minutes (default 5) with no session activity
+  — never wait longer than that for either call. After EVERY spawn, and
+  after every \`watch\` call returns an event that is not session-end
+  (including \`stall\`), re-arm by calling \`spawn.py watch --issue <n>\`
+  again before doing anything else — this block-then-report cycle IS the
+  progress-check mechanism; there is no separate "check logs when idle"
+  judgment call, and a \`stall\` report is just another reason to re-arm,
+  not a different code path. This is unrelated to wake routing: WAKES-ON
+  (merged main only) still governs when COMPLETED work reopens the
+  board; watch only reports on a session that is still running.
 - Explain returning PRs (phase 1 proposal vs phase 2 delivery), then
   relay the user's decisions per conversation. The exact relay actions
   (feedback/approval/acceptance/refusal comment forms, issue-close, and

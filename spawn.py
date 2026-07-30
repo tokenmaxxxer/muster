@@ -1326,6 +1326,108 @@ def roster_watchdog() -> int:
     return 0
 
 
+EVENTS_SUFFIX = ".events.jsonl"
+OFFSET_SUFFIX = ".events.offset"
+WORKSPACE_INDEX = ROOT / "runs" / "workspaces.json"
+_PR_URL_RE = re.compile(r"https://github\.com/[^\s\"'\\]+/pull/\d+")
+
+
+def _events_path(work: str) -> Path:
+    return Path(str(work) + EVENTS_SUFFIX)
+
+
+def _offset_path(work: str) -> Path:
+    return Path(str(work) + OFFSET_SUFFIX)
+
+
+def _append_event(events_path: Path, ev_type: str, detail) -> None:
+    with events_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"ts": int(time.time()), "type": ev_type,
+                              "detail": detail}, ensure_ascii=False) + "\n")
+
+
+def _read_offset(offset_path: Path) -> int:
+    try:
+        return int(offset_path.read_text().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_offset(offset_path: Path, n: int) -> None:
+    offset_path.write_text(str(n))
+
+
+def _workspace_index_load() -> dict:
+    try:
+        return json.loads(WORKSPACE_INDEX.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _workspace_index_put(issue: int, role: str, work: str, log: str) -> None:
+    WORKSPACE_INDEX.parent.mkdir(parents=True, exist_ok=True)
+    d = _workspace_index_load()
+    d[f"issue-{issue}/{role}"] = {"work": work, "log": log}
+    WORKSPACE_INDEX.write_text(json.dumps(d, indent=2, ensure_ascii=False))
+
+
+def _await_bounded(events_path: Path, offset_path: Path, stall_timeout_min: float,
+                    log_path: Path) -> int:
+    """이벤트 하나가 뜨거나 stall 시간이 다 찰 때까지 — 둘 중 먼저 오는
+    쪽에서 리턴한다. 무한정 블록하지 않는다 (이슈 #114 proposal).
+
+    stall 은 events.jsonl 에 안 남고 offset 도 안 미룬다 — 다음 watch 가
+    같은 미보고 구간을 다시 본다.
+    """
+    limit_s = stall_timeout_min * 60
+    seen = _read_offset(offset_path)
+    try:
+        last_size = log_path.stat().st_size
+    except OSError:
+        last_size = 0
+    last_change = time.monotonic()
+    while True:
+        if events_path.exists():
+            lines = events_path.read_text(encoding="utf-8").splitlines()
+            if len(lines) > seen:
+                ev = json.loads(lines[seen])
+                _write_offset(offset_path, seen + 1)
+                print(f"[watch] {ev['type']}: {ev['detail']}")
+                return 0
+        try:
+            size = log_path.stat().st_size
+        except OSError:
+            size = last_size
+        if size != last_size:
+            last_size = size
+            last_change = time.monotonic()
+        if time.monotonic() - last_change >= limit_s:
+            secs = int(time.monotonic() - last_change)
+            print(f"[watch] stall: 세션 로그 {secs}초째 무변화 — 이벤트 없이 "
+                  f"멈춘다. 다시 spawn.py watch 로 재무장하라", file=sys.stderr)
+            return 0
+        time.sleep(2)
+
+
+def _watch(issue: int, role: str | None, stall_timeout_min: float) -> int:
+    idx = _workspace_index_load()
+    if role:
+        entry = idx.get(f"issue-{issue}/{role}")
+    else:
+        matches = [(k, v) for k, v in idx.items() if k.startswith(f"issue-{issue}/")]
+        if len(matches) > 1:
+            sys.exit(f"이슈 {issue} 에 역할이 여럿 기록돼 있다 — 역할을 지정하라: "
+                     + ", ".join(k.split("/", 1)[1] for k, _ in matches))
+        entry = matches[0][1] if matches else None
+    if entry is None:
+        print(f"[watch] issue-{issue}{'/' + role if role else ''}: 기록 없음 — "
+              f"아직 스폰된 적이 없다", file=sys.stderr)
+        return 1
+    work = entry["work"]
+    return _await_bounded(_events_path(work), _offset_path(work),
+                           stall_timeout_min, Path(entry["log"]))
+
+
 def roster_kill(issue: int, role: str) -> int:
     d = _roster_load()
     key = f"issue-{issue}/{role}"
@@ -1639,6 +1741,10 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=12,
                     help="drive: 한 번에 띄울 최대 횟수 (기본 12, 폭주 방지)")
     ap.add_argument("--login", help="init: approvers.md 에 넣을 GitHub 로그인 (기본: gh api user)")
+    ap.add_argument("--stall-timeout", type=float, default=5.0,
+                    help="분 단위. role task/watch 가 이벤트 없이 블록하는 최대 시간 (기본 5)")
+    ap.add_argument("--role", dest="watch_role",
+                    help="watch: 같은 이슈에 역할이 여럿 기록돼 있을 때 지정")
     a = ap.parse_args()
 
     if a.role == "init":
@@ -1652,6 +1758,11 @@ def main() -> int:
         if not a.task or a.issue is None:
             sys.exit("사용법: spawn.py kill <역할> --issue <n>")
         return roster_kill(a.issue, a.task)
+    if a.role == "watch":
+        if a.issue is None:
+            sys.exit("사용법: spawn.py watch --issue <n> [--role <역할>] "
+                     "[--stall-timeout <분>]")
+        return _watch(a.issue, a.watch_role, a.stall_timeout)
     if a.role == "clean":
         # 안전한 것만 지운다: 미커밋 변경 없음 + origin 에 없는 커밋 없음.
         base = os.environ.get("MUSTER_WORK_DIR")
@@ -1759,7 +1870,9 @@ def main() -> int:
             print(f"--model {role_model}")
         return 0
     require_doctor()
-    return _spawn_one(a.cwd, a.role, a.task, a.unattended, a.issue)
+    return _spawn_one(a.cwd, a.role, a.task, a.unattended, a.issue,
+                      bounded=a.issue is not None,
+                      stall_timeout_min=a.stall_timeout)
 
 
 def issue_workspace(cwd: str, issue: int, role: str) -> str:
@@ -1907,7 +2020,8 @@ def ensure_pushed(work: str, issue: int, role: str) -> None:
 
 
 def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
-               issue: int | None = None) -> int:
+               issue: int | None = None, bounded: bool = False,
+               stall_timeout_min: float = 5.0) -> int:
     """역할 하나를 띄우고, 무슨 일이 있었는지 원장에 남기고, 처분을 말한다.
 
     main() 과 drive() 가 같은 몸통을 쓴다 — 드라이버가 따로 스폰 경로를 들고
@@ -1979,9 +2093,36 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         print(f"[{role}] 라이브 로그: {log_path}", file=sys.stderr)
         result = {}
         roster_key = f"issue-{issue}/{role}" if issue is not None else f"adhoc/{role}/{os.getpid()}"
+        events_path = _events_path(cwd)
+        offset_path = _offset_path(cwd)
+        is_parent_return = False
+        if bounded and issue is not None:
+            _workspace_index_put(issue, role, str(cwd), str(log_path))
+            # 부모(호출한 CLI 콜)는 이벤트 하나 또는 stall 시간까지만 기다리고
+            # 리턴한다 — 자식이 세션을 끝까지 몰고 간다 (이슈 #114). setsid 로
+            # 자식을 새 세션에 놓아, 부모가 속한 프로세스 그룹에 신호가 가도
+            # 자식은 안 죽는다. settings 임시파일은 자식이 아직 쓰는 중이라
+            # 부모 쪽 finally 에서 지우면 안 된다 (is_parent_return 이 막는다).
+            child_pid = os.fork()
+            if child_pid > 0:
+                is_parent_return = True
+                return _await_bounded(events_path, offset_path,
+                                       stall_timeout_min, log_path)
+            os.setsid()
+            # 부모(호출자)가 물려준 stdout/stderr 를 그대로 두면, 곧 띄울
+            # claude 서브프로세스가 Popen() 에서 stdout/stderr 를 안 지정해도
+            # 그 fd 를 그대로 상속해 세션 끝까지 파이프를 쥐고 있는다 —
+            # 부모가 bounded 리턴으로 먼저 나가도, 호출자가 그 파이프의 EOF
+            # 를 기다리고 있었다면 여전히 세션 끝까지 블록한다 (실측: 헌트로
+            # 발견). devnull 로 갈아치워 파이프 소유권을 끊는다.
+            devnull_fd = os.open(os.devnull, os.O_RDWR)
+            os.dup2(devnull_fd, 0)
+            os.dup2(devnull_fd, 1)
+            os.dup2(devnull_fd, 2)
+            os.close(devnull_fd)
         proc = subprocess.Popen(
             cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            text=True, env={**os.environ, **extra_env},
+            text=True, env={**os.environ, **extra_env}, start_new_session=True,
         )
         roster_register(roster_key, {
             "pid": proc.pid, "role": role,
@@ -1994,10 +2135,20 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             proc.stdin.close()
         except (BrokenPipeError, OSError):
             pass
+        pr_seen = set()
+        gate_refusal_seen = False
         with open(log_path, "w", encoding="utf-8") as lf:
             for line in proc.stdout:
                 lf.write(line)
                 lf.flush()
+                if issue is not None:
+                    for m in _PR_URL_RE.findall(line):
+                        if m not in pr_seen:
+                            pr_seen.add(m)
+                            _append_event(events_path, "pr-opened", m)
+                    if not gate_refusal_seen and _DENIAL_RE.search(line):
+                        gate_refusal_seen = True
+                        _append_event(events_path, "gate-refusal", line.strip()[:200])
                 try:
                     obj = json.loads(line)
                 except ValueError:
@@ -2007,7 +2158,8 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         rc = proc.wait()
         roster_remove(roster_key)
     finally:
-        os.unlink(settings)
+        if not is_parent_return:
+            os.unlink(settings)
     if result.get("result"):
         print(result["result"])                  # 세션의 마지막 답 — 기존 UX
     elif not result:
@@ -2087,6 +2239,11 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         print(f"[{role}] exit 0 인데 보드도 안 바뀌고 막힌 것도 없다 — 성공이 "
               f"아니라 실측된 침묵-사망 모드다. 세션 로그를 확인하라{sid}",
               file=sys.stderr)
+    if bounded and issue is not None:
+        # 자식(detach 된 프로세스)만 여기 닿는다 — 부모는 이미 fork 직후
+        # _await_bounded 에서 리턴했다. 마지막 사건을 남기고 그대로 끝낸다.
+        _append_event(events_path, "session-end", outcome)
+        os._exit(rc if isinstance(rc, int) else 0)
     return rc
 
 
