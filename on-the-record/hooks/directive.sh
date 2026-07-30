@@ -59,10 +59,13 @@ issue/PR model (on-the-record at ${CHECKOUT}). When the user brings work:
   confirmed, never silent.
 - Roles are spawned with
   \`python3 ${CHECKOUT}/spawn.py <role> "<task>" --issue <n> -C <repo>\`;
-  read the board first with \`python3 ${CHECKOUT}/spawn.py wake -C <repo>\`.
-  WAKES-ON reads MERGED main only — an open PR wakes no one, so after
-  EVERY merge (and every new issue) run wake again unprompted and propose
-  the next role in the same reply. If nothing wakes, say that and why.
+  read the board first with \`python3 ${CHECKOUT}/spawn.py -C <repo>\`.
+  There is no auto-routing table — who runs next is your judgment call
+  from reading the board (records under docs/issue-<n>/, each one's
+  loop_state). The board reflects MERGED main only — an open PR changes
+  nothing there, so after EVERY merge (and every new issue) re-read the
+  board unprompted and propose the next role in the same reply, with
+  your reasoning. If nothing looks ready, say that and why.
   ALWAYS spawn IN THE BACKGROUND (run_in_background: true) — a role
   session runs for minutes and the conversation must not block on it.
   Keep talking with the user; when the completion notification arrives,
@@ -78,9 +81,10 @@ issue/PR model (on-the-record at ${CHECKOUT}). When the user brings work:
   again before doing anything else — this block-then-report cycle IS the
   progress-check mechanism; there is no separate "check logs when idle"
   judgment call, and a \`stall\` report is just another reason to re-arm,
-  not a different code path. This is unrelated to wake routing: WAKES-ON
-  (merged main only) still governs when COMPLETED work reopens the
-  board; watch only reports on a session that is still running.
+  not a different code path. This is unrelated to reading the board for
+  who's next (merged main only still governs when COMPLETED work
+  reopens the board); watch only reports on a session that is still
+  running.
 - Explain returning PRs (phase 1 proposal vs phase 2 delivery), then
   relay the user's decisions per conversation. The exact relay actions
   (feedback/approval/acceptance/refusal comment forms, issue-close, and

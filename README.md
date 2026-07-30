@@ -60,7 +60,6 @@ roles/        one role is one file: rulebook bundle plus sandbox boundary
 spawn.py      reads state, brings up a session in a role's environment
               (--issue <n> creates the branch and anchors the prompt)
 on-the-record/  the plugin that drives the loop from a conversation (/on-the-record:run)
-wakes.py      evaluates docs/specs/wake-routing.md's WAKES-ON table: whom does the board wake
 gates/        deterministic checks, run by spawn.py after a session. Zero LLM calls
 ledger/       the scorecard
 ```
@@ -277,24 +276,19 @@ run is not read.
 
 ### The loop
 
-One call runs one role. After it, ask the board who is up next; `wake` evaluates
-docs/specs/wake-routing.md's WAKES-ON table and names them.
+One call runs one role. After it, who runs next is not a table lookup — it is a
+judgment call the orchestrating conversation makes by reading the board directly
+(the records under `docs/issue-<n>/`, each one's `loop_state`).
 
 ```bash
 python3 spawn.py product "build me a car-wash timing app" -C ~/work/new-app
-python3 spawn.py wake -C ~/work/new-app
-#   [feasibility] hypothesis docs/proposals/…md — feasibility has not read it yet
-python3 spawn.py feasibility "the board woke you. …" -C ~/work/new-app
-python3 spawn.py wake -C ~/work/new-app
-#   nothing standing — feasibility acknowledged it and is mid-work
+python3 spawn.py                              -C ~/work/new-app
+#   read docs/issue-<n>/reports/*.md; decide who's up next from loop_state
+python3 spawn.py feasibility "read the board: …" -C ~/work/new-app
 ```
 
-**A board that has not changed wakes nobody** (contract §6). That is what ends the
-qa↔coding cycle rather than letting it ping-pong.
-
-`wake` reports; it does not spawn. Two of the six rows are content judgments —
-product's ("does this question the acceptance criteria") and ops's ("is this ready
-to roll out") — so they are printed as *not evaluated*, never as *did not fire*.
+Human-only gates (approval, scope, round-end) are unaffected by any of this —
+they were never machine-routed to begin with.
 
 ### From a conversation
 
@@ -313,15 +307,13 @@ place where work gets handed over is already the conversation.
 
 ```bash
 python3 spawn.py                              # read the board (read-only)
-python3 spawn.py wake                         # who does the board wake? (docs/specs/wake-routing.md)
 python3 spawn.py <role> "<task>" -C <repo>    # bring up that role
 python3 spawn.py <role> "x" --dry-run         # print the merged settings only
 python3 spawn.py <role> "x" --no-contract     # skip the contract precondition
 python3 spawn.py <role> "x" --unattended      # human absent: mint off, human gates stand
 python3 spawn.py doctor                       # measure hook firing on this CLI (once per version)
-python3 spawn.py drive -C <repo>              # run whoever the board names, one at a time, until it stops
+python3 spawn.py drive -C <repo>              # no auto-routing table exists; stops immediately
 python3 spawn.py approve <kind> --subject <s> # mint an approval token yourself (needs a TTY)
-python3 spawn.py wake --all                   # include the rows already answered
 ```
 
 Authentication uses whatever is already logged in. No token, no secret.
@@ -498,17 +490,14 @@ python3 test_gates.py
 
 ## Open
 
-- **Carrying one subject end to end with the driver.** `spawn.py drive` exists, but
-  only single-role turns have been measured. Walk a full multi-role round by hand
-  before letting it run long — every step so far has surfaced something a loop
-  would have swallowed.
+- **Who runs next is orchestrator judgment, not a routing table.** (issue #120)
+  `spawn.py drive` no longer picks a role automatically — it stops immediately,
+  every time. Carrying a subject end to end means the orchestrating conversation
+  reads the board (`docs/issue-<n>/reports/*.md`, each one's `loop_state`) and
+  spawns the next role itself.
 - **Six gate families still live once per rulebook.** `state-gate.sh` exists seven
   times and all seven differ. core holds consent and the board gate today; lifting
   the rest in, with their transition tables as data, has not started.
-- **docs/specs/wake-routing.md resolves a §3/§5 disagreement from an earlier draft.**
-  §5 says every role wakes on a finding addressed to it; an earlier table draft named
-  findings only in coding's row. `wakes.py` follows the resolved behavior — every
-  role wakes on findings addressed to it.
 - **Scoring is manual.** Whether a finding hit an answer-key entry is adjudicated by
   a person (the key's adjudication clause). The runner only builds the scoresheet —
   imitating automatic adjudication is how the ledger starts lying.

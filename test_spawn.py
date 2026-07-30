@@ -785,59 +785,22 @@ class RequireDoctor(unittest.TestCase):
 
 
 class Drive(unittest.TestCase):
-    """드라이버의 유일한 일은 **멈추는 것**이다. 무엇을 띄울지는 wakes 가 정한다."""
+    """드라이버의 유일한 일은 **멈추는 것**이다 — 누구를 다음에 띄울지는
+    자동 라우팅 표가 아니라 오케스트레이터의 판단이다(이슈 #120), 그래서
+    drive() 는 스스로 역할을 고르지 않고 항상 즉시 멈춘다."""
 
-    def _fake_rows(self, rows):
-        return lambda cwd: (rows, [])
+    def test_stops_when_nothing_to_spawn(self):
+        self.assertEqual(spawn.drive("/x", False), 0)
 
-    def test_stops_when_nothing_stands(self):
-        import wakes
-        old = wakes.fresh
-        wakes.fresh = self._fake_rows([])
-        try:
-            self.assertEqual(spawn.drive("/x", False), 0)
-        finally:
-            wakes.fresh = old
-
-    def test_stops_when_the_board_did_not_change(self):
-        """§6. 이게 없으면 같은 줄을 영원히 다시 띄운다."""
-        import wakes
-        row = wakes.Row("qa", "why", "qa|k", "sig-1")
-        old_fresh, old_obs, old_spawn = wakes.fresh, wakes.observed, spawn._spawn_one
+    def test_never_calls_spawn_one(self):
         calls = []
-        wakes.fresh = self._fake_rows([row])
-        wakes.observed = lambda cwd: {}          # consume 이 안 찍혔다 = 무변화
-        spawn._spawn_one = lambda *a, **k: calls.append(a) or 0
-        try:
-            self.assertEqual(spawn.drive("/x", False), 0)
-            self.assertEqual(len(calls), 1, "무변화인데 두 번 띄웠다")
-        finally:
-            wakes.fresh, wakes.observed, spawn._spawn_one = old_fresh, old_obs, old_spawn
-
-    def test_stops_on_a_failed_session(self):
-        import wakes
-        row = wakes.Row("qa", "why", "qa|k", "sig-1")
-        old_fresh, old_spawn = wakes.fresh, spawn._spawn_one
-        wakes.fresh = self._fake_rows([row])
-        spawn._spawn_one = lambda *a, **k: 2
-        try:
-            self.assertEqual(spawn.drive("/x", False), 2)
-        finally:
-            wakes.fresh, spawn._spawn_one = old_fresh, old_spawn
-
-    def test_honours_the_runaway_limit(self):
-        import wakes
-        row = wakes.Row("qa", "why", "qa|k", "sig-1")
-        old_fresh, old_obs, old_spawn = wakes.fresh, wakes.observed, spawn._spawn_one
-        calls = []
-        wakes.fresh = self._fake_rows([row])
-        wakes.observed = lambda cwd: {"qa|k": "sig-1"}   # 항상 진전했다고 친다
+        old_spawn = spawn._spawn_one
         spawn._spawn_one = lambda *a, **k: calls.append(a) or 0
         try:
             spawn.drive("/x", False, limit=3)
-            self.assertEqual(len(calls), 3)
+            self.assertEqual(calls, [], "drive 가 역할을 자동으로 스폰했다")
         finally:
-            wakes.fresh, wakes.observed, spawn._spawn_one = old_fresh, old_obs, old_spawn
+            spawn._spawn_one = old_spawn
 
 
 class IssueScopedPrompt(unittest.TestCase):
