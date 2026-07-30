@@ -290,6 +290,12 @@ python3 spawn.py feasibility "read the board: …" -C ~/work/new-app
 Human-only gates (approval, scope, round-end) are unaffected by any of this —
 they were never machine-routed to begin with.
 
+The canonical approval location is the **issue comment**: `gh issue comment
+<issue-n> --body "APPROVE issue-<n>/<role>"`. A PR review Approve is only an
+alternative under a two-account, agent-account-separated hardening — in the
+default (single-account) setup a PR review Approve on one's own PR is not
+possible, so the issue comment is the only path (contract v3 s19).
+
 ### From a conversation
 
 Calling it from a conversation is the default. No separate trigger was built — the
