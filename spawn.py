@@ -1163,7 +1163,8 @@ def classify(rc: int, result: dict, delta: list, blocked: list) -> str:
 
 
 def fail_closed_downgrade(outcome: str, issue: int | None, blocked: list,
-                          new_commit: bool, uncommitted: list) -> str:
+                          new_commit: bool, uncommitted: list,
+                          already_delivered: bool = False) -> str:
     """`classify()` 뒤에 붙는 별도 단계 — git 상태로 `progressed` 를
     검증한다. `classify()` 자체는 손대지 않는다: git 상태를 모르고, 기존
     계약(rc/result/delta/blocked)과 기존 테스트를 그대로 둔다.
@@ -1176,12 +1177,21 @@ def fail_closed_downgrade(outcome: str, issue: int | None, blocked: list,
     아직 서 있는 run 은 오늘도 "progressed" 로 분류된다. 그런 run 을 커밋이
     없다고 FAILED 로 깎으면 정직한 blocked 신호를 완전히 지워버린다 — 그래서
     `blocked` 가 비어있지 않으면 이 다운그레이드는 아예 건드리지 않는다.
+
+    `already_delivered` (issue #129 phase 2): 이 세션 자신의 before→after
+    HEAD 델타만 보면, 같은 브랜치에서 이전 phase 가 이미 커밋+PR 을 남긴
+    뒤 이번 세션이 검증만 하고 새 커밋 없이 끝난 경우를 "실패"로 오분류한다
+    — 브랜치에 이미 PR 이 있다는 사실을 호출부에서 확인해 넘긴다. 미커밋
+    변경이 남아있으면(더러운 트리) 여전히 다운그레이드한다: "이미 배달됨" 이
+    "이번 세션이 남긴 새 변경도 안전하다"를 의미하지 않는다.
     """
     if outcome != "progressed" or issue is None:
         return outcome
     if blocked:
         return outcome
-    if new_commit and not uncommitted:
+    if uncommitted:
+        return "failed-no-commit"
+    if new_commit or already_delivered:
         return outcome
     return "failed-no-commit"
 
@@ -1381,6 +1391,26 @@ def _append_event(events_path: Path, ev_type: str, detail) -> None:
     with events_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({"ts": int(time.time()), "type": ev_type,
                               "detail": detail}, ensure_ascii=False) + "\n")
+
+
+def _prior_event_details(events_path: Path, ev_type: str) -> set:
+    """`events_path` 에 이미 남은 `ev_type` 이벤트들의 `detail` 집합.
+
+    프로세스 재시작(같은 워크스페이스로 재스폰)을 건너 `pr-opened` 를
+    멱등하게 만드는 데 쓴다 — 이 워크스페이스의 `.events.jsonl` 은
+    append-only 이므로 과거 기록을 읽으면 이전 프로세스의 in-memory
+    `pr_seen` 을 재구성할 수 있다."""
+    if not events_path.exists():
+        return set()
+    out = set()
+    for line in events_path.read_text(encoding="utf-8").splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict) and ev.get("type") == ev_type:
+            out.add(ev.get("detail"))
+    return out
 
 
 def _read_offset(offset_path: Path) -> int:
@@ -2121,7 +2151,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             proc.stdin.close()
         except (BrokenPipeError, OSError):
             pass
-        pr_seen = set()
+        pr_seen = _prior_event_details(events_path, "pr-opened") if issue is not None else set()
         gate_refusal_seen = False
         with open(log_path, "w", encoding="utf-8") as lf:
             for line in proc.stdout:
@@ -2132,15 +2162,16 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                         if m not in pr_seen:
                             pr_seen.add(m)
                             _append_event(events_path, "pr-opened", m)
-                    if not gate_refusal_seen and _DENIAL_RE.search(line):
-                        gate_refusal_seen = True
-                        _append_event(events_path, "gate-refusal", line.strip()[:200])
                 try:
                     obj = json.loads(line)
                 except ValueError:
                     continue
                 if isinstance(obj, dict) and obj.get("type") == "result":
                     result = obj
+                    denials = result.get("permission_denials") or []
+                    if issue is not None and not gate_refusal_seen and denials:
+                        gate_refusal_seen = True
+                        _append_event(events_path, "gate-refusal", str(denials)[:200])
         rc = proc.wait()
         roster_remove(roster_key)
     finally:
@@ -2178,7 +2209,14 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     if outcome == "silent-failure" and uncommitted:
         outcome = "uncommitted-work"
     new_commit = issue is not None and _is_new_commit(cwd, before_head, after_head)
-    downgraded = fail_closed_downgrade(outcome, issue, blocked, new_commit, uncommitted)
+    already_delivered = False
+    if issue is not None and outcome == "progressed" and not blocked and not new_commit:
+        branch = subprocess.run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+                                capture_output=True, text=True).stdout.strip()
+        if branch:
+            already_delivered = _pr_for_branch(Path(cwd), branch) is not None
+    downgraded = fail_closed_downgrade(outcome, issue, blocked, new_commit, uncommitted,
+                                       already_delivered)
     if downgraded != outcome:
         print(f"[{role}] 페일-클로즈드: progressed 로 자기보고 했지만 "
               f"새 커밋이 없고(before {before_head}, after {after_head})"
