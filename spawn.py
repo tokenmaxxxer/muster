@@ -636,7 +636,7 @@ def _install_hint(missing: list[str]) -> str:
     return "  `claude` 세션에서 /plugin 으로 설치한 뒤 다시 시도한다."
 
 
-# 계약 §3 의 WAKES-ON 표 순서. 보드를 읽을 때 이 순서로 보여준다.
+# 역할 순서. 보드를 읽을 때 이 순서로 보여준다.
 ROLES = ("product", "ux-design", "feasibility", "coding", "qa",
          "review", "verify", "reflect", "ops")
 BOARD = "docs"                          # v3: subject trees live at docs/issue-<n>/
@@ -820,14 +820,49 @@ def _issue_comments(root: Path, number: int) -> list[dict]:
             for c in data]
 
 
+_UPSTREAM_PATH = re.compile(r"^\s*-\s*path:\s*(\S+)", re.M)
+
+
+def _record_upstream(record: Path) -> dict[str, str]:
+    """기록의 `upstream:` 목록에서 path 만 뽑는다 (첫 빌드 판별용).
+
+    frontmatter 의 중첩 블록이라 frontmatter() 의 평면 파서로는 안 잡힌다.
+    """
+    try:
+        text = record.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    block = text.split("---", 2)
+    if len(block) < 3:
+        return {}
+    return {m.group(1): "" for m in _UPSTREAM_PATH.finditer(block[1])}
+
+
+def _front_role(root: Path, subject: str, roles: dict) -> str | None:
+    """그 subject 의 front record — subject 를 처음 연 역할 (첫 빌드 승인 게이트).
+
+    upstream 이 빈 역할이 하나뿐이면 그게 체인 루트다. 못 가리면 관례 순서
+    (product, 아니면 feasibility)로 물러난다.
+    """
+    rootless = [r for r in roles
+                if not _record_upstream(root / BOARD / subject / "reports" / f"{r}.md")]
+    if len(rootless) == 1:
+        return rootless[0]
+    for r in ("product", "feasibility"):
+        if r in roles:
+            return r
+    return None
+
+
 def approve_scope(cwd: str, issue: int) -> int:
     """s19 의 정확한 문자열 댓글을 승인자 allowlist 로 검증하고, front record 를
     `scope-approved` 로 올리는 커밋을 직접 쓴다 (이슈 #115).
 
     승인은 여전히 사람의 몫이다 — 이 함수는 그 결정을 **표현하는 방법**(댓글)에서
     **기록에 반영하는 방법**(커밋)으로 옮길 뿐, 어느 역할도 스스로 승인하지
-    못한다는 규칙은 그대로 둔다. `docs/specs/wake-routing.md` §First-build
-    approval guard 참고.
+    못한다는 규칙은 그대로 둔다.
     """
     root = Path(cwd).resolve()
     subject = f"issue-{issue}"
@@ -839,8 +874,7 @@ def approve_scope(cwd: str, issue: int) -> int:
     if not roles:
         sys.exit(f"{subject} 의 보드 기록이 없다: {root / BOARD / subject / 'reports'}")
 
-    import wakes
-    front = wakes._front(root, subject, roles)
+    front = _front_role(root, subject, roles)
     if not front:
         sys.exit(f"{subject} 의 front record 를 판별할 수 없다.")
 
@@ -1511,49 +1545,16 @@ def core_plugin_dirs() -> list[Path]:
 
 
 def drive(cwd: str, unattended: bool, limit: int = 12) -> int:
-    """보드가 지목하는 역할을 한 번에 하나씩, 멈출 때까지 띄운다.
+    """드라이버의 유일한 계약상 임무: 더 띄울 게 없으면 멈춘다.
 
-    감시자가 아니라 **직렬 루프**다. 동시에 둘을 띄우지 않는다 — 보드는 공유
-    상태이고, 계약 §3 은 동시 깨움을 정상으로 보지만 on-the-record 가 그걸 중재하지는
+    "누구를 다음에 띄울지"는 기계가 평가하는 라우팅 표가 아니라 오케스트레이터가
+    보드(기록, loop_state)를 직접 읽고 내리는 판단이다(이슈 #120) — 그래서
+    drive 는 스스로 역할을 고르지 않는다. 자동으로 고를 표가 없으므로 이
+    호출은 항상 즉시 멈춘다; 남은 인자는 향후 호출부 호환을 위해 받되 쓰지
     않는다.
-
-    멈추는 자리 넷, 전부 정상 종료다:
-      - 기계로 판정되는 줄이 더 없다
-      - 띄웠는데 보드가 안 바뀌었다 (§6 — 안 바뀐 보드는 아무도 안 깨운다)
-      - 세션이 실패했다
-      - limit 에 닿았다 (폭주 방지지 정책이 아니다)
-
-    **자동으로 안 띄우는 것**은 wakes.py 가 이미 전부 열거하고 있다: JUDGEMENT
-    두 줄(product·ops 의 내용 판단), §19 에 막힌 줄, HUMAN_ONLY 세 간선.
-    여기서 다시 판정하지 않는다 — 판정하는 순간 계약이 사람에게 유보한 자리를
-    기계가 가져간다.
     """
-    import wakes
-    for turn in range(1, limit + 1):
-        new, _answered = wakes.fresh(cwd)
-        if not new:
-            print(f"[drive] 선 줄이 없다. {turn - 1}번 띄우고 멈춘다.", file=sys.stderr)
-            return 0
-        row = new[0]
-        print(f"[drive] {turn}/{limit}  [{row.role}] {row.why}", file=sys.stderr)
-        # 보드 요약을 같이 넘긴다 — 안 주면 세션이 탐색으로 보드를 다시
-        # 발견하느라 토큰을 쓰고, 그 탐색이 매번 다르게 끝난다.
-        m_issue = re.search(r"issue-([0-9]+)", row.key + " " + row.why)
-        rc = _spawn_one(cwd, row.role,
-                        f"보드가 너를 깨웠다: {row.why}\n\n"
-                        f"지금 보드:\n" + "\n".join(status(cwd)) + "\n\n"
-                        f"계약과 네 룰북이 요구하는 대로 네 기록을 쓴다.", unattended,
-                        int(m_issue.group(1)) if m_issue else None)
-        if rc != 0:
-            print(f"[drive] {row.role} 이 실패했다 (rc={rc}). 멈춘다.", file=sys.stderr)
-            return rc
-        if wakes.observed(cwd).get(row.key) != row.sig:
-            # consume 은 progressed 일 때만 찍힌다. 안 찍혔다는 것은 보드가 안
-            # 바뀌었다는 뜻이고, §6 이 여기서 루프를 끝낸다.
-            print(f"[drive] {row.role} 이 보드를 바꾸지 않았다 — §6 으로 멈춘다. "
-                  f"위 처분이 사람이 볼 자리를 말해준다.", file=sys.stderr)
-            return 0
-    print(f"[drive] {limit}번 돌았다. 폭주 방지로 멈춘다 — 더 돌리려면 다시 부른다.",
+    print("[drive] 다음 역할을 자동으로 고르는 라우팅 표는 없다 — "
+          "오케스트레이터가 보드를 읽고 판단한다. 띄울 게 없다고 보고 멈춘다.",
           file=sys.stderr)
     return 0
 
@@ -1736,8 +1737,6 @@ def main() -> int:
                     help="이 이슈 번호로 스폰한다: issue-<n>/<역할> 브랜치를 만들고 프롬프트에 명시")
     ap.add_argument("--unattended", action="store_true",
                     help="사람이 없는 실행. mint 는 안 되고, 휴먼 게이트는 선다")
-    ap.add_argument("--all", action="store_true",
-                    help="wake: 이미 답해진 줄까지 보여준다 (계약 §6 억제를 푼다)")
     ap.add_argument("--limit", type=int, default=12,
                     help="drive: 한 번에 띄울 최대 횟수 (기본 12, 폭주 방지)")
     ap.add_argument("--login", help="init: approvers.md 에 넣을 GitHub 로그인 (기본: gh api user)")
@@ -1809,14 +1808,6 @@ def main() -> int:
     if a.role == "doctor":
         # 훅 발화 실측. 버전마다 한 번 — 룰북 집행의 전제조건이다.
         return doctor()
-    if a.role == "wake":
-        # 계약 §3 의 표를 기계로 평가하고, **누구를 열지**를 말한다.
-        # 띄우지 않는다 — 무엇을 맡길지는 그 줄을 만족시킨 사건이 정하지 않는다.
-        import wakes
-        print("\n".join(status(a.cwd)))
-        print()
-        print("\n".join(wakes.report(a.cwd, show_answered=a.all)))
-        return 0
     if a.role == "approve":
         sys.exit("v3: 승인은 파일 발행이 아니라 GitHub 행위다 — 오케스트레이터가\n"
                  "  사용자와의 대화에서 gh pr review --approve / gh pr merge 로 중계한다.")
@@ -1839,7 +1830,6 @@ def main() -> int:
             except ValueError:
                 meta = {}
             print(f"  {p.stem:12s} {meta.get('decides','')}  — {meta.get('use_when','')}")
-        print("보드가 누구를 깨우는지: spawn.py wake")
         return 0
     if not a.task:
         sys.exit("맡길 일이 없다. 사용법: spawn.py <역할> \"<맡길 일>\" [-C <경로>]")
@@ -2027,7 +2017,6 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     main() 과 drive() 가 같은 몸통을 쓴다 — 드라이버가 따로 스폰 경로를 들고
     있으면 둘이 갈라지고, 갈라진 쪽이 조용히 게이트 하나를 빠뜨린다.
     """
-    import wakes          # wakes 가 spawn 을 import 한다 — 여기서만 끌어온다
     spec = json.loads((ROOT / "roles" / f"{role}.json").read_text())
     if issue is not None:
         # 격리 작업 클론에서 돈다 — 사용자의 체크아웃은 건드리지 않고,
@@ -2077,12 +2066,6 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                 extra_env["GOPROXY"] = proxy
         before = board_snapshot(cwd)
         before_head = _git_head(cwd) if issue is not None else None
-        # 이 세션이 답하러 가는 줄들. 세션이 보드를 실제로 바꾼 뒤에만 소비로
-        # 적는다 — §6 은 wake 가 **결과 기록**으로 소비된다고 말한다.
-        try:
-            answering = [r for r in wakes.fresh(cwd)[0] if r.role == role]
-        except Exception:
-            answering = []
         t0 = time.monotonic()
         # stream-json 을 줄 단위로 받아 라이브 로그에 tee 한다 — "지금 뭐
         # 하는 중인가"가 세션이 끝나기 전에도 보이게. 최종 result 이벤트가
@@ -2169,10 +2152,9 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     after = board_snapshot(cwd)
     delta = sorted(p for p in set(before) | set(after)
                    if before.get(p) != after.get(p))
-    try:
-        _, _, blocked = wakes.evaluate(cwd)
-    except Exception:
-        blocked = []       # 분류 보조일 뿐, 평가 실패로 스폰 결과를 잃지 않는다
+    # 사람 게이트에 막힌 줄을 자동으로 판별하던 표는 없다(이슈 #120) —
+    # classify() 는 이제 이 경로로는 waiting-on-human 을 못 낸다.
+    blocked: list = []
 
     uncommitted = []
     after_head = None
@@ -2204,10 +2186,6 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
               file=sys.stderr)
         outcome = downgraded
     denials = result.get("permission_denials") or []
-    if outcome == "progressed":
-        # 계약 §6: wake 는 그 결과 기록이 쓰여야 소비된다. 아무것도 안 썼으면
-        # 그 줄은 답해지지 않은 채로 남아 다음 평가에 다시 선다.
-        wakes.consume(cwd, answering)
     ledger_write({
         "ts": int(time.time()), "role": role, "cwd": str(Path(cwd).resolve()),
         "session_id": result.get("session_id"),

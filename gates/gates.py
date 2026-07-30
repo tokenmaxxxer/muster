@@ -325,13 +325,13 @@ def record_wellformed_in(work: Path) -> list[str]:
         text = f.read_text()
         if not text.startswith("---"):
             bad.append(f"레코드 frontmatter 파싱 불가: {path} — 시작 구분자(`---`) "
-                       "없음. loop_state/verdict 를 읽을 수 없어 wake 라우팅이 "
-                       "조용히 죽는다.")
+                       "없음. loop_state/verdict 를 읽을 수 없어 오케스트레이터가 "
+                       "이 기록을 조용히 못 읽는다.")
             continue
         if len(text.split("---", 2)) < 3:
             bad.append(f"레코드 frontmatter 파싱 불가: {path} — 닫는 구분자 없음. "
-                       "loop_state/verdict 를 읽을 수 없어 wake 라우팅이 조용히 "
-                       "죽는다.")
+                       "loop_state/verdict 를 읽을 수 없어 오케스트레이터가 이 "
+                       "기록을 조용히 못 읽는다.")
     return bad
 
 
