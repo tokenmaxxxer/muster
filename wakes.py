@@ -271,6 +271,7 @@ def _rows(cwd: str) -> tuple[list[Row], list[Row]]:
             return
         f = _front(root, subject, roles)
         state = roles.get(f, {}).get("loop_state") if f else None
+        # vocab source of truth: docs/specs/loop-state-vocab.md — human-only allowlist
         if state == "scope-approved":
             woken.append(Row("coding", f"{subject}: {why}", key, sig))
         else:
@@ -283,8 +284,10 @@ def _rows(cwd: str) -> tuple[list[Row], list[Row]]:
     for subject, roles in b.items():
         # exact-match by design: compound/annotated strings are refused, not parsed.
         # resolution path for a settled "conditional" -> "go" re-raise: docs/specs/wake-routing.md#conditional-verdict-resolution
+        # vocab source of truth: docs/specs/loop-state-vocab.md (feasibility: verdict)
         if roles.get("feasibility", {}).get("verdict") == "go":
             wake_coding(subject, "feasibility verdict: go", _rec(subject, "feasibility"))
+        # vocab source of truth: docs/specs/loop-state-vocab.md (qa: loop_state)
         if roles.get("qa", {}).get("loop_state") == "handed-off":
             wake_coding(subject, "qa handed-off — 사람의 결함 판정이 끝났다",
                         _rec(subject, "qa"))
@@ -299,6 +302,7 @@ def _rows(cwd: str) -> tuple[list[Row], list[Row]]:
 
     # ── coding 의 네 번째 갈래: ux-design-record 가 reviewed 에 도달
     for subject, roles in b.items():
+        # vocab source of truth: docs/specs/loop-state-vocab.md (ux-design: loop_state)
         if roles.get("ux-design", {}).get("loop_state") == "reviewed":
             wake_coding(subject, "ux-design loop_state: reviewed",
                         _rec(subject, "ux-design"))
@@ -312,10 +316,12 @@ def _rows(cwd: str) -> tuple[list[Row], list[Row]]:
 
     # ── reflect: verify 가 cleared 이거나 review 가 reported
     for subject, roles in b.items():
+        # vocab source of truth: docs/specs/loop-state-vocab.md (verify: loop_state)
         if roles.get("verify", {}).get("loop_state") == "cleared":
             woken.append(Row("reflect", f"{subject}: verify loop_state: cleared",
                              f"reflect|{subject}|verify",
                              _sig(root, _rec(subject, "verify"))))
+        # vocab source of truth: docs/specs/loop-state-vocab.md (review: loop_state)
         elif roles.get("review", {}).get("loop_state") == "reported":
             woken.append(Row("reflect", f"{subject}: review loop_state: reported",
                              f"reflect|{subject}|review",
@@ -331,6 +337,7 @@ def _rows(cwd: str) -> tuple[list[Row], list[Row]]:
 
     # ── review: coding 이 착지시킨 변경
     for subject, roles in b.items():
+        # vocab source of truth: docs/specs/loop-state-vocab.md (coding: loop_state)
         if roles.get("coding", {}).get("loop_state") == "landed":
             woken.append(Row("review", f"{subject}: coding loop_state: landed",
                              f"review|{subject}|landed",
