@@ -1593,6 +1593,27 @@ def _read_offset(offset_path: Path) -> int:
         return 0
 
 
+def _event_count(events_path: Path) -> int:
+    """events.jsonl 의 줄 수 — offset 과 같은 단위(줄)다."""
+    try:
+        return len(events_path.read_text(encoding="utf-8").splitlines())
+    except OSError:
+        return 0
+
+
+def _origin_pr_prefix(cwd) -> str | None:
+    """이 레포 자신의 PR URL 접두사. 판별 못 하면 None(=범위 검사 생략)."""
+    try:
+        out = subprocess.run(["git", "-C", str(cwd), "remote", "get-url", "origin"],
+                             capture_output=True, text=True)
+    except OSError:
+        return None
+    if out.returncode != 0:
+        return None
+    m = re.search(r"github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?\s*$", out.stdout)
+    return f"https://github.com/{m.group(1)}/pull/" if m else None
+
+
 def _write_offset(offset_path: Path, n: int) -> None:
     offset_path.write_text(str(n))
 
@@ -1633,6 +1654,14 @@ def _await_bounded(events_path: Path, offset_path: Path, stall_timeout_min: floa
                 ev = json.loads(lines[seen])
                 _write_offset(offset_path, seen + 1)
                 print(f"[watch] {ev['type']}: {ev['detail']}")
+                # exit 0 는 "스폰이 리턴했다"이지 "세션이 끝났다"가 아니다.
+                # 호출자가 그 둘을 추론하게 두면 오케스트레이터가 사람에게
+                # 끝났다고 오보한다 — 이 저장소가 가장 비싸게 치는 실패다
+                # (이슈 #142). session-end 만이 종료를 뜻한다.
+                if ev["type"] != "session-end":
+                    print("[watch] 스폰은 리턴했지만 세션은 계속 돈다 — "
+                          "상태는 spawn.py ps, 이어보려면 spawn.py watch",
+                          file=sys.stderr)
                 return 0
         try:
             size = log_path.stat().st_size
@@ -2318,6 +2347,15 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             # 자식을 새 세션에 놓아, 부모가 속한 프로세스 그룹에 신호가 가도
             # 자식은 안 죽는다. settings 임시파일은 자식이 아직 쓰는 중이라
             # 부모 쪽 finally 에서 지우면 안 된다 (is_parent_return 이 막는다).
+            #
+            # 기다리기 전에 offset 을 지금의 파일 끝으로 민다. events.jsonl 은
+            # append-only 이고 같은 워크스페이스로 재스폰하면 이전 세션의 줄이
+            # 그대로 남아 있어서, offset 이 그 앞을 가리키면 새 스폰이 **과거
+            # 이벤트**로 즉시 리턴한다 — 세션은 계속 도는데 호출자는 끝났다고
+            # 듣는다. 실측 2026-07-30(core issue-53 phase 2): 78분 전 phase 1 이
+            # 남긴 pr-opened 로 복귀했다. 이 스폰이 소비할 수 있는 것은 이
+            # 세션이 낸 이벤트뿐이어야 한다 (이슈 #142).
+            _write_offset(offset_path, _event_count(events_path))
             child_pid = os.fork()
             if child_pid > 0:
                 is_parent_return = True
@@ -2359,12 +2397,20 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             pass
         pr_seen = _prior_event_details(events_path, "pr-opened") if issue is not None else set()
         gate_refusal_seen = False
+        # A URL the session **read** is indistinguishable from a PR it
+        # **opened** unless the owner/repo is checked: octocat/Hello-World/pull/1
+        # is GitHub's own documentation example and appears in gh help output.
+        # 실측 2026-07-30 — 그 URL 하나로 pr-opened 가 서고 스폰이 조기 복귀했다
+        # (이슈 #142). origin 을 못 읽으면 접두사는 None 이고 예전처럼 전부 받는다.
+        pr_prefix = _origin_pr_prefix(cwd) if issue is not None else None
         with open(log_path, "w", encoding="utf-8") as lf:
             for line in proc.stdout:
                 lf.write(line)
                 lf.flush()
                 if issue is not None:
                     for m in _PR_URL_RE.findall(line):
+                        if pr_prefix and not m.startswith(pr_prefix):
+                            continue
                         if m not in pr_seen:
                             pr_seen.add(m)
                             _append_event(events_path, "pr-opened", m)
