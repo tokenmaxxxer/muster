@@ -1429,5 +1429,39 @@ class PostCrashComment(unittest.TestCase):
         self.assertIn("gh", calls[0])
 
 
+class RosterConcurrency(unittest.TestCase):
+    """issue #139: 잠금 없는 read-modify-write 가 동시 등록을 잃어버렸던 문제."""
+
+    def test_concurrent_register_survives(self):
+        import threading
+
+        with tempfile.TemporaryDirectory() as td:
+            roster = Path(td) / "active.json"
+            old_roster = spawn.ROSTER
+            spawn.ROSTER = roster
+            try:
+                n = 20
+                barrier = threading.Barrier(n)
+
+                def register(i):
+                    barrier.wait()
+                    spawn.roster_register(f"issue-{i}/coding",
+                                           {"pid": i, "role": "coding",
+                                            "issue": i, "ts": 0,
+                                            "log": "", "work": ""})
+
+                threads = [threading.Thread(target=register, args=(i,))
+                           for i in range(n)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+
+                d = json.loads(roster.read_text())
+                self.assertEqual(len(d), n, d)
+            finally:
+                spawn.ROSTER = old_roster
+
+
 if __name__ == "__main__":
     unittest.main()
