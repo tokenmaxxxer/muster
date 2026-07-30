@@ -180,10 +180,11 @@ running/waiting/done 세 그룹 중 하나로 정상 분류된다.
      라우팅에 쓰인다. 대기 항목이 없으면 이 블록 자체를 만들지 않는다
      (빈 "0건" 큐를 만들지 않는다).
    - 수정 요구 → `gh pr comment` 로 해당 PR 에 남긴다
-   - 제안 승인 → 기본(1계정)에서는 자기 PR 에 리뷰 Approve 가 불가하므로,
-     정확히 이 문자열의 코멘트를 단다: `gh pr comment <n> --body "APPROVE issue-<n>/<역할>"`
-     (approval-gate 가 이 정확한 문자열만 승인으로 인정한다. 에이전트 계정을
-     분리한 하드닝 구성에서는 `gh pr review <n> --approve` 도 된다) (contract v3 s19)
+   - 제안 승인 → 승인 정본은 **이슈 댓글**이다: `gh issue comment <issue-n> --body "APPROVE issue-<n>/<역할>"`
+     (approval-gate 가 이 정확한 문자열만 승인으로 인정한다). 기본(1계정)에서는
+     자기 PR 에 리뷰 Approve 가 불가하므로 이슈 댓글이 유일한 경로다. 에이전트
+     계정을 분리한 하드닝 구성에서만 `gh pr review <n> --approve` 도 대안이 된다
+     (contract v3 s19)
    - 결과 수용 → `gh pr merge <n> --merge --delete-branch` — 머지된
      브랜치는 반드시 함께 지운다. 역할별 이슈 브랜치는 PR 이 생명주기다
    - 거부 → `gh pr close <n>`

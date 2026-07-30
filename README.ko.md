@@ -265,6 +265,11 @@ python3 spawn.py feasibility "보드를 읽어라: …" -C ~/work/new-app
 사람 전용 게이트(승인, scope, 라운드 종료)는 영향 없다 — 애초에 wake 로
 자동화된 적이 없다.
 
+승인의 정본 위치는 **이슈 댓글**이다: `gh issue comment <issue-n> --body
+"APPROVE issue-<n>/<역할>"`. PR 리뷰 Approve 는 에이전트 계정을 분리한
+2계정 하드닝 구성에서만 쓰는 대안이다 — 기본(1계정) 구성에서는 자기 PR 에
+리뷰 Approve 를 달 수 없어 이슈 댓글이 유일한 경로다(contract v3 s19).
+
 ### 대화에서
 
 대화에서 부르는 것이 기본이다. 트리거를 따로 만들지 않는다 — 일을 맡기는 자리가
