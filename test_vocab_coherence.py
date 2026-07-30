@@ -24,17 +24,17 @@ VOCAB_DOC = ROOT / "docs" / "specs" / "loop-state-vocab.md"
 # will not catch it (it will only catch mismatches between what's
 # listed here and what's declared in the vocab doc).
 CONSUMED = [
-    ("feasibility", "verdict", "go", 277),
-    ("qa", "loop_state", "handed-off", 279),
-    ("ux-design", "loop_state", "reviewed", 293),
-    ("verify", "loop_state", "cleared", 306),
-    ("review", "loop_state", "reported", 310),
-    ("coding", "loop_state", "landed", 325),
+    ("feasibility", "verdict", "go", 289),
+    ("qa", "loop_state", "handed-off", 292),
+    ("ux-design", "loop_state", "reviewed", 307),
+    ("verify", "loop_state", "cleared", 321),
+    ("review", "loop_state", "reported", 326),
+    ("coding", "loop_state", "landed", 342),
 ]
 
 # The human-only value: consumed at wakes.py's pre-approval gate, not
 # produced by any role's declared vocab.
-HUMAN_ONLY_VALUE = ("scope-approved", 267)
+HUMAN_ONLY_VALUE = ("scope-approved", 275)
 
 
 def _parse_vocab_doc(text: str):
