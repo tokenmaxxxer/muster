@@ -603,6 +603,50 @@ class FailClosedDowngrade(unittest.TestCase):
             spawn.fail_closed_downgrade("progressed", None, [], False, []),
             "progressed")
 
+    def test_already_delivered_branch_exempts_verify_only_session(self):
+        # issue-129 survey root cause 4 (issue-126's phase-2 sequence): a
+        # phase-2 session on a branch that already carries phase-1's
+        # commit+PR made no new commit of its own (before_head ==
+        # after_head) but only read/verified — that is not a failure.
+        self.assertEqual(
+            spawn.fail_closed_downgrade("progressed", 3, [], False, [],
+                                        already_delivered=True),
+            "progressed")
+
+    def test_already_delivered_with_dirty_tree_still_downgrades(self):
+        # "already delivered" covers prior commits, not this session's own
+        # uncommitted leftovers.
+        self.assertEqual(
+            spawn.fail_closed_downgrade("progressed", 3, [], False,
+                                        ["M some/file.py"],
+                                        already_delivered=True),
+            "failed-no-commit")
+
+
+class PriorEventDetails(unittest.TestCase):
+    """issue #129 root cause 1: `pr-opened` must not re-fire for a PR URL
+    already recorded in this workspace's `.events.jsonl` from an earlier
+    process (e.g. issue-123's repeated PR #124 URL across respawns)."""
+
+    def test_empty_when_file_missing(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(
+                spawn._prior_event_details(Path(td) / "missing.events.jsonl",
+                                           "pr-opened"),
+                set())
+
+    def test_reads_prior_matching_details(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / ".events.jsonl"
+            p.write_text(
+                json.dumps({"ts": 1, "type": "pr-opened",
+                           "detail": "https://github.com/o/r/pull/124"}) + "\n"
+                + json.dumps({"ts": 2, "type": "gate-refusal",
+                             "detail": "x"}) + "\n")
+            self.assertEqual(
+                spawn._prior_event_details(p, "pr-opened"),
+                {"https://github.com/o/r/pull/124"})
+
 
 class PreambleWarning(unittest.TestCase):
     """The issue-workspace task preamble in `_spawn_one` (spawn.py source,
@@ -865,6 +909,94 @@ class IssueScopedPrompt(unittest.TestCase):
             self.assertEqual(delivered.count("원래 맡긴 일."), 1, delivered)
             self.assertEqual([p for p, _ in prep].count("workspace"), 1, prep)
             self.assertEqual([p for p, _ in prep].count("branch"), 1, prep)
+
+
+class EventReporting(unittest.TestCase):
+    """issue #129 phase 2: `.events.jsonl` 기록의 정확성 — 실측된 오탐 3건
+    (gate-refusal 오탐 2건, pr-opened 중복 1건)을 보존된 fixture 로 재현."""
+
+    def _run(self, td, task, roster_key="e"):
+        import subprocess as sp
+        from unittest import mock
+
+        work = Path(td) / "work"
+        if not work.exists():
+            work.mkdir()
+            run = lambda *a: sp.run(a, cwd=str(work), capture_output=True,
+                                    text=True, check=True)
+            run("git", "init", "-q")
+            run("git", "config", "user.email", "t@example.com")
+            run("git", "config", "user.name", "t")
+            (work / "f.txt").write_text("x")
+            run("git", "add", "f.txt")
+            run("git", "commit", "-q", "-m", "init")
+        roster = Path(td) / "active.json"
+        old_roster = spawn.ROSTER
+        spawn.ROSTER = roster
+        buf = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = buf
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            with mock.patch.object(spawn, "issue_workspace",
+                                   lambda cwd, issue, role: str(work)), \
+                 mock.patch.object(spawn, "checkout_issue_branch",
+                                   lambda cwd, issue, role: "b"), \
+                 mock.patch.object(spawn, "spawn_cmd",
+                                   lambda *a, **k: (["cat"], {})), \
+                 mock.patch.object(spawn, "ensure_pushed",
+                                   lambda *a, **k: None), \
+                 mock.patch.object(spawn, "ledger_write",
+                                   lambda *a, **k: None), \
+                 mock.patch.object(spawn, "_pr_for_branch",
+                                   lambda *a, **k: None):
+                spawn._spawn_one(str(work), "qa", task, unattended=True, issue=7)
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+            spawn.ROSTER = old_roster
+        events_path = Path(str(work) + spawn.EVENTS_SUFFIX)
+        if not events_path.exists():
+            return []
+        return [json.loads(l) for l in events_path.read_text().splitlines()]
+
+    def test_end_turn_result_is_not_a_gate_refusal(self):
+        # issue-46/49 survey fixture: a normal end_turn result JSON line
+        # contains the literal key name "permission_denials" — the old
+        # raw-text regex misfired on the key name itself.
+        line = json.dumps({"type": "result", "stop_reason": "end_turn",
+                           "is_error": False, "permission_denials": []})
+        events = self._run(tempfile.mkdtemp(), line + "\n")
+        self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_echoed_source_mentioning_denied_is_not_a_gate_refusal(self):
+        # issue-126 survey fixture: mid-session tool output echoing this
+        # file's own `_DENIAL_RE = re.compile(r"permission_denial|denied", ...)`
+        # source line used to trip the raw-text scan.
+        echoed = ('{"type":"user","message":{"content":[{"type":"tool_result",'
+                  '"content":"_DENIAL_RE = re.compile(r\\"permission_denial|denied\\", re.IGNORECASE)"}]}}\n')
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": []})
+        events = self._run(tempfile.mkdtemp(), echoed + result_line + "\n")
+        self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_real_denial_still_reported(self):
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Write"}]})
+        events = self._run(tempfile.mkdtemp(), result_line + "\n")
+        self.assertTrue([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_pr_opened_does_not_refire_across_respawns(self):
+        # issue-123 survey fixture: PR #124's URL, echoed again on a later
+        # respawn of the same workspace, must not append a second
+        # pr-opened event — dedup is durable across process restarts.
+        td = tempfile.mkdtemp()
+        url = "https://github.com/o/r/pull/124"
+        self._run(td, url + "\n")
+        events = self._run(td, "이미 있는 PR 링크를 또 echo 한다: " + url + "\n")
+        opened = [e for e in events if e["type"] == "pr-opened" and e["detail"] == url]
+        self.assertEqual(len(opened), 1, events)
 
 
 class Clean(unittest.TestCase):
