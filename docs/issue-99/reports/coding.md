@@ -80,14 +80,30 @@ routing logic.
 
 ## Hunt
 
-warrant-hunter dispatched at phase-2 completion per cadence; this is a
-docs-only change with no new branch logic, so the probe's surface is
-narrow (spec-vs-code consistency, not runtime behavior).
+warrant-hunter dispatched at phase-2 completion per cadence (stance:
+after-proposal, integration/accuracy check). Result:
+`docs/reports/2026-07-30-hunt-conditional-verdict-resolution.md` —
+FINDING: the new doc section claimed parity ("same shape as the
+human-only edges above") with `wakes.py`'s two registered `HUMAN_ONLY`
+entries, but was itself never added to that dict, so
+`wakes.py.report()` never surfaced it.
+
+## resolved_findings
+
+- finding: docs/reports/2026-07-30-hunt-conditional-verdict-resolution.md
+  resolution: added a third `HUMAN_ONLY` entry
+  ("conditional 검증 재확정") in `wakes.py`, registering the new edge
+  so `wakes.py.report()` lists it alongside its two siblings, matching
+  the doc section's "same shape" claim. Data-dict addition only — no
+  `_rows()` / routing-logic change, no widening of the frozen write
+  set (still `docs/specs/wake-routing.md` + `wakes.py`). Re-ran
+  `python3 -m pytest test_gates.py test_spawn.py -q` → 83 passed,
+  unmodified, after this change.
 
 ## Open findings
 
-None open. No `addressed_to: coding` findings existed for this
-subject prior to this record.
+None open — the one finding raised by this turn's hunt is resolved
+above.
 
 ## Out of scope (per approved proposal)
 
