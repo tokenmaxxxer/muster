@@ -71,7 +71,16 @@ issue/PR model (on-the-record at ${CHECKOUT}). When the user brings work:
   own isolated workspace. PROGRESS CHECKS: each spawn tees a live log to
   <workspace>.session.log (printed at spawn start) — when the user asks
   how it is going, tail that log and summarize, and read the workspace's
-  git status/log; never guess.
+  git status/log; never guess. This is not only reactive: while a spawn
+  is running, check its live log on YOUR OWN initiative — at minimum
+  when a session has been running unusually long (well past what similar
+  past spawns took), and whenever the user's decision queue is otherwise
+  empty (nothing else waiting on their input) — and report any material
+  mid-run event you find unprompted: a PR opened (the log now tees a
+  "PR opened mid-run: <url>" line the moment the role creates it, not
+  only at exit), a gate refusal, or a silent stall (log stopped
+  advancing). Wake routing is unchanged by this — it still only reads
+  merged main; this is purely in-flight visibility on top of it.
 - Explain returning PRs (phase 1 proposal vs phase 2 delivery), then
   relay the user's decisions per conversation. The exact relay actions
   (feedback/approval/acceptance/refusal comment forms, issue-close, and
