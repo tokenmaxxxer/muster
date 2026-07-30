@@ -589,7 +589,7 @@ def t_writeset_declared():
         assert any("write-set 이탈" in b for b in gates.writeset(Path(td), {}))
 
 
-def _record_repo(td: str, role: str, record_fields: dict, frontmatter: str) -> Path:
+def _enum_record_repo(td: str, role: str, record_fields: dict, frontmatter: str) -> Path:
     """`record_enums` 전용 픽스처: roles/<role>.json + 변경된 record 한 개."""
     work = _repo(td)
     (work / "roles").mkdir()
@@ -607,7 +607,7 @@ def _record_repo(td: str, role: str, record_fields: dict, frontmatter: str) -> P
 
 def t_record_enums_out_of_enum_blocks():
     with tempfile.TemporaryDirectory() as td:
-        _record_repo(td, "feasibility", {"verdict": ["go", "no-go", "conditional"]},
+        _enum_record_repo(td, "feasibility", {"verdict": ["go", "no-go", "conditional"]},
                      'verdict: go (조건부 → 측정 필요)')
         bad = gates.record_enums(Path(td), {})
         assert bad and "verdict" in bad[0] and "feasibility.json" in bad[0], bad
@@ -615,14 +615,14 @@ def t_record_enums_out_of_enum_blocks():
 
 def t_record_enums_in_enum_passes():
     with tempfile.TemporaryDirectory() as td:
-        _record_repo(td, "feasibility", {"verdict": ["go", "no-go", "conditional"]},
+        _enum_record_repo(td, "feasibility", {"verdict": ["go", "no-go", "conditional"]},
                      "verdict: go")
         assert gates.record_enums(Path(td), {}) == []
 
 
 def t_record_enums_undeclared_field_passes():
     with tempfile.TemporaryDirectory() as td:
-        _record_repo(td, "feasibility", {}, "kind: feasibility-record\nverdict: go")
+        _enum_record_repo(td, "feasibility", {}, "kind: feasibility-record\nverdict: go")
         assert gates.record_enums(Path(td), {}) == []
 
 
@@ -641,10 +641,79 @@ def t_record_enums_missing_role_file_blocks():
 
 def t_record_enums_loop_state_out_of_set_blocks():
     with tempfile.TemporaryDirectory() as td:
-        _record_repo(td, "qa", {"loop_state": ["handed-off"]},
+        _enum_record_repo(td, "qa", {"loop_state": ["handed-off"]},
                      "loop_state: made-up-state")
         bad = gates.record_enums(Path(td), {})
         assert bad and "loop_state" in bad[0], bad
+
+
+def _record_repo(td: str, subject: str, role: str, text: str) -> Path:
+    """docs/issue-<n>/reports/<role>.md 를 커밋해 둔 레포."""
+    work = Path(td) / "work"
+    d = work / "docs" / subject / "reports"
+    d.mkdir(parents=True)
+    run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                    capture_output=True, check=True)
+    run("init", "-q", "-b", "main")
+    run("config", "user.email", "t@t"); run("config", "user.name", "t")
+    (work / "README.md").write_text("x")
+    run("add", "-A"); run("commit", "-qm", "init")
+    run("branch", "-f", "origin/main")
+    (d / f"{role}.md").write_text(text)
+    run("add", "-A"); run("-c", "user.email=t@t", "-c", "user.name=t",
+                          "commit", "-qm", "record")
+    return work
+
+
+def t_record_wellformed_missing_open_delimiter():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding", "kind: x\nloop_state: y\n")
+        bad = gates.record_wellformed_in(work)
+        assert any("issue-9/reports/coding.md" in b and "시작 구분자" in b for b in bad), bad
+
+
+def t_record_wellformed_missing_close_delimiter():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding", "---\nkind: x\nloop_state: y\n")
+        bad = gates.record_wellformed_in(work)
+        assert any("닫는 구분자" in b for b in bad), bad
+
+
+def t_record_wellformed_passes_valid_frontmatter():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding",
+                            "---\nkind: x\nloop_state: y\n---\n\n본문\n")
+        assert gates.record_wellformed_in(work) == []
+
+
+def t_record_no_tool_residue_blocks_leaked_tag():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding",
+                            "---\nkind: x\n---\n\n본문\n</content>\n")
+        bad = gates.record_no_tool_residue_in(work)
+        assert any("coding.md:6" in b and "</content>" in b for b in bad), bad
+
+
+def t_record_no_tool_residue_allows_fenced_tag():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding",
+                            "---\nkind: x\n---\n\n```\n</content>\n```\n")
+        assert gates.record_no_tool_residue_in(work) == []
+
+
+def t_record_no_tool_residue_passes_clean_record():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding",
+                            "---\nkind: x\n---\n\n평범한 본문, 태그 없음\n")
+        assert gates.record_no_tool_residue_in(work) == []
+
+
+def t_record_both_defects_block_independently():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding", "kind: x\n</content>\n")
+        wf = gates.record_wellformed_in(work)
+        residue = gates.record_no_tool_residue_in(work)
+        assert wf and residue, (wf, residue)
 
 
 def t_dep_names():
