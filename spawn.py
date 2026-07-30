@@ -1541,6 +1541,18 @@ def _auto_respawn_check(key: str, entry: dict, state: dict) -> None:
     if attempts >= RESPAWN_MAX_ATTEMPTS:
         _post_crash_comment(root, issue, key, work, entry.get("log", ""))
         return
+    # 위의 already_claimed 은 events.jsonl 을 읽기만 한다 — 두 watchdog
+    # 프로세스가 동시에 이 지점에 도달하면 둘 다 통과한다(실측: warrant-hunter
+    # 리포트, 스레드 두 개로 재현: 둘 다 _spawn_one 을 호출해 같은 워크스페이스
+    # 에 중복 세션이 뜬다). 실제 락은 이 원자적 파일 생성 하나뿐이다 —
+    # O_CREAT|O_EXCL 은 POSIX 에서 프로세스 간에도 원자적이라, 두 워치독 중
+    # 정확히 하나만 이 파일을 만들 수 있다.
+    claim_path = Path(str(work) + f".respawn-claim-{start_ts}")
+    try:
+        fd = os.open(str(claim_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        return
     task_path = Path(str(work) + ".task.txt")
     if not task_path.exists():
         print(f"[watchdog] {key}: crashed 인데 {task_path} 가 없어 재스폰 불가 "

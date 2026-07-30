@@ -67,24 +67,27 @@ silent-death sessions with a mechanical 3-way verdict (`normal` / `crashed` /
 
 ## Warrant hunt
 
-Stance: composition regression at the watchdog/respawn seam (crashed-
-detection racing a benign session-end; double-claim under two concurrent
-`--auto-respawn` invocations; double-prefixing the persisted task text on
-respawn; interaction with issue-129's `pr-opened` idempotency when a
-crashed session had already opened a PR). Dispatched to warrant-hunter
-before phase-2 completion; this is a headless single-shot session — the
-async result is not back yet at commit time. The two race concerns above
-are independently covered by `closed_checks` regardless of the hunt's
-outcome. Any finding the hunter later surfaces on this branch is a task
-for a follow-up session, not a reason to hold back the completed, tested
-work in this PR.
+Stance: composition regression at the watchdog/respawn seam. Dispatched
+before phase-2 completion; result returned within this session (report:
+`docs/reports/2026-07-30-hunt-session-end-trichotomy.md`).
+
+**Finding, resolved**: `_auto_respawn_check`'s `events.jsonl`-based
+`already_claimed` check was check-then-act with no lock — two concurrent
+`watchdog --auto-respawn` invocations on the same crashed entry could both
+pass it and both call `_spawn_one`, duplicating live sessions on the same
+workspace/branch (repro: two threads racing `_auto_respawn_check`, both
+calling `_spawn_one`). Fixed by adding an atomic `O_CREAT|O_EXCL` claim
+file (`<work>.respawn-claim-<session_start_ts>`) as the actual mutex,
+right before the append+spawn — POSIX guarantees exactly one creator
+across processes/threads. Regression test
+`AutoRespawnClaim.test_concurrent_watchdogs_do_not_double_respawn` (two
+threads, two independent `state` dicts simulating two separate watchdog
+processes) asserts exactly one `_spawn_one` call; passes.
 
 ## Open findings
 
-None confirmed from this session's own testing. The warrant-hunter pass
-above was dispatched but its result was not available before this
-session's turn ended (see Warrant hunt) — if it later reports a finding,
-it lands as a new item to address, not a currently-known open finding.
+None. The one warrant-hunter finding above was fixed and covered by a new
+regression test in this same session before commit.
 
 ## Open finding resolution path
 
@@ -98,5 +101,5 @@ are recorded in the proposal's "Out of scope" section for a future issue.
 
 ## How it was confirmed
 
-- `python3 -m unittest test_spawn.SessionEndVerdict test_spawn.AutoRespawnClaim test_spawn.PostCrashComment -v` — ran, passed.
-- Full `python3 -m unittest test_spawn -v` — ran, passed (no regressions).
+- `python3 -m unittest test_spawn.SessionEndVerdict test_spawn.AutoRespawnClaim test_spawn.PostCrashComment -v` — ran, passed (13 tests, including the concurrent-respawn regression test added after the hunt finding).
+- Full `python3 -m unittest test_spawn -v` — ran, passed, 102 tests, no regressions.

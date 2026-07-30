@@ -1338,6 +1338,36 @@ class AutoRespawnClaim(unittest.TestCase):
             self.assertEqual(called, [])
             self.assertEqual(state, {})
 
+    def test_concurrent_watchdogs_do_not_double_respawn(self):
+        # warrant-hunter finding (2026-07-30): the events.jsonl-based
+        # already_claimed check is check-then-act with no lock, so two
+        # concurrent `watchdog --auto-respawn` invocations on the same
+        # crashed entry could both pass it and both call _spawn_one.
+        # The atomic O_CREAT|O_EXCL claim file must let exactly one through.
+        import threading
+        with tempfile.TemporaryDirectory() as td:
+            work = self._crashed_workspace(td)
+            entry = {"work": work, "issue": 132, "role": "coding", "log": "l"}
+            called = []
+            lock = threading.Lock()
+            orig = spawn._spawn_one
+            def fake_spawn(*a, **k):
+                with lock:
+                    called.append(1)
+            spawn._spawn_one = fake_spawn
+            try:
+                states = [{}, {}]
+                threads = [threading.Thread(target=spawn._auto_respawn_check,
+                                            args=("issue-132/coding", entry, states[i]))
+                          for i in range(2)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+            finally:
+                spawn._spawn_one = orig
+            self.assertEqual(len(called), 1)
+
     def test_cap_reached_posts_comment_instead_of_respawning(self):
         with tempfile.TemporaryDirectory() as td:
             work = self._crashed_workspace(td)
