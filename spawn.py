@@ -1162,6 +1162,51 @@ def classify(rc: int, result: dict, delta: list, blocked: list) -> str:
     return "silent-failure"
 
 
+def session_end_verdict(work: str, now: float | None = None,
+                        alive_fn=None) -> str:
+    """워크스페이스 하나의 세션-종료 3분법: `normal` / `crashed` / `stalled` /
+    `in-progress` (이슈 #132).
+
+    `<work>.events.jsonl` 에서 마지막 `session-start` 를 찾고, 그 뒤에
+    `session-end` 가 이미 왔는지부터 본다 — 죽었다고 보고된 pid 가 사실은
+    그 찰나에 정상 종료했을 수도 있는 벤인 레이스를, `_alive()` 보다 먼저
+    확인해 `normal` 로 되돌린다. 매치가 없을 때만 `_alive()`/로그 mtime 을
+    본다.
+    """
+    now = time.time() if now is None else now
+    alive_fn = _alive if alive_fn is None else alive_fn
+    events_path = _events_path(work)
+    if not events_path.exists():
+        return "normal"
+    events = []
+    for line in events_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict):
+            events.append(ev)
+    start_idx = None
+    for i in range(len(events) - 1, -1, -1):
+        if events[i].get("type") == "session-start":
+            start_idx = i
+            break
+    if start_idx is None:
+        return "normal"
+    if any(ev.get("type") == "session-end" for ev in events[start_idx + 1:]):
+        return "normal"
+    detail = events[start_idx].get("detail") or {}
+    pid = detail.get("pid")
+    if not alive_fn(pid):
+        return "crashed"
+    log_path = Path(str(work) + ".session.log")
+    if log_path.exists():
+        silent_min = (now - log_path.stat().st_mtime) / 60
+        if silent_min > WATCHDOG_SILENCE_MIN:
+            return "stalled"
+    return "in-progress"
+
+
 def fail_closed_downgrade(outcome: str, issue: int | None, blocked: list,
                           new_commit: bool, uncommitted: list,
                           already_delivered: bool = False) -> str:
@@ -1345,19 +1390,27 @@ def watchdog_check_one(key: str, entry: dict, now: float | None = None,
     return anomalies
 
 
-def roster_watchdog() -> int:
+def roster_watchdog(auto_respawn: bool = False) -> int:
     """`spawn.py watchdog` — 살아있는 모든 역할 세션을 한 번 스캔해서 이상
     신호를 사람이 읽을 수 있게 출력한다. observe-only: 아무 것도 고치거나
     죽이지 않는다. 오케스트레이터가 10-15분 간격으로 반복 호출한다
-    (이슈 #90 phase-2 프로포절)."""
+    (이슈 #90 phase-2 프로포절).
+
+    `auto_respawn=True` (이슈 #132): 죽은 로스터 엔트리도 스캔 대상에
+    넣어(원래는 살아있는 것만 봤다) `session_end_verdict` 를 매겨, `crashed`
+    에 한해서만 재스폰/상한-코멘트를 시도한다. `stalled` 는 여전히
+    보고만 한다 — 아무 것도 고치거나 죽이지 않는다는 계약은 그대로다."""
     d = _roster_load()
     if not d:
         print("돌고 있는 역할 세션 없음")
         return 0
     state = _watchdog_state_load()
+    respawn_state = _respawn_state_load() if auto_respawn else {}
     found_any = False
     for key, e in sorted(d.items()):
         if not _alive(e.get("pid", 0)):
+            if auto_respawn:
+                _auto_respawn_check(key, e, respawn_state)
             continue
         anomalies = watchdog_check_one(key, e, state=state)
         if anomalies:
@@ -1411,6 +1464,109 @@ def _prior_event_details(events_path: Path, ev_type: str) -> set:
         if isinstance(ev, dict) and ev.get("type") == ev_type:
             out.add(ev.get("detail"))
     return out
+
+
+RESPAWN_STATE = ROOT / "runs" / "respawn_state.json"
+RESPAWN_MAX_ATTEMPTS = 2
+_CRASH_COMMENT_MARKER = "[on-the-record] {key}: crashed, 재스폰 상한({cap}) 도달"
+
+
+def _respawn_state_load() -> dict:
+    try:
+        return json.loads(RESPAWN_STATE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _respawn_state_save(d: dict) -> None:
+    RESPAWN_STATE.parent.mkdir(exist_ok=True)
+    RESPAWN_STATE.write_text(json.dumps(d, indent=2, ensure_ascii=False))
+
+
+def _post_crash_comment(root: Path, issue: int, key: str, work: str, log: str) -> None:
+    """재스폰 상한(2) 도달 시 이슈에 남기는 코멘트. 멱등: 고정 마커 문자열을
+    기존 코멘트에서 먼저 찾는다(`_issue_comments`/`approve_scope` 와 같은
+    read-then-check 패턴) — 워치독을 반복 호출해도 두 번째 코멘트는 없다."""
+    marker = _CRASH_COMMENT_MARKER.format(key=key, cap=RESPAWN_MAX_ATTEMPTS)
+    if any(marker in c.get("body", "") for c in _issue_comments(root, issue)):
+        return
+    slug = _repo_slug(root)
+    if not slug:
+        return
+    body = (f"{marker}\n\n"
+            f"워크스페이스: {work}\n로그: {log}\n\n"
+            f"{RESPAWN_MAX_ATTEMPTS}회 자동 재스폰을 모두 소진했다 — 사람이 개입해야 한다.")
+    subprocess.run(["gh", "api", f"repos/{slug}/issues/{issue}/comments",
+                    "-f", f"body={body}"], cwd=root, capture_output=True, text=True)
+
+
+def _auto_respawn_check(key: str, entry: dict, state: dict) -> None:
+    """죽은 로스터 엔트리 하나에 대해 `crashed` 인지 판정하고, 그렇다면 상한
+    안에서 재스폰을 시도하거나(2회 미만) 상한 코멘트를 남긴다(2회 도달).
+    `stalled`/`normal`/`in-progress` 는 그냥 보고만 하고 끝난다(관찰-전용
+    계약 유지, 이슈 #132)."""
+    work = entry.get("work")
+    issue = entry.get("issue")
+    role = entry.get("role")
+    if not work or issue is None or not role:
+        return
+    verdict = session_end_verdict(work)
+    print(f"[watchdog] {key}: {verdict}")
+    if verdict != "crashed":
+        return
+    events_path = _events_path(work)
+    events = []
+    if events_path.exists():
+        for line in events_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(ev, dict):
+                events.append(ev)
+    start_ts = None
+    for ev in reversed(events):
+        if ev.get("type") == "session-start":
+            start_ts = (ev.get("detail") or {}).get("ts")
+            break
+    already_claimed = any(
+        ev.get("type") == "respawn-attempt"
+        and isinstance(ev.get("detail"), dict)
+        and ev["detail"].get("session_start_ts") == start_ts
+        for ev in events)
+    if already_claimed:
+        return
+    attempts = state.get(key, {}).get("attempts", 0)
+    root = Path(work)
+    if attempts >= RESPAWN_MAX_ATTEMPTS:
+        _post_crash_comment(root, issue, key, work, entry.get("log", ""))
+        return
+    # 위의 already_claimed 은 events.jsonl 을 읽기만 한다 — 두 watchdog
+    # 프로세스가 동시에 이 지점에 도달하면 둘 다 통과한다(실측: warrant-hunter
+    # 리포트, 스레드 두 개로 재현: 둘 다 _spawn_one 을 호출해 같은 워크스페이스
+    # 에 중복 세션이 뜬다). 실제 락은 이 원자적 파일 생성 하나뿐이다 —
+    # O_CREAT|O_EXCL 은 POSIX 에서 프로세스 간에도 원자적이라, 두 워치독 중
+    # 정확히 하나만 이 파일을 만들 수 있다.
+    claim_path = Path(str(work) + f".respawn-claim-{start_ts}")
+    try:
+        fd = os.open(str(claim_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        return
+    task_path = Path(str(work) + ".task.txt")
+    if not task_path.exists():
+        print(f"[watchdog] {key}: crashed 인데 {task_path} 가 없어 재스폰 불가 "
+              f"— 사람이 직접 재스폰해야 한다", file=sys.stderr)
+        return
+    task = task_path.read_text(encoding="utf-8")
+    attempt_n = attempts + 1
+    _append_event(events_path, "respawn-attempt",
+                  {"session_start_ts": start_ts, "attempt": attempt_n})
+    state[key] = {"attempts": attempt_n}
+    _respawn_state_save(state)
+    print(f"[watchdog] {key}: crashed — 재스폰 시도 {attempt_n}/{RESPAWN_MAX_ATTEMPTS}",
+          file=sys.stderr)
+    _spawn_one(work, role, task, unattended=True, issue=issue, bounded=True)
 
 
 def _read_offset(offset_path: Path) -> int:
@@ -1777,6 +1933,9 @@ def main() -> int:
                     help="분 단위. role task/watch 가 이벤트 없이 블록하는 최대 시간 (기본 5)")
     ap.add_argument("--role", dest="watch_role",
                     help="watch: 같은 이슈에 역할이 여럿 기록돼 있을 때 지정")
+    ap.add_argument("--auto-respawn", action="store_true",
+                    help="watchdog: crashed 세션에 한해 최대 2회 자동 재스폰, "
+                         "상한 도달 시 이슈 코멘트 (기본 off, 관찰-전용 유지)")
     a = ap.parse_args()
 
     if a.role == "init":
@@ -1785,7 +1944,7 @@ def main() -> int:
     if a.role == "ps":
         return roster_ps()
     if a.role == "watchdog":
-        return roster_watchdog()
+        return roster_watchdog(auto_respawn=a.auto_respawn)
     if a.role == "kill":
         if not a.task or a.issue is None:
             sys.exit("사용법: spawn.py kill <역할> --issue <n>")
@@ -2057,6 +2216,12 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         cwd = issue_workspace(cwd, issue, role)
         br = checkout_issue_branch(cwd, issue, role)
         print(f"[{role}] 격리 작업 디렉토리: {cwd}  (브랜치 {br})", file=sys.stderr)
+        # 원본(프리픽스 붙기 전) 맡길 일을 한 번만 저장 — 재스폰(다른 spawn.py
+        # 프로세스일 수 있다)이 이걸 읽어 그대로 넘기면, 아래에서 프리픽스를
+        # 다시 붙여도 중복되지 않는다 (이슈 #132).
+        task_path = Path(str(cwd) + ".task.txt")
+        if not task_path.exists():
+            task_path.write_text(task, encoding="utf-8")
         task = (f"당신의 이슈: #{issue} (subject issue-{issue}, 브랜치 {br}).\n"
                 f"gh issue view {issue} 로 이슈를 먼저 읽어라.\n"
                 f"완료의 정의: 변경이 이 브랜치에 **커밋**되고 push 되어 PR 로\n"
@@ -2146,6 +2311,13 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             "work": str(cwd), "log": str(log_path),
             "before_head": before_head,  # 이슈 #90 watchdog signal 4 재료
         })
+        if issue is not None:
+            # 크래시가 roster_remove/종료 이벤트 사이에서 나면 이 이전엔
+            # events.jsonl 에 아무 흔적도 안 남았다(실측: survey.md 사건 #2) —
+            # append-only 라 크래시에도 살아남는 이 기록이 session_end_verdict
+            # 의 기준선이다 (이슈 #132).
+            _append_event(events_path, "session-start",
+                          {"pid": proc.pid, "ts": int(time.time())})
         try:
             proc.stdin.write(task)
             proc.stdin.close()
