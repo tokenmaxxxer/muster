@@ -18,7 +18,9 @@
 """
 from __future__ import annotations
 import argparse
+import contextlib
 import re
+import fcntl
 import hashlib
 import json
 import os
@@ -1244,6 +1246,19 @@ def fail_closed_downgrade(outcome: str, issue: int | None, blocked: list,
 ROSTER = ROOT / "runs" / "active.json"
 
 
+@contextlib.contextmanager
+def _roster_locked():
+    """runs/active.json 의 load-mutate-save 구간을 프로세스 간에 직렬화한다."""
+    lock_path = ROSTER.with_name(ROSTER.name + ".lock")
+    lock_path.parent.mkdir(exist_ok=True)
+    with open(lock_path, "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
 def _roster_load() -> dict:
     try:
         return json.loads(ROSTER.read_text())
@@ -1265,15 +1280,17 @@ def _alive(pid: int) -> bool:
 
 
 def roster_register(key: str, entry: dict) -> None:
-    d = _roster_load()
-    d[key] = entry
-    _roster_save(d)
+    with _roster_locked():
+        d = _roster_load()
+        d[key] = entry
+        _roster_save(d)
 
 
 def roster_remove(key: str) -> None:
-    d = _roster_load()
-    if d.pop(key, None) is not None:
-        _roster_save(d)
+    with _roster_locked():
+        d = _roster_load()
+        if d.pop(key, None) is not None:
+            _roster_save(d)
 
 
 def roster_ps() -> int:
