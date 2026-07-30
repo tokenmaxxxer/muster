@@ -589,6 +589,64 @@ def t_writeset_declared():
         assert any("write-set 이탈" in b for b in gates.writeset(Path(td), {}))
 
 
+def _record_repo(td: str, role: str, record_fields: dict, frontmatter: str) -> Path:
+    """`record_enums` 전용 픽스처: roles/<role>.json + 변경된 record 한 개."""
+    work = _repo(td)
+    (work / "roles").mkdir()
+    (work / "roles" / f"{role}.json").write_text(
+        json.dumps({"record_fields": record_fields}))
+    run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                    capture_output=True, check=True)
+    run("add", "-A"); run("commit", "-qm", "roles")
+    run("branch", "-f", "origin/main")
+    rep = work / "docs" / "issue-100" / "reports"
+    rep.mkdir(parents=True)
+    (rep / f"{role}.md").write_text(f"---\n{frontmatter}\n---\n\n본문\n")
+    return work
+
+
+def t_record_enums_out_of_enum_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        _record_repo(td, "feasibility", {"verdict": ["go", "no-go", "conditional"]},
+                     'verdict: go (조건부 → 측정 필요)')
+        bad = gates.record_enums(Path(td), {})
+        assert bad and "verdict" in bad[0] and "feasibility.json" in bad[0], bad
+
+
+def t_record_enums_in_enum_passes():
+    with tempfile.TemporaryDirectory() as td:
+        _record_repo(td, "feasibility", {"verdict": ["go", "no-go", "conditional"]},
+                     "verdict: go")
+        assert gates.record_enums(Path(td), {}) == []
+
+
+def t_record_enums_undeclared_field_passes():
+    with tempfile.TemporaryDirectory() as td:
+        _record_repo(td, "feasibility", {}, "kind: feasibility-record\nverdict: go")
+        assert gates.record_enums(Path(td), {}) == []
+
+
+def t_record_enums_missing_role_file_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        work = _repo(td)
+        rep = work / "docs" / "issue-100" / "reports"
+        rep.mkdir(parents=True)
+        (rep / "feasibility.md").write_text("---\nverdict: go\n---\n\n본문\n")
+        run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                        capture_output=True, check=True)
+        run("add", "-A"); run("commit", "-qm", "record only")
+        bad = gates.record_enums(Path(td), {})
+        assert bad and "역할 정의를 읽을 수 없어" in bad[0], bad
+
+
+def t_record_enums_loop_state_out_of_set_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        _record_repo(td, "qa", {"loop_state": ["handed-off"]},
+                     "loop_state: made-up-state")
+        bad = gates.record_enums(Path(td), {})
+        assert bad and "loop_state" in bad[0], bad
+
+
 def t_dep_names():
     # 한 줄이든 여러 줄이든 같은 집합이 나와야 한다 (줄 단위 파싱이면 깨진다)
     flat = '{"dependencies":{"left-pad":"^1.0.0"},"devDependencies":{"jest":"29"}}'

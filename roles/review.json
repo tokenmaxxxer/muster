@@ -14,5 +14,8 @@
   },
   "decides": "만들어진 것이 명세와 일치하는가",
   "use_when": "coding 커밋이 랜딩됐고 요구사항 대비 감사가 필요할 때. 빌더 의도는 안 읽는다",
-  "produces": "요구사항별 Present|Surface|Absent|Incorrect|Unverifiable"
+  "produces": "요구사항별 Present|Surface|Absent|Incorrect|Unverifiable",
+  "record_fields": {
+    "loop_state": ["reported"]
+  }
 }
