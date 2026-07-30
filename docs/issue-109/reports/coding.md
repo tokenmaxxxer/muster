@@ -86,6 +86,18 @@ of this write set.
   existing `origin/main` marker `_repo()` already sets, matching the
   pattern every other fixture in this file uses.
 
+## Hunt
+
+warrant-hunter dispatched at phase-2 completion (stance: rotated —
+"ON_THE_RECORD_ROOT resolution for record_enums"). Verdict: NO FINDING.
+Traced spawn.py's existing `ROOT` role-resolution pattern (spawn.py:32) and
+confirmed gates.py's new `ON_THE_RECORD_ROOT` mirrors it one directory up,
+that the plugin/marketplace deployment and `directive.sh`'s checkout
+resolution keep `gates.py` inside the same resolved checkout, that symlinked
+entry points still resolve correctly, and that fail-closed behavior on a
+missing role file is preserved. Full record:
+docs/reports/2026-07-30-hunt-issue-109-record-enums-root.md.
+
 ## Open findings
 
 None open. No blocking finding has been addressed to this record.
