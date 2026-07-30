@@ -590,15 +590,17 @@ def t_writeset_declared():
 
 
 def _enum_record_repo(td: str, role: str, record_fields: dict, frontmatter: str) -> Path:
-    """`record_enums` 전용 픽스처: roles/<role>.json + 변경된 record 한 개."""
-    work = _repo(td)
-    (work / "roles").mkdir()
-    (work / "roles" / f"{role}.json").write_text(
+    """`record_enums` 전용 픽스처: 별도 on-the-record 체크아웃에
+    roles/<role>.json 을 두고 (gates.ON_THE_RECORD_ROOT 를 그쪽으로
+    가리키게 하고) work repo 에는 변경된 record 한 개만 둔다. 호출자가
+    gates.ON_THE_RECORD_ROOT 를 저장/복원해야 한다."""
+    otr = Path(td) / "otr"
+    (otr / "roles").mkdir(parents=True)
+    (otr / "roles" / f"{role}.json").write_text(
         json.dumps({"record_fields": record_fields}))
-    run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
-                                    capture_output=True, check=True)
-    run("add", "-A"); run("commit", "-qm", "roles")
-    run("branch", "-f", "origin/main")
+    gates.ON_THE_RECORD_ROOT = otr
+
+    work = _repo(td)
     rep = work / "docs" / "issue-100" / "reports"
     rep.mkdir(parents=True)
     (rep / f"{role}.md").write_text(f"---\n{frontmatter}\n---\n\n본문\n")
@@ -606,45 +608,88 @@ def _enum_record_repo(td: str, role: str, record_fields: dict, frontmatter: str)
 
 
 def t_record_enums_out_of_enum_blocks():
-    with tempfile.TemporaryDirectory() as td:
-        _enum_record_repo(td, "feasibility", {"verdict": ["go", "no-go", "conditional"]},
-                     'verdict: go (조건부 → 측정 필요)')
-        bad = gates.record_enums(Path(td), {})
-        assert bad and "verdict" in bad[0] and "feasibility.json" in bad[0], bad
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            _enum_record_repo(td, "feasibility", {"verdict": ["go", "no-go", "conditional"]},
+                         'verdict: go (조건부 → 측정 필요)')
+            bad = gates.record_enums(Path(td), {})
+            assert bad and "verdict" in bad[0] and "feasibility.json" in bad[0], bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
 
 
 def t_record_enums_in_enum_passes():
-    with tempfile.TemporaryDirectory() as td:
-        _enum_record_repo(td, "feasibility", {"verdict": ["go", "no-go", "conditional"]},
-                     "verdict: go")
-        assert gates.record_enums(Path(td), {}) == []
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            _enum_record_repo(td, "feasibility", {"verdict": ["go", "no-go", "conditional"]},
+                         "verdict: go")
+            assert gates.record_enums(Path(td), {}) == []
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
 
 
 def t_record_enums_undeclared_field_passes():
-    with tempfile.TemporaryDirectory() as td:
-        _enum_record_repo(td, "feasibility", {}, "kind: feasibility-record\nverdict: go")
-        assert gates.record_enums(Path(td), {}) == []
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            _enum_record_repo(td, "feasibility", {}, "kind: feasibility-record\nverdict: go")
+            assert gates.record_enums(Path(td), {}) == []
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
 
 
 def t_record_enums_missing_role_file_blocks():
-    with tempfile.TemporaryDirectory() as td:
-        work = _repo(td)
-        rep = work / "docs" / "issue-100" / "reports"
-        rep.mkdir(parents=True)
-        (rep / "feasibility.md").write_text("---\nverdict: go\n---\n\n본문\n")
-        run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
-                                        capture_output=True, check=True)
-        run("add", "-A"); run("commit", "-qm", "record only")
-        bad = gates.record_enums(Path(td), {})
-        assert bad and "역할 정의를 읽을 수 없어" in bad[0], bad
+    """on-the-record 체크아웃 자체에 roles/<role>.json 이 없다 —
+    보드 문제가 아니라 on-the-record 설치 문제로 막혀야 한다."""
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            otr = Path(td) / "otr"
+            otr.mkdir()
+            gates.ON_THE_RECORD_ROOT = otr
+            work = _repo(td)
+            rep = work / "docs" / "issue-100" / "reports"
+            rep.mkdir(parents=True)
+            (rep / "feasibility.md").write_text("---\nverdict: go\n---\n\n본문\n")
+            run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                            capture_output=True, check=True)
+            run("add", "-A"); run("commit", "-qm", "record only")
+            bad = gates.record_enums(Path(td), {})
+            assert bad and "역할 정의를 읽을 수 없어" in bad[0], bad
+            assert str(otr) in bad[0], bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_record_enums_no_roles_in_work_repo_passes():
+    """보드(work repo)에 roles/ 가 아예 없어도 — on-the-record 체크아웃에
+    유효한 role 정의가 있으면 — 경고 없이 통과해야 한다(이슈의 핵심 재현)."""
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _enum_record_repo(td, "feasibility",
+                                 {"verdict": ["go", "no-go", "conditional"]},
+                                 "verdict: go")
+            assert not (work / "roles").exists()
+            bad = gates.record_enums(Path(td), {})
+            assert bad == []
+            assert not any("역할 정의를 읽을 수 없어" in b for b in bad)
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
 
 
 def t_record_enums_loop_state_out_of_set_blocks():
-    with tempfile.TemporaryDirectory() as td:
-        _enum_record_repo(td, "qa", {"loop_state": ["handed-off"]},
-                     "loop_state: made-up-state")
-        bad = gates.record_enums(Path(td), {})
-        assert bad and "loop_state" in bad[0], bad
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            _enum_record_repo(td, "qa", {"loop_state": ["handed-off"]},
+                         "loop_state: made-up-state")
+            bad = gates.record_enums(Path(td), {})
+            assert bad and "loop_state" in bad[0], bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
 
 
 def _record_repo(td: str, subject: str, role: str, text: str) -> Path:
