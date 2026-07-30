@@ -83,6 +83,26 @@ class ApproveScope(unittest.TestCase):
         rc = spawn.approve_scope(str(self.root), 4)
         self.assertEqual(rc, 0)
 
+    def test_failed_commit_rolls_back_and_does_not_fake_success(self):
+        record = _record(self.root, "issue-6", "product", "scope-proposed")
+        _approvers(self.root, "alice")
+        self._patch_gh([{"login": "alice", "body": "APPROVE issue-6/scope"}])
+
+        def fake_run(cmd, **kw):
+            class R:
+                returncode = 1
+                stdout = ""
+                stderr = "git: 커밋 실패 (테스트)"
+            import subprocess as sp
+            raise sp.CalledProcessError(1, cmd, output="", stderr=R.stderr)
+        spawn.subprocess.run = fake_run
+
+        with self.assertRaises(SystemExit):
+            spawn.approve_scope(str(self.root), 6)
+        # 커밋이 실패했으니 파일은 scope-proposed 로 되돌아가 있어야 한다 —
+        # 안 그러면 다음 호출이 idempotency 가드에 걸려 커밋 없이 성공을 보고한다.
+        self.assertEqual(spawn.frontmatter(record).get("loop_state"), "scope-proposed")
+
     def test_wrong_loop_state_is_rejected(self):
         _record(self.root, "issue-5", "product", "in-progress")
         _approvers(self.root, "alice")

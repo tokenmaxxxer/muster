@@ -872,11 +872,24 @@ def approve_scope(cwd: str, issue: int) -> int:
         sys.exit(f"{record_path} 에서 loop_state 줄을 찾지 못해 고치지 못했다.")
     record_path.write_text(new_text, encoding="utf-8")
 
+    # git add/commit 이 중간에 실패하면(정체성 없음, 훅 거부, 락, 디스크 없음)
+    # 파일은 scope-approved 인데 커밋은 없는 상태가 남는다 — 다음 호출이
+    # idempotency 가드(state == "scope-approved")에 걸려 커밋 없이 성공을
+    # 보고한다(실측: warrant-hunter, 2026-07-30). 파일 쓰기를 되돌려 그 상태를
+    # 만들지 않는다.
     rel = str(record_path.relative_to(root))
-    subprocess.run(["git", "-C", str(root), "add", rel], check=True)
-    subprocess.run(["git", "-C", str(root), "commit", "-m",
-                    f"{subject}: scope-approved (approved by {match['login']} "
-                    f"via spawn.py approve-scope)"], check=True)
+    try:
+        subprocess.run(["git", "-C", str(root), "add", rel],
+                       check=True, capture_output=True, text=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-m",
+                        f"{subject}: scope-approved (approved by {match['login']} "
+                        f"via spawn.py approve-scope)"],
+                       check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        record_path.write_text(text, encoding="utf-8")
+        sys.exit(f"커밋 실패 — 기록을 되돌렸다({record_path}), 다시 시도해도 된다: "
+                 f"{e.stderr.strip() if e.stderr else e}")
+
     print(f"{subject}: {front} 기록을 scope-approved 로 올리고 커밋했다 — "
           f"{match['login']} 의 승인. push 는 별도로 한다.")
     return 0

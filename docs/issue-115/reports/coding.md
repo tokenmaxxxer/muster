@@ -98,8 +98,31 @@ by human or orchestrator, ever.
 
 Warrant-hunter dispatched at phase-2 completion (stance: silent-failure —
 does `approve-scope` ever report success without having actually written
-the promotion, or refuse silently with exit 0?).
+the promotion, or refuse silently with exit 0?). FINDING:
+`docs/reports/2026-07-30-hunt-scope-approval-interface.md` — the record's
+`loop_state: scope-approved` file write ran before the unguarded `git
+add`/`git commit`; a commit failure left the file promoted with no commit,
+and the idempotency guard (file-state-only) would then report success on
+every later re-run without ever committing. Addressed same-turn:
+`approve_scope` now wraps the git calls, and on `CalledProcessError` rewrites
+the record back to its pre-promotion text before exiting non-zero — no
+partially-promoted state can survive a failed commit. New regression test
+`test_failed_commit_rolls_back_and_does_not_fake_success` (patches
+`subprocess.run` to raise `CalledProcessError`, asserts the file reads back
+`scope-proposed`). `python3 test_approve_scope.py -v` — 6/6 pass after the
+fix.
+
+## resolved_findings
+
+- finder: coding:warrant-hunter (stance: silent-failure)
+  finding: unguarded git add/commit after file write → idempotency guard
+  can report false success on a subject whose commit actually failed
+  report: docs/reports/2026-07-30-hunt-scope-approval-interface.md
+  resolution: spawn.py `approve_scope` — git calls wrapped, file write
+  rolled back on `CalledProcessError`; test added
+  code_sha: this branch's phase-2 fix-up commit
 
 ## Open findings
 
-None open. No blocking finding has been addressed to this record.
+None open. The one finding raised (above) is resolved in this same phase-2
+delivery, same commit set.
