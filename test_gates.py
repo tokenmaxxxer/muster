@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import gates
 import spawn
 import pr_reference
+import closure_sweep
 
 
 def _board(td: str, subject: str, **roles: str) -> Path:
@@ -611,6 +612,32 @@ def t_pr_reference_phase2_requires_closes():
     # 다른 이슈를 닫는 문구는 이 이슈를 통과시키지 않는다
     bad2 = pr_reference.check_body(126, "Closes #999", "phase2")
     assert bad2, bad2
+
+
+def t_closure_sweep_closed_issue_open_pr_violates():
+    kind = closure_sweep.classify("CLOSED", "OPEN", "see #135", 135)
+    assert kind == closure_sweep.OPEN_PR_ON_CLOSED_ISSUE, kind
+
+
+def t_closure_sweep_merged_delivery_issue_open_violates():
+    kind = closure_sweep.classify("OPEN", "MERGED", "Closes #135", 135)
+    assert kind == closure_sweep.MERGED_DELIVERY_ISSUE_OPEN, kind
+
+
+def t_closure_sweep_merged_phase1_plain_ref_not_violation():
+    # phase-1 제안 PR — merged 여도 plain #n 참조만으로는 이슈를 닫을 의무가 없다
+    kind = closure_sweep.classify("OPEN", "MERGED", "phase 1 proposal, see #135", 135)
+    assert kind is None, kind
+
+
+def t_closure_sweep_closed_issue_no_pr_ref_not_violation():
+    kind = closure_sweep.classify("CLOSED", "OPEN", "unrelated PR, see #999", 135)
+    assert kind is None, kind
+
+
+def t_closure_sweep_everything_consistent_not_violation():
+    assert closure_sweep.classify("OPEN", "OPEN", "see #135", 135) is None
+    assert closure_sweep.classify("CLOSED", "MERGED", "Closes #135", 135) is None
 
 
 if __name__ == "__main__":

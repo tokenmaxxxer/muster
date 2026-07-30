@@ -1936,6 +1936,8 @@ def main() -> int:
     ap.add_argument("--auto-respawn", action="store_true",
                     help="watchdog: crashed 세션에 한해 최대 2회 자동 재스폰, "
                          "상한 도달 시 이슈 코멘트 (기본 off, 관찰-전용 유지)")
+    ap.add_argument("--post", action="store_true",
+                    help="closure-sweep: 위반을 해당 이슈에 코멘트로도 남긴다 (기본은 stdout 만)")
     a = ap.parse_args()
 
     if a.role == "init":
@@ -1945,6 +1947,21 @@ def main() -> int:
         return roster_ps()
     if a.role == "watchdog":
         return roster_watchdog(auto_respawn=a.auto_respawn)
+    if a.role == "closure-sweep":
+        # 보드 전체를 훑어 이슈-PR 종결 불일치를 보고한다 — 명시적 단발 호출
+        # (approve-scope 와 마찬가지로 watchdog 틱에 자동으로 안 물린다, 이슈 #135).
+        sys.path.insert(0, str((Path(__file__).parent / "gates").resolve()))
+        import closure_sweep
+        root = Path(a.cwd).resolve()
+        violations = closure_sweep.find_violations(root)
+        if not violations:
+            print("종결 일관성 스윕: 위반 없음")
+            return 0
+        print("종결 일관성 스윕: 위반 발견")
+        print(closure_sweep.format_report(violations))
+        if a.post:
+            closure_sweep.post_sweep_comments(root, violations)
+        return 1
     if a.role == "kill":
         if not a.task or a.issue is None:
             sys.exit("사용법: spawn.py kill <역할> --issue <n>")
