@@ -43,14 +43,16 @@ step QA is on" is fine to know; "why it is on that step" must not be.
 
 ## 2. The state-exposure contract — on-the-record does not own it
 
-**`docs/specs/role-handoff-contract.md` (v2, `status: final`) is the authority
-here, not this document.** It lives in `review-agent-rulebook` and defines the
-shared record format for all six roles. What follows is only what on-the-record needs
+**The role-handoff contract (v3) is the authority here, not this document.**
+It lives only in `core/contract/role-handoff-contract.md` in
+`tokenmaxxxer-core` — repos carry no copy — and defines the shared record
+format for all nine roles. What follows is only what on-the-record needs
 in order to read the board; where the two disagree, the contract wins.
 
 The board is fully in-repo (contract §10): every role writes one status record
-at `docs/reports/records/<subject>/<role>.md`, inside doctrine's `reports`
-bucket. on-the-record reads the frontmatter and nothing else.
+at `docs/issue-<n>/reports/<role>.md`, `main`-merged only. The board opt-in
+marker is `docs/specs/approvers.md`. on-the-record reads the frontmatter and
+nothing else.
 
 ```yaml
 kind: feasibility-record
@@ -83,19 +85,19 @@ Two things on-the-record's reader has to get right, both named by the contract:
 ### Transition state, stated plainly
 
 The contract's own text says landing it in each rulebook is separate work, "one
-proposal per repo" — and as of 2026-07-27 **all eight rulebooks have landed it:
-every repository has a v2 board.** on-the-record reads the v2 board first and, if a
+proposal per repo" — and as of 2026-07-27 **all nine rulebooks have landed it:
+every repository has a v3 board.** on-the-record reads the v3 board first and, if a
 given repo somehow still lacks one, falls back to the v1 locations
 (`review-record.md`, `feasibility-record.md`, `state.md`, `product-record.md`)
-— not to use them, but to say *"this repo has not moved to v2 yet"* instead of
+— not to use them, but to say *"this repo has not moved to v3 yet"* instead of
 the flat "nothing in progress" that a v1 repo would otherwise get. **A false
 quiet is the failure mode being avoided.**
 
 `roles/qa.json` no longer carries `QA_WORKSPACE` or a sandbox `allowWrite`
 scoped to it. Contract §10 abolished that external tree, and the qa rulebook
-has since landed v2: qa's evidence — intake profile, bug reports, regression
+has since landed v3: qa's evidence — intake profile, bug reports, regression
 records, run stats — now lives entirely inside the target repo, under
-`docs/reports/records/<subject>/qa.md` and `docs/reports/records/<subject>/qa/**`,
+`docs/issue-<n>/reports/qa.md` and `docs/issue-<n>/reports/qa/**`,
 the same place every other role's record lives. qa's scratch space for a run
 is whatever session-scoped temp directory the run already has; no dedicated
 external workspace and no role-file default are needed for it.
@@ -174,18 +176,19 @@ lets a command inside the sandbox edit `~/.claude/settings.json` or an
 executable on `$PATH` and **widen its own permissions on the next run.** Leave
 it on.
 
-## 5. Approval — tokens
+## 5. Approval — a GitHub act
 
-`qa-cycle`'s four human-only transitions (`Confirmed-Defect`, `Go`, `No-Go`,
-`Shipped-Under-Exception`) require a verdict token minted by `signoff`, and the
-token is consumed the moment it passes.
+Approval is a GitHub act: an `APPROVED` PR review, or a comment that is
+exactly `APPROVE issue-<n>/<role>`, from a login in
+`docs/specs/approvers.md`. `gh-guard` keeps that honest in the default
+single-account setup.
 
-What a token actually guarantees is not "a human did this" but **"an actor
-cannot mint its own approval."**
+What that guarantees is not "a human did this" but **"an actor cannot approve
+its own change."**
 
 **Whether an agent may ever hold that seat is settled elsewhere, and currently
 settled as no.** Contract §8 ("The human's seat") names four judgment points
-reserved for a human — minting or retiring a `subject`, the verdict tokens the
+reserved for a human — minting or retiring a `subject`, the approvals the
 contract reserves (qa's is-this-a-defect call), resolving cross-role disputes,
 and **approving scope changes**. warrant halting a headless coding run at
 `proposed → approved` is that clause being honoured, not a defect.
@@ -211,8 +214,9 @@ location without updating all three together.
    to that plugin's gate.
 3. **Every role gets its own session,** because the session is the boundary of
    plugin scoping.
-4. **An actor cannot mint its own approval.** Only a separate session in a
-   separate context can.
+4. **An actor cannot approve its own change.** Approval is a GitHub act — an
+   `APPROVED` review or an `APPROVE issue-<n>/<role>` comment from a login in
+   `approvers.md` — relayed by a separate session in a separate context.
 5. **Untrusted values are never interpolated into a shell.** A `$(…)` in an
    issue title executes — and anyone can open an issue, so that is remote code
    execution. Pass through env and quote.
@@ -229,7 +233,7 @@ location without updating all three together.
 | 2 | query state → pick a role | that on-the-record can dispatch without knowing an agent's internals |
 | 3 | qa bench on/off | that the rulebook earns its keep — the organisation's first measurement |
 | 4 | more trigger sources (issues, alerts) | that events arrive without passing through a person |
-| 5 | an approving agent | a token minted by a separate context |
+| 5 | an approving agent | a GitHub approval (review/comment) relayed by a separate context |
 
 ## 8. Unsettled
 

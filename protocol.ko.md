@@ -41,14 +41,14 @@
 
 ## 2. 상태 노출 계약 — on-the-record 의 것이 아니다
 
-**여기서의 권위는 이 문서가 아니라 `docs/specs/role-handoff-contract.md`
-(v2, `status: final`) 다.** `review-agent-rulebook` 에 있고 역할 6개의 공유 기록
-형식을 정의한다. 아래는 on-the-record 가 보드를 읽는 데 필요한 것만 추린 것이고, 둘이
+**여기서의 권위는 이 문서가 아니라 인계 계약(v3) 이다.** `tokenmaxxxer-core`
+의 `core/contract/role-handoff-contract.md` 에만 있고(레포에는 사본이 없다)
+역할 9개의 공유 기록 형식을 정의한다. 아래는 on-the-record 가 보드를 읽는 데 필요한 것만 추린 것이고, 둘이
 어긋나면 계약이 이긴다.
 
 보드는 전부 대상 레포 안에 있다(계약 §10). 각 역할이 상태 기록 하나를
-`docs/reports/records/<subject>/<역할>.md` 에 쓴다 — doctrine 의 `reports` 버킷
-안이다. on-the-record 는 frontmatter 만 읽는다.
+`docs/issue-<n>/reports/<역할>.md` 에 쓰고, `main` 머지분만 본다. 보드 opt-in
+마커는 `docs/specs/approvers.md` 다. on-the-record 는 frontmatter 만 읽는다.
 
 ```yaml
 kind: feasibility-record
@@ -78,18 +78,18 @@ on-the-record 의 리더가 반드시 지켜야 할 것 둘, 둘 다 계약이 �
 ### 이행 중이라는 사실을 그대로 적는다
 
 계약 본문이 스스로 말한다 — 각 룰북에 내리는 것은 별개 작업이고 "레포당 제안서
-하나"다. 2026-07-27 현재 **룰북 여덟 개 모두 내려왔다 — 모든 레포에 v2 보드가
-있다.** on-the-record 는 v2 보드를 먼저 읽고, 어느 레포가 그래도 보드가 없다면 v1
+하나"다. 2026-07-27 현재 **룰북 아홉 개 모두 내려왔다 — 모든 레포에 v3 보드가
+있다.** on-the-record 는 v3 보드를 먼저 읽고, 어느 레포가 그래도 보드가 없다면 v1
 자리(`review-record.md`, `feasibility-record.md`, `state.md`,
 `product-record.md`)를 확인한다 — 그걸 쓰기 위해서가 아니라, v1 레포가 받게 될
-밋밋한 "진행 중 아님" 대신 *"이 레포는 아직 v2 로 안 옮겨졌다"* 라고 말하기
+밋밋한 "진행 중 아님" 대신 *"이 레포는 아직 v3 로 안 옮겨졌다"* 라고 말하기
 위해서다. **피해야 할 실패는 거짓 고요다.**
 
 `roles/qa.json` 은 더 이상 `QA_WORKSPACE` 도, 거기로 한정된 샌드박스
 `allowWrite` 도 갖고 있지 않다. 계약 §10 이 그 외부 트리를 폐지했고, qa 룰북도
-이후 v2 로 내려왔다 — qa 의 증거(intake profile, 버그 리포트, 회귀 기록, 실행
+이후 v3 로 내려왔다 — qa 의 증거(intake profile, 버그 리포트, 회귀 기록, 실행
 통계)는 이제 대상 레포 안,
-`docs/reports/records/<subject>/qa.md` 와 `docs/reports/records/<subject>/qa/**`
+`docs/issue-<n>/reports/qa.md` 와 `docs/issue-<n>/reports/qa/**`
 에 다른 모든 역할의 기록과 같은 자리에 산다. qa 실행의 스크래치 공간은 그 실행이
 이미 갖고 있는 세션 임시 디렉터리이고, 별도의 외부 워크스페이스도 역할 파일의
 기본값도 필요 없다.
@@ -159,18 +159,18 @@ on-the-record 자체 마켓플레이스(`.claude-plugin/marketplace.json`)에도
 `~/.claude/settings.json` 이나 `$PATH` 의 실행파일을 고쳐 **다음 실행에서 자기
 권한을 넓힐 수 있다**. 끄지 않는다.
 
-## 5. 승인 — 토큰
+## 5. 승인 — GitHub 행위
 
-`qa-cycle` 의 사람 전용 전이 4개(`Confirmed-Defect`·`Go`·`No-Go`·
-`Shipped-Under-Exception`)는 `signoff` 가 발행한 verdict 토큰이 있어야 통과하고,
-통과하는 순간 토큰이 소모된다.
+승인은 GitHub 행위다: PR 의 `APPROVED` 리뷰, 또는 정확히
+`APPROVE issue-<n>/<role>` 문자열인 코멘트를 `docs/specs/approvers.md` 에
+등록된 로그인이 남기는 것. 1계정 기본 설정에서는 `gh-guard` 가 이를 지킨다.
 
-토큰이 실제로 보장하는 성질은 "사람이 했다"가 아니라 **"행위자가 자기 승인을
-스스로 만들 수 없다"** 이다.
+그것이 실제로 보장하는 성질은 "사람이 했다"가 아니라 **"행위자가 자기 변경을
+스스로 승인할 수 없다"** 이다.
 
 **에이전트가 그 자리에 앉을 수 있는가는 다른 곳에서 정해지고, 지금은 "안 된다"로
 정해져 있다.** 계약 §8("The human's seat")이 사람에게 유보된 판단 지점 넷을
-지목한다 — `subject` 의 발행과 회수, 계약이 사람에게 유보한 판정 토큰(qa 의
+지목한다 — `subject` 의 발행과 회수, 계약이 사람에게 유보한 승인(qa 의
 "이게 결함인가" 판정), 역할 간 분쟁 해소, 그리고 **범위 변경 승인**. 헤드리스
 coding 이 `proposed → approved` 에서 멈추는 것은 이 조항이 지켜지는 것이지
 결함이 아니다.
@@ -192,7 +192,9 @@ README 도 같은 정본을 따른다. PR 리뷰 Approve 는 승인 계정이 PR
 1. **on-the-record 는 상태를 쓰지 않는다.** 읽고, 역할을 고르고, 켤 뿐이다.
 2. **상태 파일은 한 플러그인만 쓴다.** 전이 통제는 그 플러그인의 게이트가 한다.
 3. **역할마다 세션이 다르다.** 플러그인 스코핑의 경계가 세션이기 때문이다.
-4. **승인은 행위자가 스스로 만들 수 없다.** 별도 세션·별도 컨텍스트에서만.
+4. **행위자는 자기 변경을 스스로 승인할 수 없다.** 승인은 GitHub 행위
+   (`APPROVED` 리뷰 또는 `approvers.md` 의 로그인이 남긴
+   `APPROVE issue-<n>/<role>` 코멘트)이고, 별도 세션·별도 컨텍스트가 중계한다.
 5. **신뢰할 수 없는 값을 셸에 보간하지 않는다.** 이슈 제목의 `$(…)` 가 실행된다 —
    이슈는 누구나 열 수 있으므로 원격 코드 실행이다. env 로 넘겨 인용한다.
 6. **재시도는 멱등하다.** 매 시도를 base + 계약에서 새로 시작한다.
@@ -206,7 +208,7 @@ README 도 같은 정본을 따른다. PR 리뷰 Approve 는 승인 계정이 PR
 | 2 | 상태 조회 → 역할 결정 | on-the-record 가 에이전트 내부를 모르고도 배차하는가 |
 | 3 | qa bench on/off | 룰북이 값을 하는가 (조직 최초의 실측) |
 | 4 | 트리거 소스 추가 (이슈·알럿) | 사건이 사람 손을 안 거치고 들어오는가 |
-| 5 | 승인 에이전트 | 토큰을 별도 컨텍스트가 발행 |
+| 5 | 승인 에이전트 | 별도 컨텍스트가 중계하는 GitHub 승인(리뷰/코멘트) |
 
 ## 8. 미확정
 
