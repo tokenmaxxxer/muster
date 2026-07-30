@@ -31,7 +31,9 @@ but a label never passes that gatekeeper. That state machine was removed.
 
 **① Query state.** Read what each agent exposes. Never write it.
 
-**② Pick a role.** Decide which role an event should wake.
+**② Pick a role.** Who runs next is not a table lookup — it is a judgment
+call made by reading the board directly (each subject's record and its
+`loop_state`).
 
 **③ Spawn an environment.** Bring up a headless session carrying that role's
 plugin set and boundary.
@@ -222,10 +224,5 @@ and **approving scope changes**. warrant halting a headless coding run at
 
 ## 8. Unsettled
 
-- **A WAKES-ON watcher** — contract §3 names "a future automated watcher, if one
-  is built" as the thing that could carry the table instead of a human. That is
-  on-the-record's job, and it implements §3's table rather than inventing a schedule.
-  Now that all eight rulebooks have a board, this is buildable but not yet
-  built.
 - **What calls on-the-record** — a person directly, cron, or an issue webhook. For
   stages 1–2 a person is enough. No long-running process is being built.
