@@ -316,10 +316,9 @@ python3 spawn.py                              # read the board (read-only)
 python3 spawn.py <role> "<task>" -C <repo>    # bring up that role
 python3 spawn.py <role> "x" --dry-run         # print the merged settings only
 python3 spawn.py <role> "x" --no-contract     # skip the contract precondition
-python3 spawn.py <role> "x" --unattended      # human absent: mint off, human gates stand
+python3 spawn.py <role> "x" --unattended      # human absent, human gates still stand
 python3 spawn.py doctor                       # measure hook firing on this CLI (once per version)
 python3 spawn.py drive -C <repo>              # no auto-routing table exists; stops immediately
-python3 spawn.py approve <kind> --subject <s> # mint an approval token yourself (needs a TTY)
 ```
 
 Authentication uses whatever is already logged in. No token, no secret.
