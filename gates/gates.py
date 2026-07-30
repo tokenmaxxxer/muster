@@ -33,6 +33,12 @@ PROTECTED_ROOT_DIRS = {"roles", "gates", "agents", "images", "profiles"}
 PROTECTED_GLOBS = ["*.pem", "*.key", "*.p12", ".env", ".env.*",
                    "auth.*", "auth_*", "*secret*", "*credential*", "*.keystore"]
 
+# docs/issue-<n>/reports/<role>.md — 보드 레코드 경로 형태. #100 의 record_enums
+# 와 같은 형태를 쓴다 (아직 main 에 없어 여기서 독립 정의).
+RECORD_PATH = re.compile(r"^docs/issue-[^/]+/reports/([^/]+)\.md$")
+# 코드펜스 밖에서, 한 줄 전체가 태그 하나뿐인 경우만 잔여물로 본다.
+_TOOL_TAG = re.compile(r"^\s*</?[A-Za-z][\w-]*(?:\s+[^<>]*)?/?>\s*$")
+
 REGISTRY = {
     "requirements.txt": "https://pypi.org/pypi/{}/json",
     "package.json": "https://registry.npmjs.org/{}",
@@ -292,7 +298,80 @@ def record_enums(d: Path, cfg: dict) -> list[str]:
     return bad
 
 
-ALL = {"writeset": writeset, "deps": deps, "record_enums": record_enums}
+def _changed_records(work: Path) -> list[str]:
+    """변경 파일 중 docs/issue-<n>/reports/<role>.md 형태만. 실패는 fail closed."""
+    files = changed_files(work)
+    return [f for f in files if RECORD_PATH.match(f)]
+
+
+def record_wellformed_in(work: Path) -> list[str]:
+    """`record_wellformed` 의 실질 검사. 라우터(d/"work")와 CI(repo 직접) 양쪽에서
+    같은 로직을 쓰기 위해 작업 디렉터리를 인자로 받는다."""
+    try:
+        records = _changed_records(work)
+    except RuntimeError as e:
+        return [str(e)]
+    bad = []
+    for path in records:
+        f = work / path
+        if not f.exists():
+            continue
+        text = f.read_text()
+        if not text.startswith("---"):
+            bad.append(f"레코드 frontmatter 파싱 불가: {path} — 시작 구분자(`---`) "
+                       "없음. loop_state/verdict 를 읽을 수 없어 wake 라우팅이 "
+                       "조용히 죽는다.")
+            continue
+        if len(text.split("---", 2)) < 3:
+            bad.append(f"레코드 frontmatter 파싱 불가: {path} — 닫는 구분자 없음. "
+                       "loop_state/verdict 를 읽을 수 없어 wake 라우팅이 조용히 "
+                       "죽는다.")
+    return bad
+
+
+def record_wellformed(d: Path, cfg: dict) -> list[str]:
+    """변경된 docs/issue-<n>/reports/<role>.md 가 well-formed `---`
+    frontmatter 블록을 가졌는지 검사한다. 파싱 실패는 '검사할 필드 없음'이
+    아니라 차단 사유다."""
+    return record_wellformed_in(d / "work")
+
+
+def record_no_tool_residue_in(work: Path) -> list[str]:
+    """`record_no_tool_residue` 의 실질 검사. 라우터/CI 양쪽에서 공유한다."""
+    try:
+        records = _changed_records(work)
+    except RuntimeError as e:
+        return [str(e)]
+    bad = []
+    for path in records:
+        f = work / path
+        if not f.exists():
+            continue
+        in_fence = False
+        for lineno, line in enumerate(f.read_text().splitlines(), start=1):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            m = _TOOL_TAG.match(line)
+            if m:
+                bad.append(f"레코드에 툴 태그 잔여물: {path}:{lineno} — "
+                           f"{line.strip()!r}. 에이전트 툴 출력이 레코드 본문에 "
+                           "새어들어왔다.")
+    return bad
+
+
+def record_no_tool_residue(d: Path, cfg: dict) -> list[str]:
+    """레코드 본문에 툴 호출 트랜스크립트가 새어들어온 흔적(고립된 XML 태그
+    한 줄)이 있는지 검사한다. 코드펜스 안은 제외한다."""
+    return record_no_tool_residue_in(d / "work")
+
+
+ALL = {"writeset": writeset, "deps": deps,
+       "record_enums": record_enums,
+       "record_wellformed": record_wellformed,
+       "record_no_tool_residue": record_no_tool_residue}
 
 
 def check(names: list[str], d: Path, cfg: dict) -> list[str]:
