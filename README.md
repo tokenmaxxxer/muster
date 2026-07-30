@@ -64,6 +64,23 @@ gates/        deterministic checks, run by spawn.py after a session. Zero LLM ca
 ledger/       the scorecard
 ```
 
+## Requirements
+
+**macOS or Linux.** `bash`, `python3`, `git`, and `gh` on `PATH`, and a
+GitHub account you can `gh auth login` with.
+
+**Native Windows is not supported — use WSL.** Two things make it structural
+rather than a porting gap: the entire enforcement plane is `.sh` hooks
+(`board-gate`, `approval-gate`, `gh-guard`, `directive`), and `spawn.py` drives
+role sessions with `os.fork()` / `os.setsid()` / `fcntl.flock()`. It fails at
+import rather than starting and enforcing nothing, which is the outcome to
+prefer: a session that runs with no gates looks like success.
+
+On macOS the sandbox is Seatbelt, already present. **On Linux the sandbox and
+the credential store have not been measured** — `bash`, `fork` and `flock` are
+all there, so the driver runs, but do not read that as a verified claim about
+isolation.
+
 ## Getting started (what the user actually sets up)
 
 Once, per machine:
