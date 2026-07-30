@@ -9,7 +9,7 @@ phase: 1
 files:
 - `on-the-record/commands/run.md`
 - `spawn.py`
-- `gates/gates.py`
+- `gates/gates.py` (possibly a new `gates/pr_reference.py` — see item 3)
 - `test_gates.py`
 - `protocol.md`, `protocol.ko.md`
 - `README.md`, `README.ko.md`
@@ -47,13 +47,26 @@ history.
 2. `spawn.py`: add a short comment on `approve_scope()` stating issue
    comments are canonical and the PR-comment union is a fallback, matching
    the fixed relay instruction — no logic change.
-3. `gates/gates.py`: new gate function checking the PR body (via
-   `gh pr view --json body` or the diff context already available to the
-   gate) contains `#<issue-n>` — `Closes #<issue-n>` required specifically
-   for phase-2 delivery PRs (detected the same way existing gates detect
-   phase, e.g. via the record's `loop_state`), plain `#<issue-n>` sufficient
-   for phase-1 proposal PRs. Missing reference fails closed with a message
-   naming the expected string. Add corresponding cases to `test_gates.py`.
+3. `gates/gates.py`: new gate function checking the PR body contains
+   `#<issue-n>` — `Closes #<issue-n>` required specifically for phase-2
+   delivery PRs, plain `#<issue-n>` sufficient for phase-1 proposal PRs.
+   Missing reference fails closed with a message naming the expected
+   string. Add corresponding cases to `test_gates.py`.
+
+   Design constraint (found by warrant-hunter during phase 1, see
+   `docs/reports/2026-07-30-hunt-issue-126-coding.md`): neither of the
+   repo's two existing gate entry points — `gates.check(names, d, cfg)`
+   nor `gates/ci.py`'s `check(repo: Path)` — receives or threads a PR
+   number, and every existing gate/test is deliberately local-checkout-only
+   (`ci.py` explicitly skips spec-based checks for PRs it can't attribute
+   to a role record). A PR-body-reference gate genuinely needs the PR
+   number and body, which today only a `gh pr view` call outside the
+   checkout can supply. This gate therefore needs its own thin entry point
+   (e.g. a `gates/pr_reference.py` invoked by CI with `--pr <n>`, not
+   folded into `check(repo)`'s local-diff signature) rather than reusing
+   the existing local-checkout gate shape — that decision is deferred to
+   phase 2 implementation, but the write set above already accounts for a
+   new file if `gates/gates.py` alone can't carry it.
 4. `protocol.md`/`protocol.ko.md` and `README.md`/`README.ko.md`: add or
    correct a short passage naming the issue comment as the single canonical
    approval-signal location, PR review Approve as the two-account hardened
