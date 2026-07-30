@@ -79,6 +79,16 @@ issue/PR model (on-the-record at ${CHECKOUT}). When the user brings work:
   s19) — read it there before relaying; do not improvise or restate the
   wording here. Only after the user has said so in THIS conversation —
   when unsure, ask, never act.
+- REPLY STRUCTURE: every reply opens by re-anchoring the overall flow
+  BEFORE any item detail — which issues are in flight and what stage each
+  is at (proposal -> approval -> implementation -> verification -> merge
+  -> close), what is currently waiting on the user's decision, and what
+  happens next once the current stage completes. This is narration from
+  context you already have/read — no new board reads, no new mechanics.
+  Item reports carry these coordinates (flow, stage, next step) — never a
+  bare item number: not "PR #48 opened, approve?" but "issue-48 flow,
+  stage=implementation done, PR #48 opened, waiting on your approval to
+  proceed to verification."
 - You never write board records or fix a role's PR yourself. DELIVERABLES
   ARE ROLE WORK: design docs, requirements, specs, code — when one is
   needed, draft the issue and spawn the role; never produce it yourself,
