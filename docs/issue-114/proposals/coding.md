@@ -29,6 +29,18 @@ spawning, or after any `watch` call returns, re-arm by calling
 becomes mechanical (block-until-exit), not judgment-based (guess when
 to check).
 
+Additional feedback on this revision: event-exit alone only covers the
+happy path — a session that silently dies, hangs, or produces nothing
+never fires an event, so nothing wakes the orchestrator. Both the
+initial `spawn.py role task` call and `watch` must therefore be
+BOUNDED: they return no later than a configurable stall interval
+(default ~5 minutes), yielding either a real material event or a
+`stall` report when no session-log writes have occurred in that
+window. A `stall` report is not terminal — the caller re-arms `watch`
+again exactly as it would after any other event. Bounded returns +
+re-arm is what achieves periodic checking; the orchestrator never
+implements polling logic of its own.
+
 ## Constraints
 
 - Wake routing itself is out of scope — detection of COMPLETED,
@@ -55,6 +67,10 @@ to check).
   contract v3 process model) — state that survives between them
   (which events already happened, whether the session PID is still
   alive) has to live on disk, not in Python process memory.
+- Neither call may block indefinitely. Both must return within a
+  configurable stall interval (default ~5 minutes) even if no material
+  event has occurred, so a hung or silently-dead session still yields
+  a bounded response instead of leaving the orchestrator's turn stuck.
 
 ## What will be done
 
@@ -62,10 +78,22 @@ to check).
   - `<workspace>.events.jsonl` — one JSON object per material event,
     append-only, written by whichever process drains the session's
     stream. Shape: `{"ts": <epoch>, "type": "pr-opened"|"gate-refusal"|
-    "session-end", "detail": <url or outcome string>}`.
+    "session-end"|"stall", "detail": <url or outcome string>}`. A
+    `stall` line's `detail` is the number of seconds since the last
+    observed session-log write; `stall` lines are NOT persisted to
+    `events.jsonl` (they're not a fact about the session, just an
+    absence of one) — they are synthesized on the fly by whichever call
+    (`role task` or `watch`) is currently blocked, and reported to the
+    caller without advancing `events.offset`, so the next `watch` call
+    re-checks the same unreported window.
   - `<workspace>.events.offset` — a single integer byte offset into
     `events.jsonl`, the last position `watch` has reported up through.
     Absent means nothing has been reported yet.
+  - A new `--stall-timeout <minutes>` flag (default `5`) on both
+    `spawn.py role task` and `spawn.py watch` — named alongside the
+    CLI's existing per-call flags so it reads as one more configurable
+    bound, not a new category of config. No env var: this stays a
+    plain CLI flag, consistent with the "no new env var" constraint.
 - In `spawn.py`, split `_spawn_one`'s current single blocking
   read-to-completion loop (`spawn.py:1872-1890` today) into two parts
   that run in the SAME detached child process (`start_new_session=True`
@@ -88,27 +116,38 @@ to check).
 - The invoking `spawn.py role task --issue n` call itself no longer
   blocks until session end. After launching the detached child and
   registering it in the roster (unchanged), it polls `events.jsonl` for
-  the FIRST line to appear, prints that event to stderr, writes
-  `events.offset` past it, and exits — returning control (and that one
-  event) to the caller.
-- Add `spawn.py watch --issue <n> [--role <role>]` (new argparse
-  subcommand + `_watch()` function): resolve the workspace from the
-  roster/issue exactly as `roster_kill` does today, read
-  `events.offset`, and block (short poll loop, same style as the
-  existing `roster_watchdog` poll) until a line past that offset
-  appears in `events.jsonl`. Print that event, advance
-  `events.offset`, and exit 0. If the roster entry for that issue/role
-  is already gone (session ended before `watch` was called) but
-  `events.jsonl` has an unreported `session-end` line, report that line
-  immediately instead of blocking forever.
+  the FIRST line to appear, bounded by `--stall-timeout` (default
+  5 minutes): if a line lands first, it prints that event to stderr,
+  writes `events.offset` past it, and exits; if the timeout elapses
+  first with no session-log write since the last observed one, it
+  prints a `stall` report (seconds since last write) to stderr and
+  exits WITHOUT advancing `events.offset` — either way the call
+  returns, never blocking indefinitely.
+- Add `spawn.py watch --issue <n> [--role <role>] [--stall-timeout
+  <minutes>]` (new argparse subcommand + `_watch()` function): resolve
+  the workspace from the roster/issue exactly as `roster_kill` does
+  today, read `events.offset`, and block (short poll loop, same style
+  as the existing `roster_watchdog` poll) until EITHER a line past that
+  offset appears in `events.jsonl`, OR the stall timeout (default 5
+  minutes) elapses with no session-log write observed in that window.
+  On a real event: print it, advance `events.offset`, exit 0. On a
+  stall: print a `stall` report and exit 0 WITHOUT advancing
+  `events.offset`, so the next `watch` call re-checks the same
+  unreported window — a stall is not terminal, the caller just
+  re-arms. If the roster entry for that issue/role is already gone
+  (session ended before `watch` was called) but `events.jsonl` has an
+  unreported `session-end` line, report that line immediately instead
+  of blocking at all.
 - In `on-the-record/hooks/directive.sh`'s PROGRESS CHECKS bullet
   (lines 71-74), replace the "when the user asks, tail the log"
   instruction with: after every spawn, and after every `watch` call
-  returns an event that is not `session-end`, re-arm by calling
-  `spawn.py watch --issue <n>` again before doing anything else; the
-  block IS the notification mechanism, so no separate "check
-  unprompted" judgment call is needed. State explicitly that wake
-  routing (merged-main reads) is unchanged and unrelated.
+  returns an event that is not `session-end` — including `stall` — 
+  re-arm by calling `spawn.py watch --issue <n>` again before doing
+  anything else; the block IS the notification mechanism, so no
+  separate "check unprompted" judgment call is needed, and a `stall`
+  report is just another reason to re-arm, not a different code path.
+  State explicitly that wake routing (merged-main reads) is unchanged
+  and unrelated.
 
 ## Out of scope
 
@@ -142,6 +181,14 @@ to check).
   orchestrator's turn ending) and confirm the child keeps running,
   finishes, and still writes `session-end` — proving the
   `start_new_session=True` detachment actually holds.
+- Manual trace of `stall`: with a stub `events.jsonl`/`.session.log`
+  where no line has been appended since before `--stall-timeout`
+  (set low, e.g. `--stall-timeout 0.05`, for the test), confirm both
+  `spawn.py role task` and `spawn.py watch` return a `stall` report
+  within roughly that bound rather than blocking indefinitely, that
+  `events.offset` is NOT advanced by a `stall` report, and that
+  re-arming `watch` immediately afterward re-evaluates the same
+  window instead of erroring or skipping ahead.
 - Read `directive.sh`'s rendered PROGRESS CHECKS text end to end and
   confirm it says "re-arm `watch` after each event", not "check logs
   when idle", and states the wake-routing boundary in plain language.
