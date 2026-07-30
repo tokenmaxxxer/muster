@@ -50,7 +50,14 @@ is built to catch.
 - `scope-approved` — consumed at `wakes.py`'s pre-approval gate inside
   `wake_coding()` (`state == "scope-approved"`, ~line 266-267, the
   "사전 승인 게이트" comment block). No role produces this value — a
-  human, via the pre-approval gate, is the only path to it. No role
-  approves its own or another's scope-approved; this mirrors
-  `wakes.py`'s existing `HUMAN_ONLY` dict entry ("사전 승인 게이트")
-  which names the same gate as human-only by design, not by omission.
+  human's `APPROVE issue-<n>/scope` comment is the only decision path
+  to it, and no role approves its own or another's scope-approved.
+  The sole writer of this value is `spawn.py approve-scope` (issue
+  #115): it verifies that comment against
+  `docs/specs/approvers.md` and writes the promotion commit itself —
+  a tool-written value, never a role's record output, so this
+  exemption stays scoped to `scope-approved` by name and does not
+  weaken `record_enums`' write-time check on any role-produced value.
+  This mirrors `wakes.py`'s existing `HUMAN_ONLY` dict entry
+  ("사전 승인 게이트") which names the same gate as human-only by
+  design, not by omission.

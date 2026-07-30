@@ -45,8 +45,13 @@ HUMAN_ONLY = {
     "라운드 종료 가치 게이트": "candidate-round-done 이 사람을 깨워 게이트 "
                                "둘을 돌린다. 자동화를 금지한다",
     "사전 승인 게이트": "front record 가 scope-proposed 에 닿으면 사람이 읽고 "
-                        "scope-approved 로 올린다. 그 상태로 가는 **유일한** "
-                        "경로이고, 어떤 역할도 자기 것이든 남의 것이든 승인하지 못한다",
+                        "scope-approved 로 승인한다 — 그 결정은 여전히 사람만 "
+                        "낼 수 있고, 어떤 역할도 자기 것이든 남의 것이든 "
+                        "승인하지 못한다. 결정을 **기록에 반영하는 것**은 "
+                        "`spawn.py approve-scope` 가 한다(이슈 #115) — "
+                        "APPROVE issue-<n>/scope 댓글과 승인자 allowlist를 "
+                        "검증하고 커밋을 쓰는 것은 도구지만, 그 댓글을 다는 "
+                        "결정 자체는 사람 몫이라 여전히 자동화되지 않는다",
     "conditional 검증 재확정": "feasibility 의 verdict: conditional 이 사람의 "
                                 "결정(PR Approve 또는 APPROVE 댓글, "
                                 "docs/specs/approvers.md)으로 풀리면 feasibility "
