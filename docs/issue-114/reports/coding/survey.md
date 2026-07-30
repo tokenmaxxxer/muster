@@ -40,6 +40,38 @@ schema change, no migration. Contract is a single new log-line shape:
 producer in spawn.py, the consumer instruction in directive.sh) agree
 on what the orchestrator is told to look for.
 
+## Addendum (post-revision): detachment and event mechanism
+
+Revision feedback on PR #116 rejected the log-line-only design (see PR
+comment): an exit-notified orchestrator never sees a line written into
+a log while the watching process is still running. Rechecked the
+relevant existing mechanisms before revising the write set above:
+
+- `_spawn_one`'s `Popen` call (`spawn.py:1857-1860`) does not pass
+  `start_new_session=True` — the child shares the parent's process
+  group. Any redesign that has the CLI call exit before the session
+  finishes needs this set, or the child risks dying with its invoker.
+- `roster_register`/`roster_remove`/`_alive` (`spawn.py:1054-1053,
+  1046`) already track `{pid, role, issue, work, log}` per running
+  session and are reused as-is to resolve a workspace from `--issue n`
+  in the new `watch` subcommand, the same way `roster_kill`
+  (`spawn.py:1208`) already does.
+- `roster_watchdog` (`spawn.py:1180`) already runs a poll loop over
+  roster entries on a timer; `watch`'s poll loop over `events.jsonl`
+  follows the same style rather than inventing a new one.
+- Finalization (`ensure_pushed`, `gate_report`, `classify`,
+  `fail_closed_downgrade`, `ledger_write`) at `spawn.py:1892-1943` all
+  runs synchronously after `proc.wait()` in the same call that streamed
+  stdout — this has to keep running exactly once, inside whichever
+  process ends up draining the pipe to completion (the newly detached
+  child), not duplicated between the child and the invoking CLI call.
+
+This confirms the write set is still just `spawn.py` +
+`on-the-record/hooks/directive.sh`, and grounds the new
+`events.jsonl`/`events.offset` on-disk contract in mechanisms
+(`roster_register`, poll-loop style) that already exist rather than a
+new invention.
+
 ## Scout: skipped
 
 This is a two-file internal-tooling change to an existing log/directive
