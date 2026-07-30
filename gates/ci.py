@@ -10,7 +10,13 @@ spec 이 없다. spec 없음을 라우터 규칙에 그대로 넣으면 fail clo
 그래서 여기서는 spec 없이 성립하는 검사만 돌린다. write-set 대조는 plan 스테이지가
 생기면 추가한다 — 그때까지 있지도 않은 spec 을 상대하는 코드를 두지 않는다.
 
-  python3 gates/ci.py [<repo 경로>]     # 기본값: 현재 디렉터리
+PR 이슈참조 검사(issue-126)는 별도 옵션이다: PR 번호와 이슈 번호는 로컬
+checkout에 없고 `gh pr view`로만 얻어지므로, `check(repo)`의 로컬-전용
+시그니처에 넣지 않고 `--pr`/`--issue`가 주어졌을 때만 켠다(주어지지 않으면
+이 검사는 그냥 스킵된다 — PR 컨텍스트 없이 도는 다른 호출부를 막지 않기
+위해서다).
+
+  python3 gates/ci.py [<repo 경로>] [--pr <n> --issue <n> [--phase phase1|phase2]]
   종료 코드 0 통과 / 1 차단
 """
 from __future__ import annotations
@@ -19,12 +25,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import gates
+import pr_reference
 
 
-def check(repo: Path) -> list[str]:
+def check(repo: Path, pr: int | None = None, issue: int | None = None,
+          phase: str = "phase1") -> list[str]:
     """차단 사유 목록. 비어 있으면 통과."""
     bad = [f"보호 경로 변경: {f}" for f in gates.changed_files(repo)
            if gates.is_protected(f)]
+    if pr is not None and issue is not None:
+        bad += pr_reference.check(repo, pr, issue, phase)
     bad += gates.record_enums(repo, {})
     bad += gates.record_wellformed_in(repo)
     bad += gates.record_no_tool_residue_in(repo)
@@ -44,9 +54,23 @@ def check(repo: Path) -> list[str]:
 
 
 def main() -> int:
-    repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    argv = sys.argv[1:]
+    opts = {}
+    positional = []
+    i = 0
+    while i < len(argv):
+        if argv[i] in ("--pr", "--issue", "--phase"):
+            opts[argv[i][2:]] = argv[i + 1]
+            i += 2
+        else:
+            positional.append(argv[i])
+            i += 1
+    repo = Path(positional[0] if positional else ".").resolve()
+    pr = int(opts["pr"]) if "pr" in opts else None
+    issue = int(opts["issue"]) if "issue" in opts else None
+    phase = opts.get("phase", "phase1")
     try:
-        bad = check(repo)
+        bad = check(repo, pr, issue, phase)
     except RuntimeError as e:
         # 검사 자체가 불가능한 경우. 통과가 아니라 차단이다 — 트레이스백 대신
         # 왜 못 봤는지를 읽히게 낸다 (대개 base 브랜치 미확보).

@@ -890,6 +890,9 @@ def approve_scope(cwd: str, issue: int) -> int:
 
     needle = f"APPROVE {subject}/scope"
     pr = _pr_for_branch(root, f"{subject}/{front}")
+    # 이슈 댓글이 승인 정본이다 — 먼저 본다. PR 댓글은 PR 이 있을 때만 보는
+    # fallback 이지 대등한 소스가 아니다(issue-126: 위치 드리프트로 승인을
+    # 놓친 사례가 있었다). 순서를 바꾸지 말 것.
     comments = _issue_comments(root, issue)
     if pr:
         comments += _issue_comments(root, pr)
