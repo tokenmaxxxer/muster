@@ -101,6 +101,37 @@ def _committed_changes(work: Path) -> list[str]:
     return files
 
 
+def _committed_changes_with_status(work: Path) -> list[tuple[str, str, str | None]]:
+    """`_committed_changes` 와 같은 diff 를 status 를 보존한 채 낸다.
+
+    (status, path, old_path) — rename/copy 는 old_path 에 원본 경로가 들어간다.
+    그 외 상태는 old_path=None. record_fulfils_diff 가 A/D/R/C 를 구분해야 해서
+    status 를 버리는 `_committed_changes` 로는 부족하다 — 같은 `-z` 파싱 루프를
+    중복하지 않기 위해 별도 함수로 뺀다. 실패 시 예외를 던져 fail closed."""
+    p = subprocess.run(
+        ["git", "-C", str(work), "diff", "--name-status", "-z", f"{BASE}...HEAD"],
+        capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(
+            f"{BASE} 기준 diff 확인 불가 (fail closed): {p.stderr.strip()[:200]}")
+    recs, out, i = p.stdout.split("\0"), [], 0
+    while i < len(recs):
+        status = recs[i]
+        i += 1
+        if not status or i >= len(recs):
+            continue
+        path = recs[i]
+        i += 1
+        old = None
+        if status[0] in ("R", "C"):          # 다음 필드가 원본 경로
+            old = path
+            if i < len(recs):
+                path = recs[i]
+            i += 1
+        out.append((status, path, old))
+    return out
+
+
 def _worktree_changes(work: Path) -> list[str]:
     """워킹트리/인덱스 변경. rename 은 원본과 대상을 **둘 다** 낸다.
 
@@ -374,6 +405,63 @@ def record_no_tool_residue(d: Path, cfg: dict) -> list[str]:
     return record_no_tool_residue_in(d / "work")
 
 
+_FULFILS_LINE = re.compile(r"^\s*[-*]?\s*fulfils:\s*(\S+)\s+(.*)$")
+
+
+def record_fulfils_diff(d: Path, cfg: dict) -> list[str]:
+    """변경된 phase-2 레코드의 `fulfils: delete|create|move ...` 라인이 실제
+    커밋 diff 와 일치하는지 검사한다 (issue #155).
+
+    파싱 안 되는 `fulfils:` 라인은 "검사할 게 없다"가 아니라 그 자체로 차단
+    사유다 (`dep_names()` 와 같은 fail-closed 원칙). `fulfils:` 라인이 하나도
+    없는 레코드는 이 게이트가 아예 건드리지 않는다 — opt-in 마커다."""
+    root = d / "work" if (d / "work").exists() else d
+    try:
+        records = _changed_records(root)
+        status_changes = _committed_changes_with_status(root)
+    except RuntimeError as e:
+        return [str(e)]
+
+    deleted = {p for s, p, old in status_changes if s[0] == "D"}
+    created = {p for s, p, old in status_changes if s[0] == "A"}
+    renamed_old = {old for s, p, old in status_changes if s[0] in ("R", "C") and old}
+    renamed_pairs = {(old, p) for s, p, old in status_changes
+                      if s[0] in ("R", "C") and old}
+
+    bad = []
+    for path in records:
+        f = root / path
+        if not f.exists():
+            continue
+        for lineno, line in enumerate(f.read_text().splitlines(), start=1):
+            m = _FULFILS_LINE.match(line)
+            if not m:
+                continue
+            kind, rest = m.group(1), m.group(2).strip()
+            loc = f"{path}:{lineno}"
+            if kind == "delete":
+                claim_path = rest
+                if not claim_path or not (claim_path in deleted or
+                                           claim_path in renamed_old):
+                    bad.append(f"fulfils 불일치: {loc} — 'delete {claim_path}' "
+                               "claim 이 커밋 diff 에 D(또는 rename 원본)로 없다")
+            elif kind == "create":
+                claim_path = rest
+                new_paths = created | {p for _, p in renamed_pairs}
+                if not claim_path or claim_path not in new_paths:
+                    bad.append(f"fulfils 불일치: {loc} — 'create {claim_path}' "
+                               "claim 이 커밋 diff 에 A(또는 rename 대상)로 없다")
+            elif kind == "move":
+                mv = re.match(r"^(\S+)\s*->\s*(\S+)$", rest)
+                if not mv or (mv.group(1), mv.group(2)) not in renamed_pairs:
+                    bad.append(f"fulfils 불일치: {loc} — 'move {rest}' claim 이 "
+                               "커밋 diff 의 rename 쌍과 일치하지 않는다")
+            else:
+                bad.append(f"fulfils 파싱 불가: {loc} — 알 수 없는 claim 종류 "
+                           f"{kind!r} (delete/create/move 만 허용, fail closed)")
+    return bad
+
+
 BRANCH_ROLE = re.compile(r"^issue-[^/]+/([^/]+)$")
 # 항상 허용되는 레코드 경로 — 어떤 write_scope 선언·오버라이드도 이걸 못
 # 지운다 (issue-149 item 5: 기록 의무는 무조건 살아남는다).
@@ -439,7 +527,8 @@ def role_scope(work: Path, branch: str) -> list[str]:
 ALL = {"writeset": writeset, "deps": deps,
        "record_enums": record_enums,
        "record_wellformed": record_wellformed,
-       "record_no_tool_residue": record_no_tool_residue}
+       "record_no_tool_residue": record_no_tool_residue,
+       "record_fulfils_diff": record_fulfils_diff}
 
 
 def check(names: list[str], d: Path, cfg: dict) -> list[str]:
