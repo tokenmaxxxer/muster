@@ -1,0 +1,22 @@
+{
+  "marketplace": "tokenmaxxxer-conformance-review",
+  "repo": "tokenmaxxxer/conformance-review-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/conformance-review-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "산출물 vs 명세 일치",
+  "use_when": "implementation 커밋이 랜딩된 후, 요구사항 대비 감사가 필요할 때. 빌더 의도는 안 읽는다",
+  "produces": "요구사항별 Present|Surface|Absent|Incorrect|Unverifiable, 인용된 증거",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": ["reported"]
+  }
+}

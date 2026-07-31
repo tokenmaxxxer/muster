@@ -1,0 +1,21 @@
+{
+  "marketplace": "tokenmaxxxer-interaction-design",
+  "repo": "tokenmaxxxer/interaction-design-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "문제 → 화면·플로우",
+  "use_when": "product-discovery 스펙 확정 후",
+  "produces": "wireframe/flow diagram, state list, edge-case interaction notes, open design questions",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": ["reviewed"]
+  }
+}

@@ -13,7 +13,7 @@
       "name": "freelunch",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/coding-agent-rulebook"
+        "repo": "tokenmaxxxer/implementation-rulebook"
       },
       "description": "Speed-first plugin that forces every task onto concurrent background Sonnet agents with zero idle time"
     },
@@ -21,7 +21,7 @@
       "name": "terse",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/coding-agent-rulebook"
+        "repo": "tokenmaxxxer/implementation-rulebook"
       },
       "description": "Output-token compression scoped to conversational prose — never worker prompts, contracts, code, or safety-critical text. Three levels via /terse."
     },
@@ -29,7 +29,7 @@
       "name": "blueprint",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/coding-agent-rulebook"
+        "repo": "tokenmaxxxer/implementation-rulebook"
       },
       "description": "Archetype-based architecture selection from a queryable database: deterministic classify/recommend CLI, anti-pattern checks, and the fan-out contract to freeze before dispatching workers."
     },
@@ -37,7 +37,7 @@
       "name": "no-mock",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/coding-agent-rulebook"
+        "repo": "tokenmaxxxer/implementation-rulebook"
       },
       "description": "Steers deliverables toward production-runnable structure at generation time — real persistence, real integration seams, no silent mocks. Pure direction, no verification machinery."
     },
@@ -45,7 +45,7 @@
       "name": "scout",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/coding-agent-rulebook"
+        "repo": "tokenmaxxxer/implementation-rulebook"
       },
       "description": "Pre-build reconnaissance: identify best-in-class exemplars and the customer expectation baseline (Camp benchmarking + Kano + saturation stop rule), compress into a scout brief that steers the build. Bounded and judgment-gated — never a research report, never post-build comparison."
     },
@@ -53,7 +53,7 @@
       "name": "no-footgun",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/coding-agent-rulebook"
+        "repo": "tokenmaxxxer/implementation-rulebook"
       },
       "description": "Direction-only security steering: names the threat patterns for the surface being built so the secure pattern is chosen at write time — surface-gated, cascading custom rules, zero review passes or scans."
     },
@@ -61,7 +61,7 @@
       "name": "doctrine",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/coding-agent-rulebook"
+        "repo": "tokenmaxxxer/implementation-rulebook"
       },
       "description": "Documentation placement doctrine: six lifetime-based buckets under docs/, created on session start, a directive that classifies at write time and records decisions/measurements as they happen, and a PreToolUse gate refusing writes under docs/ outside them."
     },
@@ -69,7 +69,7 @@
       "name": "warrant",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/coding-agent-rulebook"
+        "repo": "tokenmaxxxer/implementation-rulebook"
       },
       "description": "Work-unit protocol: one approval gate at the front, then uninterrupted execution. A proposal states the request, the constraints, and the write set; approval freezes it; a PreToolUse gate refuses edits outside it and commits without the Proposal: trailer; SessionStart rebuilds state from the repository."
     },
@@ -77,15 +77,15 @@
       "name": "dispatch",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/coding-agent-rulebook"
+        "repo": "tokenmaxxxer/implementation-rulebook"
       },
       "description": "Chat-to-git record-keeping discipline: when you work through chat, the conversation becomes the durable git record — a requirement becomes an issue, the work a pull request that Closes it, feedback becomes PR comments — and a PR merges only on an explicit, recorded user approval. Direction only, no gates, so a person or agent with no memory of the session can reconstruct intent, work, and rationale from git alone."
     },
     {
-      "name": "coding-agent-env",
+      "name": "implementation-env",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/coding-agent-rulebook"
+        "repo": "tokenmaxxxer/implementation-rulebook"
       },
       "description": "One-install environment bundle: installs the whole tokenmaxxxer steering stack via dependencies."
     },
@@ -93,7 +93,7 @@
       "name": "intake",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/qa-agent-rulebook"
+        "repo": "tokenmaxxxer/execution-observation-rulebook"
       },
       "description": "Per-project QA profile: /qa-init scans the target project once — issue tracker repo, issue templates, labels, app launch method, test conventions — and freezes it into qa/intake.md, which every other QA plugin reads. Committed to the project repo so every user shares one profile."
     },
@@ -101,7 +101,7 @@
       "name": "testrun",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/qa-agent-rulebook"
+        "repo": "tokenmaxxxer/execution-observation-rulebook"
       },
       "description": "Test execution: launches the actual product and exercises it — plan-driven when a plan exists, ad-hoc smoke otherwise. Every verdict carries evidence (command output, screenshot, log); run records land under qa/runs/. Report, don't fix: findings become issues, never edits to product code."
     },
@@ -109,7 +109,7 @@
       "name": "bugreport",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/qa-agent-rulebook"
+        "repo": "tokenmaxxxer/execution-observation-rulebook"
       },
       "description": "Bug filing discipline: a confirmed, actually-reproduced defect becomes a tracker issue that follows the project's own issue template and labels (per qa/intake.md), with duplicate search before filing and a standard form as fallback."
     },
@@ -117,7 +117,7 @@
       "name": "stats",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/qa-agent-rulebook"
+        "repo": "tokenmaxxxer/execution-observation-rulebook"
       },
       "description": "Trust accounting: /qa-stats follows every issue filed from the workspace's run records to its tracker outcome and reports the stack's production signal — acceptance rate (fixed), noise rate (closed not-planned), duplicate conversions, UNFILED reasons. Read-only, no hooks."
     },
@@ -125,145 +125,145 @@
       "name": "regress",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/qa-agent-rulebook"
+        "repo": "tokenmaxxxer/execution-observation-rulebook"
       },
       "description": "Regression tests with an adoption gate: /regress turns a confirmed bug into an automated test adopted only if it fails on the bug commit and passes stably (k=5) on the fix. Adopted tests live in the QA workspace and run on every /testrun; anything that can't prove itself is discarded, not committed."
     },
     {
-      "name": "qa-cycle",
+      "name": "execution-observation-cycle",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/qa-agent-rulebook"
+        "repo": "tokenmaxxxer/execution-observation-rulebook"
       },
-      "description": "The QA cycle spine: owns the session state file (projects/<owner>-<repo>/state.md) and the PreToolUse gate that refuses any write the transition table in docs/specs/qa-cycle-state-machine.md disallows for the current phase. Human-only transitions require a matching unconsumed verdict token minted by signoff."
+      "description": "The QA cycle spine: owns the session state file (projects/<owner>-<repo>/state.md) and the PreToolUse gate that refuses any write the transition table in docs/specs/execution-observation-cycle-state-machine.md disallows for the current phase. Human-only transitions require a matching unconsumed verdict token minted by signoff."
     },
     {
       "name": "signoff",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/qa-agent-rulebook"
+        "repo": "tokenmaxxxer/execution-observation-rulebook"
       },
-      "description": "Human sign-off: /go-no-go records a Go/No-Go/Shipped-Under-Exception verdict against an exit-readiness bundle. Captures an unambiguous verdict from the user's own turn as a single-use token that authorizes exactly one qa-cycle transition."
+      "description": "Human sign-off: /go-no-go records a Go/No-Go/Shipped-Under-Exception verdict against an exit-readiness bundle. Captures an unambiguous verdict from the user's own turn as a single-use token that authorizes exactly one execution-observation-cycle transition."
     },
     {
-      "name": "qa-agent-env",
+      "name": "execution-observation-env",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/qa-agent-rulebook"
+        "repo": "tokenmaxxxer/execution-observation-rulebook"
       },
-      "description": "One-install QA environment bundle: pulls in the whole tokenmaxxxer QA stack (intake, testrun, bugreport, stats, regress, qa-cycle, signoff) as dependencies. Contains no code of its own."
+      "description": "One-install QA environment bundle: pulls in the whole tokenmaxxxer QA stack (intake, testrun, bugreport, stats, regress, execution-observation-cycle, signoff) as dependencies. Contains no code of its own."
     },
     {
-      "name": "product-cycle",
+      "name": "product-discovery-cycle",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/product-agent-rulebook"
+        "repo": "tokenmaxxxer/product-discovery-rulebook"
       },
       "description": "Product-discovery state machine: idle -> scoping -> researching -> hypothesis-registered -> measuring -> decided. Registers the metric, threshold, and decision rule before any data is collected; the gated hypothesis-registered -> measuring transition requires both the registered package and an approval token minted from the user's own turn; the threshold is frozen once measuring starts; decided applies the registered rule mechanically."
     },
     {
-      "name": "product-agent-env",
+      "name": "product-discovery-env",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/product-agent-rulebook"
+        "repo": "tokenmaxxxer/product-discovery-rulebook"
       },
-      "description": "One-install environment bundle: installs product-cycle via dependency."
+      "description": "One-install environment bundle: installs product-discovery-cycle via dependency."
     },
     {
-      "name": "feasibility-cycle",
+      "name": "technical-feasibility-cycle",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/feasibility-agent-rulebook"
+        "repo": "tokenmaxxxer/technical-feasibility-rulebook"
       },
       "description": "Feasibility role cycle: takes a specification only (deliberately without the market argument), runs four sequential probes (technical, prior art, legal/regulatory, threat model), and gates entry into a verdict on all four being resolved. A UserPromptSubmit hook mints an approval token only from the user's own turn; a PreToolUse hook gates the state file's transitions against the token and the probe fields, evaluated on the target path regardless of which tool wrote it."
     },
     {
-      "name": "feasibility-agent-env",
+      "name": "technical-feasibility-env",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/feasibility-agent-rulebook"
+        "repo": "tokenmaxxxer/technical-feasibility-rulebook"
       },
-      "description": "One-install environment bundle for the feasibility role: installs feasibility-cycle via dependency. Contains no code of its own."
+      "description": "One-install environment bundle for the feasibility role: installs technical-feasibility-cycle via dependency. Contains no code of its own."
     },
     {
-      "name": "ops-cycle",
+      "name": "release-engineering-cycle",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/ops-agent-rulebook"
+        "repo": "tokenmaxxxer/release-engineering-rulebook"
       },
-      "description": "The ops role's state machine: idle -> readiness -> rollout -> steady -> incident. A UserPromptSubmit hook mints an approval token only from the user's own turn; a PreToolUse gate refuses readiness -> rollout without every checklist item resolved to yes/no with a pointable artifact, refuses rollout -> steady without a matching approval token, and mechanically refuses any release transition out of steady once the error budget is recorded exhausted."
+      "description": "The release-engineering role's state machine: idle -> readiness -> rollout -> steady -> incident. A UserPromptSubmit hook mints an approval token only from the user's own turn; a PreToolUse gate refuses readiness -> rollout without every checklist item resolved to yes/no with a pointable artifact, refuses rollout -> steady without a matching approval token, and mechanically refuses any release transition out of steady once the error budget is recorded exhausted."
     },
     {
-      "name": "ops-agent-env",
+      "name": "release-engineering-env",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/ops-agent-rulebook"
+        "repo": "tokenmaxxxer/release-engineering-rulebook"
       },
-      "description": "One-install environment bundle for the ops role: installs ops-cycle via dependency. Contains no code of its own."
+      "description": "One-install environment bundle for the ops role: installs release-engineering-cycle via dependency. Contains no code of its own."
     },
     {
-      "name": "reflect-cycle",
+      "name": "issue-retrospective-cycle",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/reflect-agent-rulebook"
+        "repo": "tokenmaxxxer/issue-retrospective-rulebook"
       },
       "description": "Reflect record state machine: idle -> reflecting -> done. Wakes after a subject's work has landed and verify and/or review have concluded (a verify-record reaching `cleared`, or a review-record reaching `reported`); the reflect-record must carry a non-empty pointer to the other role records it read; its findings are advisory only per contract §5."
     },
     {
-      "name": "reflect-agent-env",
+      "name": "issue-retrospective-env",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/reflect-agent-rulebook"
+        "repo": "tokenmaxxxer/issue-retrospective-rulebook"
       },
-      "description": "One-install environment bundle: installs reflect-cycle via dependency."
+      "description": "One-install environment bundle: installs issue-retrospective-cycle via dependency."
     },
     {
-      "name": "review-cycle",
+      "name": "conformance-review-cycle",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/review-agent-rulebook"
+        "repo": "tokenmaxxxer/conformance-review-rulebook"
       },
-      "description": "The review role's state machine: idle -> scoped -> auditing -> reported. Per-requirement verdicts (Present, Surface, Absent, Incorrect) gate the move to reported; a standing refusal rule keeps the role from ever reading the building agent's intent or proposal prose."
+      "description": "The conformance-review role's state machine: idle -> scoped -> auditing -> reported. Per-requirement verdicts (Present, Surface, Absent, Incorrect) gate the move to reported; a standing refusal rule keeps the role from ever reading the building agent's intent or proposal prose."
     },
     {
-      "name": "review-agent-env",
+      "name": "conformance-review-env",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/review-agent-rulebook"
+        "repo": "tokenmaxxxer/conformance-review-rulebook"
       },
-      "description": "One-install environment bundle for the review role: installs review-cycle via dependency. Contains no code of its own."
+      "description": "One-install environment bundle for the review role: installs conformance-review-cycle via dependency. Contains no code of its own."
     },
     {
-      "name": "ux-design-cycle",
+      "name": "interaction-design-cycle",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/ux-design-rulebook"
+        "repo": "tokenmaxxxer/interaction-design-rulebook"
       },
-      "description": "UX-design record state machine: idle -> drafting -> reviewed. Wakes after a new/changed product-record (or a chain-root hypothesis); the ux-design-record must carry a non-empty pointer to its governing hypothesis/product-record; reaching `loop_state: reviewed` is what wakes coding per contract §3."
+      "description": "UX-design record state machine: idle -> drafting -> reviewed. Wakes after a new/changed product-record (or a chain-root hypothesis); the ux-design-record must carry a non-empty pointer to its governing hypothesis/product-record; reaching `loop_state: reviewed` is what wakes implementation per contract §3."
     },
     {
-      "name": "ux-design-agent-env",
+      "name": "interaction-design-env",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/ux-design-rulebook"
+        "repo": "tokenmaxxxer/interaction-design-rulebook"
       },
-      "description": "One-install environment bundle: installs ux-design-cycle via dependency."
+      "description": "One-install environment bundle: installs interaction-design-cycle via dependency."
     },
     {
-      "name": "verify-cycle",
+      "name": "defect-verification-cycle",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/verify-agent-rulebook"
+        "repo": "tokenmaxxxer/defect-verification-rulebook"
       },
-      "description": "The verify role's state machine: idle -> reproducing -> reproduced -> cleared. Adversarial reproduction of defects coding and qa may have missed, gated by transition-rules.md; blocking findings addressed to coding are not overridden by a clean review-record."
+      "description": "The defect-verification role's state machine: idle -> reproducing -> reproduced -> cleared. Adversarial reproduction of defects implementation and execution-observation may have missed, gated by transition-rules.md; blocking findings addressed to implementation are not overridden by a clean review-record."
     },
     {
-      "name": "verify-agent-env",
+      "name": "defect-verification-env",
       "source": {
         "source": "github",
-        "repo": "tokenmaxxxer/verify-agent-rulebook"
+        "repo": "tokenmaxxxer/defect-verification-rulebook"
       },
-      "description": "One-install environment bundle for the verify role: installs verify-cycle via dependency. Contains no code of its own."
+      "description": "One-install environment bundle for the verify role: installs defect-verification-cycle via dependency. Contains no code of its own."
     }
   ]
 }

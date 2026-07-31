@@ -1,0 +1,19 @@
+{
+  "marketplace": "tokenmaxxxer-issue-retrospective",
+  "repo": "tokenmaxxxer/issue-retrospective-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "이슈 역사가 무엇을 가르치는가 (단일 이슈 회고)",
+  "use_when": "작업이 랜딩되고 defect-verification/conformance-review 가 종결된 뒤. 기록만 읽는다",
+  "produces": "timeline, lessons list, one-line advisory (advisory only)",
+  "write_scope": [],
+  "record_fields": {}
+}

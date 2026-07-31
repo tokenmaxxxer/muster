@@ -1,0 +1,22 @@
+{
+  "marketplace": "tokenmaxxxer-implementation",
+  "repo": "tokenmaxxxer/implementation-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/implementation-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "승인된 범위 → 동작 코드 (신규 구현)",
+  "use_when": "스펙/제안이 승인됐고 신규 구현이 필요할 때. 검증은 안 한다 — 자기 주장 확인(빌드·자기 테스트 1회)까지만",
+  "produces": "src/·test/ 코드, build proposal, what-did-not-work log, closed_checks entries, coding record",
+  "write_scope": ["src/**", "test/**"],
+  "record_fields": {
+    "loop_state": ["scope-proposed", "scope-approved", "in-progress", "landed"]
+  }
+}
