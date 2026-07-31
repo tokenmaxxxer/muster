@@ -374,6 +374,68 @@ def record_no_tool_residue(d: Path, cfg: dict) -> list[str]:
     return record_no_tool_residue_in(d / "work")
 
 
+BRANCH_ROLE = re.compile(r"^issue-[^/]+/([^/]+)$")
+# 항상 허용되는 레코드 경로 — 어떤 write_scope 선언·오버라이드도 이걸 못
+# 지운다 (issue-149 item 5: 기록 의무는 무조건 살아남는다).
+_WRITE_SCOPE_OVERRIDE = re.compile(
+    r"^\s*[-*]\s*write:\s*([^:\s]+)\s*:\s*(\S+)", re.M)
+
+
+def _always_writable(role: str) -> list[str]:
+    return [f"docs/issue-*/reports/{role}.md",
+            f"docs/issue-*/reports/{role}/**",
+            f"docs/issue-*/proposals/{role}.md"]
+
+
+def _write_scope_overrides(work: Path) -> dict[str, list[str]]:
+    """보드 레포 루트의 `docs/specs/write_scope.md` 를 파싱한다.
+
+    `writeset()` 가 이미 쓰는 `- write: <값>` 줄 형태를 역할 접두어로 확장한
+    것 — 새 포맷을 만들지 않고 검증된 파싱을 재사용한다."""
+    f = work / "docs" / "specs" / "write_scope.md"
+    if not f.exists():
+        return {}
+    out: dict[str, list[str]] = {}
+    for role, glob in _WRITE_SCOPE_OVERRIDE.findall(f.read_text()):
+        out.setdefault(role, []).append(glob)
+    return out
+
+
+def role_scope(work: Path, branch: str) -> list[str]:
+    """PR diff 가 브랜치로 선언된 역할의 `write_scope` 안에 있는지 검사한다.
+
+    역할을 브랜치 이름(`issue-<n>/<role>`)에서 구조적으로 해석한다 —
+    `board-gate.sh`/`record_enums()` 가 이미 쓰는 같은 방식. 브랜치가 그
+    형태가 아니거나, 해당 role 정의를 못 읽거나, `write_scope` 가 선언되지
+    않았으면 "검사할 게 없다"가 아니라 "검사할 수 없다": fail closed.
+    보드 레포의 `docs/specs/write_scope.md` 오버라이드가 있으면 그 역할의
+    글롭 목록을 통째로 대체하지만, 레코드/제안 경로(`_always_writable`)는
+    오버라이드 뒤에도 항상 합집합으로 남는다 — 어떤 오버라이드도 기록 의무를
+    지울 수 없다."""
+    m = BRANCH_ROLE.match(branch)
+    if not m:
+        return [f"브랜치 이름에서 역할을 해석할 수 없다 (fail closed): "
+                f"{branch!r} — issue-<n>/<role> 형태가 아니다"]
+    role = m.group(1)
+    role_file = ON_THE_RECORD_ROOT / "roles" / f"{role}.json"
+    try:
+        role_cfg = json.loads(role_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return [f"역할 정의를 읽을 수 없어 write_scope 를 검사할 수 없다: "
+                f"{role_file} (on-the-record 체크아웃: {ON_THE_RECORD_ROOT}) ({e})"]
+    if "write_scope" not in role_cfg:
+        return [f"roles/{role}.json 에 write_scope 선언이 없다 (fail closed)"]
+    overrides = _write_scope_overrides(work)
+    allowed = overrides.get(role, list(role_cfg["write_scope"]))
+    allowed = allowed + _always_writable(role)
+    try:
+        files = changed_files(work)
+    except RuntimeError as e:
+        return [str(e)]
+    return [f"write_scope 이탈: {f} (역할 {role}, 허용: {', '.join(allowed)})"
+            for f in files if not any(fnmatch.fnmatch(f, a) for a in allowed)]
+
+
 ALL = {"writeset": writeset, "deps": deps,
        "record_enums": record_enums,
        "record_wellformed": record_wellformed,
