@@ -1,0 +1,7 @@
+{
+  "name": "pricing",
+  "description": "The pricing role on contract v3: 얼마를, 어떤 구조로 받을지. use_when: 신규 가격 정책이 걸릴 때. Hand-off: 단위경제 성립 여부 재확인은 → finance-unit-economics.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

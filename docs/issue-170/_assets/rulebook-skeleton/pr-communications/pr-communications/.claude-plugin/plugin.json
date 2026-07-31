@@ -1,0 +1,7 @@
+{
+  "name": "pr-communications",
+  "description": "The pr-communications role on contract v3: 메시지가 외부에 어떻게 읽힐지. use_when: 외부 커뮤니케이션이 걸릴 때. Hand-off: 캠페인 성격 메시지는 → marketing.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

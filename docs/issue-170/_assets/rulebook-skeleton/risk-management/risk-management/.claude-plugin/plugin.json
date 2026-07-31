@@ -1,0 +1,7 @@
+{
+  "name": "risk-management",
+  "description": "The risk-management role on contract v3: 전사 리스크 노출이 허용 범위인가. use_when: 재무/운영/전략 리스크가 걸릴 때 (feasibility보다 넓은 범위). Hand-off: 개별 법규 컴플라이언스 세부는 → legal-compliance.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

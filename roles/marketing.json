@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-marketing",
+  "repo": "tokenmaxxxer/marketing-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/marketing-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "어떤 메시지로 어떤 채널에 도달할지",
+  "use_when": "캠페인/포지셔닝이 걸릴 때",
+  "produces": "messaging doc, channel plan, target segment",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

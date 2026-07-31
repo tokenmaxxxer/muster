@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-partnerships-bd",
+  "repo": "tokenmaxxxer/partnerships-bd-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/partnerships-bd-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "파트너십이 구조적으로 성립하는가",
+  "use_when": "제휴/BD 딜 구조가 걸릴 때",
+  "produces": "deal structure verdict, term sheet outline",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

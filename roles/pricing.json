@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-pricing",
+  "repo": "tokenmaxxxer/pricing-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/pricing-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "얼마를, 어떤 구조로 받을지",
+  "use_when": "신규 가격 정책이 걸릴 때",
+  "produces": "pricing verdict, tier structure, rationale vs alternatives considered",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

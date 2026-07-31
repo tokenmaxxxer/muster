@@ -1,0 +1,7 @@
+{
+  "name": "market-analysis",
+  "description": "The market-analysis role on contract v3: 경쟁 구도에서 이 스펙이 서는가. use_when: product 스펙 확정 후, 경쟁 구도가 걸린 결정일 때. Hand-off: 가격 정책이 걸리면 → pricing; 포지셔닝 메시지가 걸리면 → marketing.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

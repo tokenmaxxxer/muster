@@ -1,0 +1,7 @@
+{
+  "name": "growth-analytics",
+  "description": "The growth-analytics role on contract v3: 퍼널 병목과 실험 결과가 실제 개선인지. use_when: 퍼널 분석 또는 A/B 실험 해석이 걸릴 때. Hand-off: 캠페인 메시지 변경이 필요하면 → marketing.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

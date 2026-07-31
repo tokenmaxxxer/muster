@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-market-analysis",
+  "repo": "tokenmaxxxer/market-analysis-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/market-analysis-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "경쟁 구도에서 이 스펙이 서는가",
+  "use_when": "product 스펙 확정 후, 경쟁 구도가 걸린 결정일 때",
+  "produces": "five-forces summary, competitor list w/ evidence links, JTBD-landscape verdict",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

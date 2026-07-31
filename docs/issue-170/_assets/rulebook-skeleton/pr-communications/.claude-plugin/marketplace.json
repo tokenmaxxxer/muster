@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-pr-communications",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "pr-communications",
+      "source": "./pr-communications",
+      "description": "The pr-communications role on contract v3 (issue-160 round-3 promotion). Decides: 메시지가 외부에 어떻게 읽힐지."
+    }
+  ]
+}

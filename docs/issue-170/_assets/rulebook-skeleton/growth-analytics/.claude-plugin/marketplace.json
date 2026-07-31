@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-growth-analytics",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "growth-analytics",
+      "source": "./growth-analytics",
+      "description": "The growth-analytics role on contract v3 (issue-160 round-3 promotion). Decides: 퍼널 병목과 실험 결과가 실제 개선인지."
+    }
+  ]
+}

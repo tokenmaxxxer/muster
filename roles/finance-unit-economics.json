@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-finance-unit-economics",
+  "repo": "tokenmaxxxer/finance-unit-economics-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/finance-unit-economics-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "단위경제상 성립하는가",
+  "use_when": "가격/비용 구조가 걸린 결정일 때",
+  "produces": "unit economics model (CAC/LTV/margin), sensitivity note",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

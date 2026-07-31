@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-legal-compliance",
+  "repo": "tokenmaxxxer/legal-compliance-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/legal-compliance-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "이 스펙/처리가 법·규제를 통과하는가",
+  "use_when": "개인정보·라이선스·계약이 걸릴 때",
+  "produces": "compliance verdict, applicable regulation list, required mitigations",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

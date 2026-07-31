@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-legal-compliance",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "legal-compliance",
+      "source": "./legal-compliance",
+      "description": "The legal-compliance role on contract v3 (issue-160 round-3 promotion). Decides: 이 스펙/처리가 법·규제를 통과하는가."
+    }
+  ]
+}

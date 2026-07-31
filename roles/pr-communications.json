@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-pr-communications",
+  "repo": "tokenmaxxxer/pr-communications-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/pr-communications-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "메시지가 외부에 어떻게 읽힐지",
+  "use_when": "외부 커뮤니케이션이 걸릴 때",
+  "produces": "communications plan, key message, risk/Q&A prep",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

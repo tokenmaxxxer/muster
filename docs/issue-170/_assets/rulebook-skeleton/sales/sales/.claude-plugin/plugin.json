@@ -1,0 +1,7 @@
+{
+  "name": "sales",
+  "description": "The sales role on contract v3: 리드/기회를 어떻게 진행시킬지. use_when: 영업 프로세스 설계가 걸릴 때. Hand-off: 메시지/포지셔닝 자체는 → marketing.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}
