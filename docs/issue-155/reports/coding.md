@@ -7,7 +7,7 @@ loop_state: landed
 upstream: docs/issue-155/proposals/2026-07-31-coding-fulfils-marker-gate.md
 (approved via issue comment `APPROVE issue-155/coding`)
 
-code_under_review: (this branch's phase-2 commit)
+code_under_review: 1d296ea3128abac8f94a458b775fd4779c109011
 
 ## What was done
 
