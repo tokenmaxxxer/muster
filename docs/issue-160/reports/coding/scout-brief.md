@@ -27,3 +27,17 @@ Sources:
 - https://m3.material.io/foundations/design-tokens
 - https://www.amazon.com/RESTful-Design-Patterns-Best-Practices/dp/1835885284
 - https://www.goodreads.com/en/book/show/407999.Competitive_Strategy
+
+## Round 2 (re-scout, PR #161 feedback) — company-wide domain sweep
+
+Trigger: reviewer feedback on PR #161 — domain map was dev-biased, missing nearly all biz/ops and design/content lineages. New decision surfacing: for each newly-listed domain, does a credible book/course canon exist (promote-eligible) or only practitioner-consensus/no-canon (hold-only)?
+
+Mode: batched-sequential (4 WebSearch calls in one turn). Results were mostly noisy (SEO content, not canon confirmation) for biz/ops queries — canon assertions below are stated as **prior knowledge, labeled as assumption** where the search did not independently confirm a title; kept anchors where a specific canonical work did surface (Traction, Data Warehouse Toolkit, Database Reliability Engineering).
+
+Judge point: search confirmed the working hypothesis — biz/ops domains overwhelmingly lack one dominant canonical text (fragmented practitioner-guide landscape: CAC/LTV blog posts, no equivalent of a Porter or a SWEBOK), which is itself evidence for the survey's HOLD-not-PROMOTE judgment on nearly all of them. No further deepening changes a build decision — stopped after round 2.
+
+Sources (round 2, supplementary/weak — see assumption labels in survey):
+- https://www.oreilly.com/library/view/startup-cxo/9781119772576/c07.xhtml (unit economics chapter, Startup CXO)
+- https://growthmethod.com/growth-marketing-books/ (Traction — Weinberg & Mares)
+- https://uxcontent.com/product-localization-for-ux/ (UX-writing/localization overlap)
+- https://www.oreilly.com/library/view/database-reliability-engineering/9781491925935 (Database Reliability Engineering)
