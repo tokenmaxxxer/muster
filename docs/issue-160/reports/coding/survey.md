@@ -98,8 +98,70 @@ PR #161 feedback: rows 1-18 above are dev/product-eng biased; the domain map mus
 | Domain 2 (competitive/market analysis) | **(d) domain, no role** — silently subsumed into `product`'s hypothesis work, no named artifact. |
 | Domain 9 (security/threat modeling) | **(d) domain effectively unnamed** — exists only as one probe inside `feasibility`'s "4-probe" verdict, no independent literature-anchored artifact. |
 
-## Summary counts
+## Summary counts (round 1/2, superseded below by round 3's rule flip)
 - (a) 1:1 fit: `ux-design`* , `coding`*, `reflect` (3, *with caveats noted above)
 - (b) bundled, split candidates: `feasibility` (3 domains → 1 verdict), `product` (partial — market analysis unnamed), `ops` (2 domains → 1 role, weaker split case)
 - (c) method not domain: `qa`, `review`, `verify` (3)
 - (d) domain, no role: UX engineering/tokens, API design, competitive/market analysis, security/threat-model-as-independent-artifact (4)
+
+## 3. Round-3 re-judgment — promotion-default rule flip (PR #161 second feedback)
+
+PR #161's second feedback withdraws round-2's "promote conservatively" instruction and replaces the judgment rule outright: **promotion is now the default** for any domain whose `decides` (a distinguishable judgment lens) and `produces` (a distinguishable deliverable) can both be named. Two changes to how holds are argued, both retroactive to every row above:
+
+1. **"No single canonical text" is no longer a hold reason.** A domain with a dominant practitioner framework or multiple credible lineages (rather than one canonical book) is anchored to that framework/lineage set instead — canon-absence was round 2's hold reason for nearly all biz/ops rows and it no longer applies.
+2. **"Zero current usage signal" is no longer a hold reason.** The feedback states explicitly: role definitions must exist before demand arrives, not after — this was round 1/2's hold reason for rows 17-18, 27-28, 30-34, 36-40, 42, 44 and it no longer applies.
+
+What still justifies **귀속** (attribution, kept as the only remaining exception, per feedback's own two carve-outs):
+- **Pure restatement** of a judgment lens already counted elsewhere in the map (not "a related domain" — the *same* decides/produces pair named twice).
+- **Non-separable produces**: splitting the domain out would leave it with no artifact that stands alone from the role it would be split from.
+
+### 3a. Re-judged table — every domain from rows 1-44, final call
+
+| Domain (row #s merged) | Final role | 판정 | decides (lens) | produces (anchor) |
+|---|---|---|---|---|
+| Product discovery (1) | `product` | keep (existing) | 무엇을 만들지 | Cagan/JTBD hypothesis+spec |
+| Competitive/market analysis (2) | `market-analysis` | **PROMOTE** (round 1, unchanged) | 경쟁 구도에서 이 스펙이 서는가 | Porter five-forces + JTBD-landscape verdict |
+| UX research/interaction (3) | `ux-research` | keep (renamed from `ux-design`) | 문제→화면/플로우 | NN/Cooper screen-flow spec |
+| UX engineering/tokens (4) | `ux-engineering` | **PROMOTE** (round 1, unchanged) | 디자인 결정→토큰/규칙 시스템화 | Design Tokens Book / Material token classes |
+| API/interface design (5) | `api-design` | **PROMOTE** (round 1, unchanged) | 서비스 경계의 인터페이스 형태 | RESTful API Design Patterns anchor |
+| Software architecture/system design (6, 20 — same domain restated twice) | **`architecture`** (new) | **PROMOTE — reversed from round 1/2 hold** | 컴포넌트 경계·의존 방향을 어떻게 가를지 | Bass/Clements/Kazman + Evans DDD anchor; ADR-style decision record |
+| Coding/implementation (7) | `coding` | keep | 승인된 범위→동작 코드 | Code Complete/Clean Code anchor |
+| Test/QA methodology (8) | `qa` | keep (method role, unaffected by domain-promotion rule) | 실행 시 실제 동작 | evidence-cited pass/fail |
+| Security/threat modeling (9) | `security-threat-model` | **PROMOTE** (round 1, unchanged) | 신뢰 경계의 위협 표면 | Shostack/STRIDE anchor |
+| Tech feasibility/build-vs-buy (10) | `feasibility` | keep, narrowed | 기술적으로 되는가 | PoC-driven build-vs-buy verdict |
+| Legal/regulatory/compliance (11, 29 — same domain) | **`legal-compliance`** (new) | **PROMOTE — reversed from round 1/2 hold** | 이 스펙/처리가 법·규제를 통과하는가 | dominant framework anchor: ISO 37301 compliance-management-system structure + IAPP privacy-program framework (no single canonical text, but two credible cross-jurisdiction frameworks — satisfies the new rule's "복수 계보" allowance) |
+| Code review/audit (12) | `review` | keep (method role) | 산출물 vs 명세 일치 | Present/Surface/Absent/Incorrect/Unverifiable |
+| Independent verification (13) | `verify` | keep (method role) | 결함 실재 — 독립 재현 | reproduced/not-reproduced + evidence |
+| Release engineering/rollout (14) | `ops` | keep, bundled w/ 15 | 배포 가능한가 | SRE Workbook canary/staged-rollout anchor |
+| Incident response/postmortem (15) | `ops` (bundled) | keep | 장애 후 무엇을 배웠나 | blameless postmortem anchor |
+| Retrospective/org learning (16) | `reflect` | keep | 이슈 역사가 무엇을 가르치나 | Kerth retrospective anchor |
+| Data/analytics engineering (17, 28 — same domain restated) | **`data-engineering`** (new) | **PROMOTE — reversed from round 1 completeness-note / round 2 hold** | 데이터를 안정적으로 이동·변환할 파이프라인 설계 | Reis & Housley *Fundamentals of Data Engineering* anchor |
+| Technical writing/documentation (18, 43 — same domain restated) | **`technical-writing`** (new) | **PROMOTE — reversed from round 1 completeness-note / round 2 hold** | 독자가 알아야 할 것을 어떻게 구조화하는가 | Google Technical Writing courses anchor |
+| DB design/data modeling (19) | **`data-modeling`** (new) | **PROMOTE — reversed from round 2 hold** (feedback names this explicitly) | 데이터를 어떤 관계/스키마로 모델링할지 | Kimball & Ross / Codd anchor |
+| Performance engineering (21) | **`performance-engineering`** (new) | **PROMOTE — reversed from round 2 hold** (feedback names this explicitly) | 이 설계가 부하/지연 목표를 만족하는가 | Brendan Gregg *Systems Performance* anchor |
+| Infra/IaC (22) | `ops` | **귀속 유지** — non-separable produces | IaC is *how* `ops` executes a rollout decision, not a distinct judgment lens from row 14; splitting leaves no artifact that isn't already `ops`'s rollout checklist | — |
+| CI/CD·build (23) | `ops` | **귀속 유지** — non-separable produces, same reasoning as row 22 | — | — |
+| Accessibility/WCAG (24) | **`accessibility`** (new) | **PROMOTE — reversed from round 2 hold** (feedback names this explicitly) | 화면/플로우/토큰이 WCAG를 만족하는가 | W3C WCAG 2.x normative anchor |
+| SLO/reliability engineering (25) | `ops` | **귀속 유지** — pure restatement of row 14/15's lens (same SRE-workbook lineage, same "is it up and fast enough" judgment feasibility already asked to reconsider once and reject; feedback's explicit-promotion list does not name this row) | — | — |
+| Secure coding/pentest (26) | **`secure-coding`** (new) | **PROMOTE — reversed from round 2 hold** (feedback names this explicitly) | 구현이 실제로 공격에 견디는가 (설계 단계 threat-model과 별개, 구현/사후 검증) | OWASP ASVS/Testing Guide + Weidman anchor |
+| ML engineering (27) | **`ml-engineering`** (new) | **PROMOTE — reversed from round 2 hold** ("usage signal" no longer a hold reason) | 모델을 서비스로 안정적으로 서빙할 수 있는가 | Sculley et al. "Hidden Technical Debt" + Huyen anchor |
+| Finance/unit economics (30) | **`finance-unit-economics`** (new) | **PROMOTE — reversed** | 이 사업/기능이 단위경제상 성립하는가 | Damodaran valuation coursework / *Startup CXO* ch. anchor |
+| Pricing (31) | **`pricing`** (new) | **PROMOTE — reversed** | 얼마를 받을지, 어떤 구조로 받을지 | Nagle & Holden anchor |
+| Sales (32) | **`sales`** (new) | **PROMOTE — reversed** | 이 리드/기회를 어떻게 진행시킬지 | Rackham *SPIN Selling* anchor |
+| Marketing (33) | **`marketing`** (new) | **PROMOTE — reversed** | 어떤 메시지로 어떤 채널에 도달할지 | Kotler & Keller anchor |
+| Growth/funnel analysis (34) + experiment interpretation (35 — same judgment lens, "does the data support the claim", restated) | **`growth-analytics`** (new) | **PROMOTE — reversed** (row 35 merges in as attribution-by-restatement, not held) | 퍼널의 어느 단계가 병목이고, 이 실험이 그 병목을 실제로 개선했는가 | Weinberg & Mares *Traction* + Kohavi/Tang/Xu *Trustworthy Online Controlled Experiments* anchor |
+| Customer support/CS (36) | **`customer-support`** (new) | **PROMOTE — reversed** (dominant practitioner framework, not a book canon — satisfies new rule's framework allowance) | 고객 문의를 어떤 우선순위/SLA로 처리할지 | Zendesk/Intercom support-ops playbooks + Customer Effort Score methodology anchor |
+| Partnerships/BD (37) | **`partnerships-bd`** (new) | **PROMOTE — reversed** | 이 파트너십이 구조적으로 성립하는가 | alliance/BD practitioner lineage anchor (e.g. Segil *Fast Alliances*) |
+| PR/communications (38) | **`pr-communications`** (new) | **PROMOTE — reversed** | 이 메시지가 외부에 어떻게 읽힐지 | Grunig & Hunt anchor |
+| Risk management (39) | **`risk-management`** (new) | **PROMOTE — reversed** | 전사 리스크 노출이 허용 범위인가 (feasibility의 "만들어도 되는가"보다 넓은 범위 — 재무/운영/전략 리스크 포함) | COSO ERM framework anchor |
+| Brand/visual design (40) | **`brand-design`** (new) | **PROMOTE — reversed** | 브랜드 정체성이 시각적으로 일관되는가 | Wheeler *Designing Brand Identity* anchor |
+| Content design/UX writing (41) | **`content-design`** (new) | **PROMOTE — reversed from round 2's attribution into `ux-research`** (feedback names this explicitly as an expected promotion) | 문구가 사용자의 실제 결정을 돕는가 (플로우 설계와 별개의 판단 — Redish 렌즈는 상호작용이 아니라 언어) | Redish *Letting Go of the Words* + Winters content-design lineage anchor |
+| i18n/localization (42) | **`localization`** (new) | **PROMOTE — reversed** | 다른 로케일에서도 이 산출물이 성립하는가 | Esselink anchor |
+| DevRel (44) | **`devrel`** (new) | **PROMOTE — reversed** | 외부 개발자가 이 표면을 채택할 수 있는가 | Thengvall anchor |
+
+### 3b. What stays held or attributed, and why (the only two carve-outs left)
+- **IaC (22), CI/CD (23), SLO (25)** stay attributed to `ops` — non-separable produces / pure restatement of `ops`'s existing rollout-reliability lens. These are the only three rows in the entire 44-row map still held after the rule flip.
+- No domain is held purely for lacking a canonical text or lacking current usage — both reasons are retired per feedback.
+
+### 3c. Round-3 summary
+44 domains surveyed end-to-end, deduped where the same domain was restated (6=20, 11=29, 17=28, 18=43, 34=35) → **35 target roles**: the original 9 (`ux-design` renamed `ux-research`) + 26 promotions (4 from round 1, 22 from round 3's rule flip). Only 3 rows remain attributed (IaC, CI/CD, SLO → all into `ops`). Zero rows held with no disposition.
