@@ -422,8 +422,12 @@ def role_settings(role: str) -> dict:
     # permissions.allow 에 규칙이 없는 도구는 그냥 거부된다(#58 조사가 놓친 지점).
     # 모든 역할에 적용한다(#58 과 동일한 operator 결정: option B) — 샌드박스
     # 활성 여부와 무관하다, 이 층은 샌드박스가 아니라 CLI 권한 프롬프트이므로.
+    # Read/Grep/Glob 도 같은 이유로 추가한다(이슈 #153) — 읽기 전용 조회이고
+    # 도달 가능한 경로는 여전히 sandbox.filesystem.allowRead/denyRead 가 정한다;
+    # 이 층은 그 경계를 넓히지 않는다. Bash 하위 패턴은 "읽기 전용"으로 안전하게
+    # 한정할 수 없어 제외한다(survey 3절).
     allow = s.setdefault("permissions", {}).setdefault("allow", [])
-    for tool in ("WebSearch", "WebFetch"):
+    for tool in ("WebSearch", "WebFetch", "Read", "Grep", "Glob"):
         if tool not in allow:
             allow.append(tool)
 
