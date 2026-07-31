@@ -1,0 +1,30 @@
+{
+  "marketplace": "tokenmaxxxer-refactoring-legacy",
+  "repo": "tokenmaxxxer/refactoring-legacy-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/refactoring-legacy-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "기존 코드의 관찰 가능한 동작을 바꾸지 않고 안전하게 재구조화할 수 있는가",
+  "use_when": "레거시/기존 코드에 손을 대야 할 때",
+  "produces": "refactoring plan, characterization tests, before/after behavior-equivalence note",
+  "write_scope": [
+    "src/**",
+    "test/**"
+  ],
+  "record_fields": {
+    "loop_state": [
+      "scope-proposed",
+      "scope-approved",
+      "in-progress",
+      "landed"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "marketplace": "tokenmaxxxer-incident-response",
+  "repo": "tokenmaxxxer/incident-response-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/incident-response-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "장애 후 무엇을 배웠고 재발을 무엇으로 막을 것인가",
+  "use_when": "장애 종결 직후",
+  "produces": "timeline, blameless postmortem, action items w/ owner+deadline",
+  "write_scope": [
+    "docs/issue-<n>/postmortems/**"
+  ],
+  "record_fields": {
+    "loop_state": [
+      "scope-proposed",
+      "scope-approved",
+      "in-progress",
+      "landed"
+    ]
+  }
+}

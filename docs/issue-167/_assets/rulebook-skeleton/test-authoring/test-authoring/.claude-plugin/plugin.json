@@ -1,0 +1,7 @@
+{
+  "name": "test-authoring",
+  "description": "The test-authoring role on contract v3: 테스트 코드 자체가 격리성·fixture 전략 면에서 좋은 설계인가. use_when: 신규/기존 테스트 스위트를 설계·리뷰할 때. Hand-off: 실제 실행 결과 관찰은 → execution-observation.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

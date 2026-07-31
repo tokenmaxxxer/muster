@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-incident-response",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "incident-response",
+      "source": "./incident-response",
+      "description": "The incident-response role on contract v3 (issue-160 round-4 promotion). Decides: 장애 후 무엇을 배웠고 재발을 무엇으로 막을 것인가."
+    }
+  ]
+}

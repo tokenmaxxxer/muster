@@ -1,0 +1,7 @@
+{
+  "name": "incident-response",
+  "description": "The incident-response role on contract v3: 장애 후 무엇을 배웠고 재발을 무엇으로 막을 것인가. use_when: 장애 종결 직후. Hand-off: 용량 부족이 원인이면 → capacity-planning; 계측 부재가 원인이면 → observability.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

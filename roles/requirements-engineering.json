@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-requirements-engineering",
+  "repo": "tokenmaxxxer/requirements-engineering-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/requirements-engineering-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "요구사항이 검증가능·일관·추적 가능하게 명세되었는가",
+  "use_when": "product 가설이 확정되어 정식 스펙으로 전환할 때",
+  "produces": "structured requirements doc, traceability matrix, ambiguity list resolved",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

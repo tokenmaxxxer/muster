@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-test-authoring",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "test-authoring",
+      "source": "./test-authoring",
+      "description": "The test-authoring role on contract v3 (issue-160 round-4 promotion). Decides: 테스트 코드 자체가 격리성·fixture 전략 면에서 좋은 설계인가."
+    }
+  ]
+}
