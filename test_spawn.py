@@ -1551,5 +1551,116 @@ class EventExitScope(unittest.TestCase):
         self.assertEqual(kept, ["https://github.com/tokenmaxxxer/on-the-record/pull/142"])
 
 
+class FlowsPayload(unittest.TestCase):
+    """issue #172: `spawn.py flows --json` payload — schema shape per section,
+    all `gh`-hitting helpers monkeypatched (no live network in tests)."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.root = Path(self.td.name)
+        self.addCleanup(self.td.cleanup)
+        self._patched = []
+        self._patch(spawn, "_repo_slug", lambda root: "acme/repo")
+        self._patch(spawn, "_pr_list_all", lambda root: [])
+        self._patch(spawn, "_issue_comments", lambda root, n: [])
+        self._patch(spawn, "_roster_load", lambda: {})
+        old_root = spawn.ROOT
+        spawn.ROOT = self.root
+        self.addCleanup(setattr, spawn, "ROOT", old_root)
+        sys.path.insert(0, str((Path(spawn.__file__).parent / "gates").resolve()))
+        import closure_sweep
+        self.closure_sweep = closure_sweep
+        self._patch(closure_sweep, "find_violations", lambda root, subjects=None: [])
+
+    def _patch(self, obj, name, fn):
+        orig = getattr(obj, name)
+        setattr(obj, name, fn)
+        self.addCleanup(setattr, obj, name, orig)
+
+    def _write_record(self, subject, role, loop_state, verdict=None, upstream=False):
+        rec = self.root / spawn.BOARD / subject / "reports"
+        rec.mkdir(parents=True, exist_ok=True)
+        body = f"---\nloop_state: {loop_state}\n"
+        if verdict:
+            body += f"verdict: {verdict}\n"
+        if upstream:
+            body += "upstream:\n  - path: docs/issue-1/reports/other.md\n"
+        body += "---\n"
+        (rec / f"{role}.md").write_text(body, encoding="utf-8")
+
+    def test_schema_top_level_keys(self):
+        payload = spawn.flows_payload(self.root)
+        for key in ("schema_version", "generated_at", "repo", "decision_queue",
+                    "flows", "sessions", "ledger", "hygiene"):
+            self.assertIn(key, payload)
+        self.assertIsInstance(payload["schema_version"], int)
+        self.assertIsInstance(payload["hygiene"]["closure_sweep"], list)
+        self.assertIsInstance(payload["hygiene"]["unapproved_open_prs"], list)
+
+    def test_flows_section_stage_mapping_and_unmapped_fallback(self):
+        self._write_record("issue-10", "product-discovery", "scope-proposed")
+        self._write_record("issue-11", "product-discovery", "some-downstream-state")
+        payload = spawn.flows_payload(self.root)
+        by_issue = {f["issue"]: f for f in payload["flows"]}
+        self.assertEqual(by_issue[10]["stage"], "proposal")
+        self.assertTrue(by_issue[10]["stage_derived"])
+        self.assertEqual(by_issue[11]["stage"], "some-downstream-state")
+        self.assertFalse(by_issue[11]["stage_derived"])
+
+    def test_decision_queue_from_open_pr(self):
+        self._write_record("issue-20", "product-discovery", "scope-proposed")
+        self._patch(spawn, "_pr_list_all", lambda root: [
+            {"number": 99, "headRefName": "issue-20/product-discovery",
+             "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
+        ])
+        payload = spawn.flows_payload(self.root)
+        self.assertEqual(len(payload["decision_queue"]), 1)
+        entry = payload["decision_queue"][0]
+        self.assertEqual(entry["pr"], 99)
+        self.assertEqual(entry["phase"], 1)
+        self.assertEqual(entry["awaiting"], "approve-scope")
+
+    def test_sessions_alive_is_pending_dead_looks_up_ledger(self):
+        self._patch(spawn, "_roster_load", lambda: {
+            "issue-5/coding": {"role": "coding", "issue": 5, "pid": 999999,
+                               "ts": int(time.time())},
+        })
+        spawn.ledger_write({"role": "coding", "cost_usd": 1.0, "outcome": "progressed",
+                           "board_delta": ["docs/issue-5/reports/coding.md"]})
+        payload = spawn.flows_payload(self.root)
+        self.assertEqual(len(payload["sessions"]), 1)
+        s = payload["sessions"][0]
+        # pid 999999 is assumed not alive in the test sandbox
+        if not s["alive"]:
+            self.assertEqual(s["verdict"], "progressed")
+
+    def test_ledger_aggregation_per_issue_and_unattributed_bucket(self):
+        spawn.ledger_write({"role": "coding", "cost_usd": 1.5, "outcome": "progressed",
+                           "board_delta": ["docs/issue-7/reports/coding.md"]})
+        spawn.ledger_write({"role": "coding", "cost_usd": 0.5, "outcome": "refused",
+                           "board_delta": []})
+        payload = spawn.flows_payload(self.root)
+        self.assertEqual(len(payload["ledger"]), 1)
+        self.assertEqual(payload["ledger"][0]["issue"], 7)
+        self.assertEqual(payload["ledger"][0]["sessions"], 1)
+        self.assertAlmostEqual(payload["ledger"][0]["cost_usd_total"], 1.5)
+        self.assertEqual(payload["unattributed"]["sessions"], 1)
+        self.assertAlmostEqual(payload["unattributed"]["cost_usd_total"], 0.5)
+
+    def test_hygiene_includes_closure_sweep_and_unapproved_prs(self):
+        self._write_record("issue-30", "implementation", "scope-approved")
+        self._patch(spawn, "_pr_list_all", lambda root: [
+            {"number": 55, "headRefName": "issue-30/implementation",
+             "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
+        ])
+        self._patch(self.closure_sweep, "find_violations",
+                    lambda root, subjects=None: [{"kind": "open-pr-on-closed-issue"}])
+        payload = spawn.flows_payload(self.root)
+        self.assertEqual(payload["hygiene"]["closure_sweep"],
+                         [{"kind": "open-pr-on-closed-issue"}])
+        self.assertEqual(len(payload["hygiene"]["unapproved_open_prs"]), 1)
+        self.assertEqual(payload["hygiene"]["unapproved_open_prs"][0]["pr"], 55)
+
+
 if __name__ == "__main__":
     unittest.main()
