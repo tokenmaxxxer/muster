@@ -75,3 +75,44 @@ No changes were needed in `gates.py`, `pr_reference.py`, or `closure_sweep.py`
 Combined: 117 pytest tests pass, all role-name-dependent checks in
 `test_gates.py` pass, confirming the regression reported in issue #162 is
 resolved.
+
+## Follow-up: one remaining stale reference (PR #165 review comment)
+
+PR #165's fix list (lines 53, 95, 208-211, 228, 363 of `test_gates.py`) missed
+one occurrence: `test_gates.py:170`, inside `t_rulebook_falls_back_to_github`,
+still read `roles/qa.json` (deleted by the rename) and built a synthetic
+local-checkout directory named `qa-agent-rulebook`, which no longer matches
+`roles/execution-observation.json`'s `path` field
+(`$TOKENMAXXXER_RULEBOOKS/execution-observation-rulebook`). On `main` this
+made `python3 test_gates.py` fail with `FileNotFoundError` before printing any
+`ok` lines.
+
+Fix: `roles/qa.json` -> `roles/execution-observation.json`, and the synthetic
+checkout directory name `qa-agent-rulebook` -> `execution-observation-rulebook`
+(matching the canon role's actual `path` basename, not just its role name) so
+the local-checkout-wins branch of `spawn.rulebook_source` is exercised
+correctly.
+
+Test results (this fix, run against this branch's checkout of `main`-equivalent
+state, i.e. after commit `386fc1d`):
+
+- `python3 test_gates.py` -> 43 `ok` lines, then the same
+  `t_repo_local_claude_config_stops_the_spawn` failure documented above
+  (`OSError: [Errno 30] Read-only file system` on
+  `~/.tokenmaxxxer/trusted-repo-config.json`), confirmed pre-existing and
+  unrelated to role names (same failure, same site, independent of the
+  `roles/qa.json` fix). Because that failure sits alphabetically before
+  `t_rulebook_falls_back_to_github` in the direct-run order, the fixed test
+  was additionally verified standalone: `python3 -c "import test_gates;
+  test_gates.t_rulebook_falls_back_to_github()"` completes without error.
+  Full output: [`implementation/test_gates_full_run.log`](implementation/test_gates_full_run.log).
+- `python3 -m pytest -q` -> `109 passed, 8 failed`. The 8 failures are in
+  `test_spawn.py` (`GitHead`, `IsNewCommit`, `Clean`, `Watchdog`,
+  `EventExitScope` classes) and are git-plumbing/filesystem-sandbox failures
+  unrelated to role names or `roles/qa.json` (e.g. `git` operations against
+  throwaway temp repos returning empty results in this sandbox). Reported
+  honestly rather than filtered out. Full output:
+  [`implementation/pytest_full_run.log`](implementation/pytest_full_run.log).
+
+This closes the one remaining leftover from the PR #164 -> PR #165 role-rename
+cleanup identified in the issue #162 review thread.

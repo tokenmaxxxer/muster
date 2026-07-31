@@ -1,0 +1,55 @@
+  ok  t_board_absent_names_the_v1_location
+  ok  t_board_reads_loop_state
+  ok  t_board_tolerates_trailing_comment
+  ok  t_closure_sweep_closed_issue_no_pr_ref_not_violation
+  ok  t_closure_sweep_closed_issue_open_pr_violates
+  ok  t_closure_sweep_everything_consistent_not_violation
+  ok  t_closure_sweep_merged_delivery_issue_open_violates
+  ok  t_closure_sweep_merged_phase1_plain_ref_not_violation
+  ok  t_commit_bypass
+  ok  t_dep_direct_reference
+  ok  t_dep_names
+  ok  t_deps_fail_closed
+  ok  t_fulfils_create_claim_absent_blocks
+  ok  t_fulfils_create_claim_matches_diff_passes
+  ok  t_fulfils_delete_claim_absent_from_diff_blocks
+  ok  t_fulfils_delete_claim_matches_diff_passes
+  ok  t_fulfils_move_claim_matches_rename_passes
+  ok  t_fulfils_move_claim_wrong_pair_blocks
+  ok  t_fulfils_record_with_no_claims_untouched
+  ok  t_fulfils_unparseable_claim_blocks
+  ok  t_missing_board_marker_stops_the_spawn
+  ok  t_new_roles_resolve_without_a_local_checkout
+  ok  t_origin_main_missing
+  ok  t_parse_new_deps
+  ok  t_pr_reference_phase1_missing_ref_blocks
+  ok  t_pr_reference_phase1_plain_ref_passes
+  ok  t_pr_reference_phase1_wrong_issue_blocks
+  ok  t_pr_reference_phase2_requires_closes
+  ok  t_protected_paths
+  ok  t_record_both_defects_block_independently
+  ok  t_record_enums_in_enum_passes
+  ok  t_record_enums_loop_state_out_of_set_blocks
+  ok  t_record_enums_missing_role_file_blocks
+  ok  t_record_enums_no_roles_in_work_repo_passes
+  ok  t_record_enums_out_of_enum_blocks
+  ok  t_record_enums_undeclared_field_passes
+  ok  t_record_no_tool_residue_allows_fenced_tag
+  ok  t_record_no_tool_residue_blocks_leaked_tag
+  ok  t_record_no_tool_residue_passes_clean_record
+  ok  t_record_wellformed_missing_close_delimiter
+  ok  t_record_wellformed_missing_open_delimiter
+  ok  t_record_wellformed_passes_valid_frontmatter
+  ok  t_rename_bypass
+Traceback (most recent call last):
+  File "/home/jwjung/.tokenmaxxxer/work/on-the-record-issue-162-implementation/test_gates.py", line 881, in <module>
+    t()
+  File "/home/jwjung/.tokenmaxxxer/work/on-the-record-issue-162-implementation/test_gates.py", line 128, in t_repo_local_claude_config_stops_the_spawn
+    spawn.require_no_repo_config(str(root), True)   # 명시적 opt-out 은 통과
+  File "/home/jwjung/.tokenmaxxxer/work/on-the-record-issue-162-implementation/spawn.py", line 767, in require_no_repo_config
+    pins.write_text(json.dumps(table, indent=2))
+  File "/usr/lib/python3.10/pathlib.py", line 1154, in write_text
+    with self.open(mode='w', encoding=encoding, errors=errors, newline=newline) as f:
+  File "/usr/lib/python3.10/pathlib.py", line 1119, in open
+    return self._accessor.open(self, mode, buffering, encoding, errors,
+OSError: [Errno 30] Read-only file system: '/home/jwjung/.tokenmaxxxer/trusted-repo-config.json'
