@@ -1,0 +1,7 @@
+{
+  "name": "partnerships-bd",
+  "description": "The partnerships-bd role on contract v3: 파트너십이 구조적으로 성립하는가. use_when: 제휴/BD 딜 구조가 걸릴 때. Hand-off: 법적 계약 검토는 → legal-compliance.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-sales",
+  "repo": "tokenmaxxxer/sales-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/sales-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "리드/기회를 어떻게 진행시킬지",
+  "use_when": "영업 프로세스 설계가 걸릴 때",
+  "produces": "sales playbook, stage definitions, qualification criteria",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

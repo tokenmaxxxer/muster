@@ -1,0 +1,7 @@
+{
+  "name": "customer-support",
+  "description": "The customer-support role on contract v3: 문의를 어떤 우선순위/SLA로 처리할지. use_when: CS 플로우/SLA 설계가 걸릴 때. Hand-off: 반복 문의가 제품 결함이면 → product-discovery.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "finance-unit-economics",
+  "description": "The finance-unit-economics role on contract v3: 단위경제상 성립하는가. use_when: 가격/비용 구조가 걸린 결정일 때. Hand-off: 실제 가격 숫자 결정은 → pricing.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

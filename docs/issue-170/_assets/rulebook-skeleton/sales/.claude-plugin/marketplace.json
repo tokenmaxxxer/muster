@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-sales",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "sales",
+      "source": "./sales",
+      "description": "The sales role on contract v3 (issue-160 round-3 promotion). Decides: 리드/기회를 어떻게 진행시킬지."
+    }
+  ]
+}

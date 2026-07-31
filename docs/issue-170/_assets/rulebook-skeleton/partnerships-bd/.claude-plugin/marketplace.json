@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-partnerships-bd",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "partnerships-bd",
+      "source": "./partnerships-bd",
+      "description": "The partnerships-bd role on contract v3 (issue-160 round-3 promotion). Decides: 파트너십이 구조적으로 성립하는가."
+    }
+  ]
+}

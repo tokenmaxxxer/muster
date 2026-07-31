@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-customer-support",
+  "repo": "tokenmaxxxer/customer-support-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/customer-support-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "문의를 어떤 우선순위/SLA로 처리할지",
+  "use_when": "CS 플로우/SLA 설계가 걸릴 때",
+  "produces": "support playbook, SLA table, escalation path",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

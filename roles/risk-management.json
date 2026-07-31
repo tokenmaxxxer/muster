@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-risk-management",
+  "repo": "tokenmaxxxer/risk-management-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/risk-management-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "전사 리스크 노출이 허용 범위인가",
+  "use_when": "재무/운영/전략 리스크가 걸릴 때 (feasibility보다 넓은 범위)",
+  "produces": "ERM verdict, risk register entry, mitigation owner",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

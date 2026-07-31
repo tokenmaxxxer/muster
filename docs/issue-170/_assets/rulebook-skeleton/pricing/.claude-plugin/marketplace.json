@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-pricing",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "pricing",
+      "source": "./pricing",
+      "description": "The pricing role on contract v3 (issue-160 round-3 promotion). Decides: 얼마를, 어떤 구조로 받을지."
+    }
+  ]
+}

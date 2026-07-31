@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-growth-analytics",
+  "repo": "tokenmaxxxer/growth-analytics-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/growth-analytics-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "퍼널 병목과 실험 결과가 실제 개선인지",
+  "use_when": "퍼널 분석 또는 A/B 실험 해석이 걸릴 때",
+  "produces": "funnel diagnosis, experiment trust verdict (SRM/pre-registration check)",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

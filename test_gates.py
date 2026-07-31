@@ -213,7 +213,7 @@ def t_new_roles_resolve_without_a_local_checkout():
         spec = _json.loads((spawn.ROOT / "roles" / f"{role}.json").read_text())
         assert "path" not in spec, f"{role}: 로컬 경로를 박으면 다른 기계에서 깨진다"
         assert spawn.rulebook_source(spec)["source"] == "github", role
-    assert len(spawn.ROLES) == 27, spawn.ROLES
+    assert len(spawn.ROLES) == 38, spawn.ROLES
 
 
 def t_board_absent_names_the_v1_location():

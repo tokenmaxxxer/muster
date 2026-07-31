@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-finance-unit-economics",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "finance-unit-economics",
+      "source": "./finance-unit-economics",
+      "description": "The finance-unit-economics role on contract v3 (issue-160 round-3 promotion). Decides: 단위경제상 성립하는가."
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "legal-compliance",
+  "description": "The legal-compliance role on contract v3: 이 스펙/처리가 법·규제를 통과하는가. use_when: 개인정보·라이선스·계약이 걸릴 때. Hand-off: 전사 리스크 노출 규모 판단은 → risk-management.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

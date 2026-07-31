@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-risk-management",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "risk-management",
+      "source": "./risk-management",
+      "description": "The risk-management role on contract v3 (issue-160 round-3 promotion). Decides: 전사 리스크 노출이 허용 범위인가."
+    }
+  ]
+}
