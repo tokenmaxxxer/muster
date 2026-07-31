@@ -763,6 +763,117 @@ def t_role_scope_undeclared_write_scope_fails_closed():
         gates.ON_THE_RECORD_ROOT = old
 
 
+def _fulfils_repo(td: str, subject: str, role: str, record_text: str,
+                  pre_files: dict = None, ops=None) -> Path:
+    """fulfils 게이트 전용 픽스처: 초기 커밋(pre_files 포함) 후 origin/main 을
+    거기서 고정하고, 두 번째 커밋에서 ops(파일 삭제/생성/rename)와 레코드를
+    함께 넣는다 — `_record_repo`와 달리 diff 에 실제 파일 변경이 필요해서 뺐다."""
+    work = Path(td) / "work"
+    d = work / "docs" / subject / "reports"
+    d.mkdir(parents=True)
+    run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                    capture_output=True, check=True)
+    run("init", "-q", "-b", "main")
+    run("config", "user.email", "t@t"); run("config", "user.name", "t")
+    (work / "README.md").write_text("x")
+    for path, content in (pre_files or {}).items():
+        p = work / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+    run("add", "-A"); run("commit", "-qm", "init")
+    run("branch", "-f", "origin/main")
+    for op in (ops or []):
+        kind = op[0]
+        if kind == "delete":
+            run("rm", "-q", op[1])
+        elif kind == "create":
+            p = work / op[1]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("new")
+        elif kind == "rename":
+            (work / op[2]).parent.mkdir(parents=True, exist_ok=True)
+            run("mv", op[1], op[2])
+    (d / f"{role}.md").write_text(record_text)
+    run("add", "-A"); run("-c", "user.email=t@t", "-c", "user.name=t",
+                          "commit", "-qm", "record")
+    return work
+
+
+def t_fulfils_delete_claim_matches_diff_passes():
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\nfulfils: delete docs/foo.md\n",
+                             pre_files={"docs/foo.md": "x"},
+                             ops=[("delete", "docs/foo.md")])
+        assert gates.record_fulfils_diff(Path(td), {}) == []
+
+
+def t_fulfils_delete_claim_absent_from_diff_blocks():
+    # issue #145 의 실제 사고 재현: 레코드는 삭제를 주장하지만 diff 에는 없다.
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\nfulfils: delete docs/foo.md\n",
+                             pre_files={"docs/foo.md": "x"},
+                             ops=[])
+        bad = gates.record_fulfils_diff(Path(td), {})
+        assert any("delete docs/foo.md" in b for b in bad), bad
+
+
+def t_fulfils_create_claim_matches_diff_passes():
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\nfulfils: create src/new.py\n",
+                             ops=[("create", "src/new.py")])
+        assert gates.record_fulfils_diff(Path(td), {}) == []
+
+
+def t_fulfils_create_claim_absent_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\nfulfils: create src/new.py\n",
+                             ops=[])
+        bad = gates.record_fulfils_diff(Path(td), {})
+        assert any("create src/new.py" in b for b in bad), bad
+
+
+def t_fulfils_move_claim_matches_rename_passes():
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(
+            td, "issue-9", "coding",
+            "---\nkind: x\n---\n\nfulfils: move old/a.py -> new/a.py\n",
+            pre_files={"old/a.py": "x" * 50},
+            ops=[("rename", "old/a.py", "new/a.py")])
+        assert gates.record_fulfils_diff(Path(td), {}) == []
+
+
+def t_fulfils_move_claim_wrong_pair_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(
+            td, "issue-9", "coding",
+            "---\nkind: x\n---\n\nfulfils: move old/a.py -> wrong/a.py\n",
+            pre_files={"old/a.py": "x" * 50},
+            ops=[("rename", "old/a.py", "new/a.py")])
+        bad = gates.record_fulfils_diff(Path(td), {})
+        assert any("move old/a.py -> wrong/a.py" in b for b in bad), bad
+
+
+def t_fulfils_unparseable_claim_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\nfulfils: rewrite docs/foo.md\n",
+                             pre_files={"docs/foo.md": "x"}, ops=[])
+        bad = gates.record_fulfils_diff(Path(td), {})
+        assert any("파싱 불가" in b and "rewrite" in b for b in bad), bad
+
+
+def t_fulfils_record_with_no_claims_untouched():
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\n평범한 본문, claim 없음\n",
+                             ops=[])
+        assert gates.record_fulfils_diff(Path(td), {}) == []
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("t_")]
     for t in tests:
