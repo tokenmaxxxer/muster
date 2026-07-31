@@ -144,6 +144,35 @@ Net role count unchanged from round 4: **43 roles** (round 5 is a naming + speci
 
 **Track B — gradual rulebook depth**, filled in as each role is first invoked, unchanged from round 4's rationale.
 
+### Rulebook repo naming convention (round 6, per PR #161's sixth feedback)
+
+**Convention: `<role-name>-rulebook`** — drop `agent` entirely, use the round-5 role name. Applies to every rulebook repo, existing and new; Track A stands up the 34 net-new roles' repos already named this way (`user-discovery-rulebook`, not `user-discovery-agent-rulebook`), so this section covers only the 9 existing repos, which need an actual GitHub rename plus reference updates.
+
+**(a) Rename mapping — existing 9 repos:**
+
+| Current repo | New name | Note |
+|---|---|---|
+| `tokenmaxxxer/coding-agent-rulebook` | `tokenmaxxxer/implementation-rulebook` | role renamed `coding`→`implementation` |
+| `tokenmaxxxer/qa-agent-rulebook` | `tokenmaxxxer/execution-observation-rulebook` | role renamed `qa`→`execution-observation` |
+| `tokenmaxxxer/ops-agent-rulebook` | `tokenmaxxxer/release-engineering-rulebook` | role renamed `ops`→`release-engineering` |
+| `tokenmaxxxer/verify-agent-rulebook` | `tokenmaxxxer/defect-verification-rulebook` | role renamed `verify`→`defect-verification` |
+| `tokenmaxxxer/review-agent-rulebook` | `tokenmaxxxer/conformance-review-rulebook` | role renamed `review`→`conformance-review` |
+| `tokenmaxxxer/reflect-agent-rulebook` | `tokenmaxxxer/issue-retrospective-rulebook` | role renamed `reflect`→`issue-retrospective` |
+| `tokenmaxxxer/product-agent-rulebook` | `tokenmaxxxer/product-discovery-rulebook` | role renamed `product`→`product-discovery` |
+| `tokenmaxxxer/feasibility-agent-rulebook` | `tokenmaxxxer/technical-feasibility-rulebook` | role renamed `feasibility`→`technical-feasibility` |
+| `tokenmaxxxer/ux-design-rulebook` | `tokenmaxxxer/interaction-design-rulebook` | role renamed `ux-research`/`ux-design`→`interaction-design`; already lacked `agent`, still renamed to track the role rename |
+
+GitHub repo renames leave the old URL as a redirect, but every hardcoded reference below must still be updated — the redirect is a safety net for stragglers, not a substitute for updating call sites.
+
+**(b) Impact list — sites that depend on the naming convention:**
+
+- `roles/*.json` (9 files) — each role's `"repo"` and `"path"` fields (`spawn.py:3-4` pattern, e.g. `roles/coding.json`) hardcode the old repo name and the `$TOKENMAXXXER_RULEBOOKS/<repo>` local-checkout path; both need updating to the new name, in lockstep with the file's own rename to `roles/<new-role-name>.json` (Track A).
+- `.claude-plugin/marketplace.json` — every role's marketplace entries embed `"repo": "tokenmaxxxer/<old-name>-agent-rulebook"` per plugin block (multiple blocks per role, e.g. 9 occurrences for `coding-agent-rulebook` alone); all need the new repo name.
+- `spawn.py` — `rulebook_source()`, `rulebook_checkout()`, `ensure_rulebook()` (spawn.py:141-291) read `spec["repo"]`/`spec["path"]` from the role JSON at runtime and do not hardcode repo names themselves, so no code change is needed there — but they will clone whatever `roles/*.json` says, so a stale role file silently points at a now-renamed (redirected) repo until updated.
+- Any prose doc referencing a rulebook repo by name (e.g. onboarding/setup docs, `docs/handbooks/*`, `README.md`) — not enumerated here since execution is a separate issue; that issue's write set must grep for `-agent-rulebook` and each old bare name to find every prose mention before landing the rename.
+
+This section is proposal text only — no repo rename, no `roles/*.json`/`marketplace.json` edit happens in this PR; both land in the execution issue per this proposal's existing scope boundary.
+
 ## Side-effect analysis
 Unchanged from round 4 on orchestration cost and the briefing-cost-vs-work-cost pathology (`use_when` remains the sole lever, not role count) — see [[survey]] §4e and the round-4 side-effect text this document previously carried. This round's addition:
 
