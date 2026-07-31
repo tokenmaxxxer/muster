@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1461,6 +1462,81 @@ class RosterConcurrency(unittest.TestCase):
                 self.assertEqual(len(d), n, d)
             finally:
                 spawn.ROSTER = old_roster
+
+
+class EventExitScope(unittest.TestCase):
+    """이슈 #142 — 스폰은 **이 세션이 낸** 이벤트로만 리턴해야 한다.
+
+    실측 2026-07-30(core issue-53 phase 2): 78분 전 phase 1 이 남긴
+    `pr-opened https://github.com/octocat/Hello-World/pull/1` 로 스폰이 exit 0
+    을 냈고, 세션은 계속 돌았다. 두 결함이 겹쳤다 — 과거 이벤트를 소비했고,
+    그 이벤트의 URL 은 이 레포의 PR 도 아니었다.
+    """
+
+    def setUp(self):
+        self.td = tempfile.mkdtemp()
+        self.work = Path(self.td) / "wk"
+        self.work.mkdir()
+        self.events = spawn._events_path(self.work)
+        self.offset = spawn._offset_path(self.work)
+        self.log = Path(str(self.work) + ".session.log")
+        self.log.write_text("")
+
+    def tearDown(self):
+        shutil.rmtree(self.td, ignore_errors=True)
+
+    def test_stale_event_is_not_consumed_after_baseline(self):
+        """이전 세션이 남긴 줄은 offset 을 파일 끝으로 민 뒤엔 안 보인다."""
+        spawn._append_event(self.events, "pr-opened",
+                            "https://github.com/octocat/Hello-World/pull/1")
+        spawn._append_event(self.events, "session-end", "progressed")
+        # 스폰이 fork 직전에 하는 일
+        spawn._write_offset(self.offset, spawn._event_count(self.events))
+        self.assertEqual(spawn._read_offset(self.offset), 2)
+        # 새 세션이 자기 이벤트를 낸다 — 리턴은 이것으로만 일어나야 한다
+        spawn._append_event(self.events, "session-start", {"pid": 111})
+        lines = self.events.read_text().splitlines()
+        ev = json.loads(lines[spawn._read_offset(self.offset)])
+        self.assertEqual(ev["type"], "session-start")
+        self.assertEqual(ev["detail"]["pid"], 111)
+
+    def test_without_baseline_the_stale_event_wins(self):
+        """기준선을 안 밀면 78분 전 줄이 먼저 잡힌다 — 고치기 전 동작."""
+        spawn._append_event(self.events, "pr-opened",
+                            "https://github.com/octocat/Hello-World/pull/1")
+        spawn._append_event(self.events, "session-start", {"pid": 111})
+        ev = json.loads(self.events.read_text().splitlines()[0])
+        self.assertEqual(ev["type"], "pr-opened")   # 이게 실측된 오보의 씨앗
+
+    def test_event_count_matches_offset_units(self):
+        self.assertEqual(spawn._event_count(self.events), 0)
+        spawn._append_event(self.events, "a", "1")
+        spawn._append_event(self.events, "b", "2")
+        self.assertEqual(spawn._event_count(self.events), 2)
+        self.assertEqual(spawn._event_count(Path(self.td) / "nope.jsonl"), 0)
+
+    def _origin(self, url):
+        subprocess.run(["git", "init", "-q", str(self.work)], check=False)
+        subprocess.run(["git", "-C", str(self.work), "remote", "add", "origin", url],
+                       check=False, capture_output=True)
+        return spawn._origin_pr_prefix(self.work)
+
+    def test_pr_prefix_from_https_and_ssh_origin(self):
+        self.assertEqual(self._origin("https://github.com/tokenmaxxxer/on-the-record.git"),
+                         "https://github.com/tokenmaxxxer/on-the-record/pull/")
+
+    def test_pr_prefix_none_without_origin(self):
+        subprocess.run(["git", "init", "-q", str(self.work)], check=False)
+        self.assertIsNone(spawn._origin_pr_prefix(self.work))
+
+    def test_foreign_pr_url_is_not_this_repos_pr(self):
+        prefix = self._origin("git@github.com:tokenmaxxxer/on-the-record.git")
+        self.assertEqual(prefix, "https://github.com/tokenmaxxxer/on-the-record/pull/")
+        found = spawn._PR_URL_RE.findall(
+            'see https://github.com/octocat/Hello-World/pull/1 and '
+            'https://github.com/tokenmaxxxer/on-the-record/pull/142')
+        kept = [m for m in found if m.startswith(prefix)]
+        self.assertEqual(kept, ["https://github.com/tokenmaxxxer/on-the-record/pull/142"])
 
 
 if __name__ == "__main__":
