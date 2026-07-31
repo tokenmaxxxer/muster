@@ -60,6 +60,21 @@ gates/        결정론 검사. 세션이 끝나면 spawn.py 가 부른다. LLM 
 ledger/       성적표
 ```
 
+## 요구사항
+
+**macOS 또는 Linux.** `PATH` 에 `bash`, `python3`, `git`, `gh`, 그리고
+`gh auth login` 할 수 있는 GitHub 계정.
+
+**Windows 네이티브는 지원하지 않는다 — WSL 을 쓴다.** 이식이 덜 된 게 아니라
+구조적이다: 강제 평면 전체가 `.sh` 훅(`board-gate`, `approval-gate`,
+`gh-guard`, `directive`)이고, `spawn.py` 는 `os.fork()` / `os.setsid()` /
+`fcntl.flock()` 으로 역할 세션을 몬다. 시작해서 아무것도 강제하지 않는 대신
+import 에서 실패하는데, 그쪽이 낫다 — 게이트 없이 도는 세션은 성공처럼 보인다.
+
+macOS 의 샌드박스는 Seatbelt 라 이미 있다. **Linux 의 샌드박스와 자격증명
+저장은 아직 실측하지 않았다** — `bash`·`fork`·`flock` 이 다 있으니 드라이버는
+돌지만, 그걸 격리가 검증됐다는 뜻으로 읽지 마라.
+
 ## 시작하기 (사용자가 실제로 해야 할 설정)
 
 기계당 한 번:

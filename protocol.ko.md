@@ -137,7 +137,14 @@ on-the-record 자체 마켓플레이스(`.claude-plugin/marketplace.json`)에도
 ## 4. 격리 — 컨테이너가 아니라 샌드박스
 
 컨테이너를 쓰지 않는다. Claude Code 의 Bash 샌드박스가 **우리가 필요한 것을 더
-잘 준다.** macOS 는 Seatbelt 라 설치할 것도 없다.
+잘 준다.**
+
+플랫폼별로, 암시하지 말고 적어 둔다. **macOS** 는 Seatbelt 라 설치할 것도 없고,
+아래 실측은 전부 거기서 잰 것이다. **Linux** 는 드라이버는 돈다(`bash`·`fork`·
+`flock` 이 다 있다) 하지만 샌드박스와 자격증명 저장은 **실측하지 않았다** —
+아래 표를 Linux 에서 검증된 것으로 읽지 마라. **Windows 네이티브는 범위 밖**이다:
+강제 평면이 `.sh` 훅이고 드라이버가 fork 하므로, `spawn.py` 는 게이트 없이
+시작하는 대신 import 에서 실패한다. WSL 을 쓴다.
 
 | 필요한 것 | 컨테이너(hosted CI) | Bash 샌드박스 |
 |---|---|---|
