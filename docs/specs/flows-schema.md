@@ -102,7 +102,9 @@ One entry per active roster row.
   "elapsed_min": 14.2,
   "pid": 48213,
   "alive": true,
-  "verdict": "pending"
+  "verdict": "pending",
+  "last_activity": { "ts": "2026-07-31T12:03:44Z", "kind": "tool_use",
+                     "detail": "Write roles/data-modeling.json" }
 }
 ```
 
@@ -114,6 +116,22 @@ One entry per active roster row.
 | `pid` | integer | process id |
 | `alive` | boolean | whether the process is currently running |
 | `verdict` | string | `"pending"` when `alive: true`; otherwise looked up from the newest matching ledger entry for this role/issue |
+| `last_activity` | object \| `null` | see below; `null` when the roster entry has no `log` path, the log file is missing, or its tail could not be parsed |
+
+`last_activity` is derived from the tail of the session's `.session.log` (the
+raw `stream-json` transcript) — parsing happens only inside `flows`
+(contract provider side); consumers still read only this JSON field, never
+the log itself.
+
+| field | type | notes |
+|---|---|---|
+| `ts` | string | ISO 8601 UTC — the log file's mtime, not a record timestamp (the CLI transcript carries none) |
+| `kind` | string | `"tool_use"`, `"text"`, or `"result"` — the type of the last meaningful transcript record found in the tail |
+| `detail` | string | human-readable one-liner, truncated to 80 chars: tool name + its most salient input (e.g. `"Write roles/data-modeling.json"`, `"pytest test_spawn.py 실행"`) for `tool_use`; first non-empty line of the message for `text`; the result/subtype string for `result` |
+
+Only the last 64KiB of the log is read (tail-based, not a full scan) and any
+read/decode/parse failure yields `last_activity: null` rather than an
+error.
 
 ### 2.4 `ledger[]`
 

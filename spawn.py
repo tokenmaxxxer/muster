@@ -2043,6 +2043,73 @@ def _ledger_issue(entry: dict) -> int | None:
     return None
 
 
+def _activity_tool_summary(name: str, inp: dict) -> str:
+    if not isinstance(inp, dict):
+        return name
+    for key in ("command", "file_path", "path", "pattern", "query", "description"):
+        val = inp.get(key)
+        if not val:
+            continue
+        val = str(val)
+        if key == "command":
+            return f"{val[:60]} 실행"
+        return f"{name} {val}"
+    return name
+
+
+def _session_last_activity(log_path: Path | None) -> dict | None:
+    """세션의 session.log 마지막 유의미 레코드를 tail 로 읽어
+    `{ts, kind, detail}` 로 요약한다. 로그가 없거나 파싱 불가면 `None` —
+    소비자(상황판)는 여전히 JSON만 읽는다, 로그 파싱은 여기서만 한다
+    (이슈 #172 FEEDBACK)."""
+    if log_path is None:
+        return None
+    try:
+        if not log_path.exists():
+            return None
+        size = log_path.stat().st_size
+        tail_size = min(size, 65536)
+        with log_path.open("rb") as fh:
+            fh.seek(size - tail_size)
+            data = fh.read()
+        lines = data.decode("utf-8", errors="replace").splitlines()
+        if tail_size < size and lines:
+            lines = lines[1:]  # 앞이 잘렸을 수 있는 첫 줄은 버린다
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                           time.gmtime(log_path.stat().st_mtime))
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            rtype = rec.get("type")
+            if rtype == "result":
+                detail = str(rec.get("result") or rec.get("subtype") or "결과")
+                return {"ts": ts, "kind": "result", "detail": detail[:80]}
+            if rtype == "assistant":
+                content = ((rec.get("message") or {}).get("content")) or []
+                for block in reversed(content):
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "tool_use":
+                        detail = _activity_tool_summary(
+                            block.get("name", ""), block.get("input") or {})
+                        return {"ts": ts, "kind": "tool_use", "detail": detail[:80]}
+                    if block.get("type") == "text":
+                        first_line = (block.get("text") or "").strip().splitlines()
+                        if first_line and first_line[0]:
+                            return {"ts": ts, "kind": "text",
+                                   "detail": first_line[0][:80]}
+        return None
+    except (OSError, UnicodeError):
+        return None
+
+
 def flows_payload(root: Path) -> dict:
     """Build the `flows --json` payload (issue #172) — read-only, matches
     `status()`'s own invariant (protocol.md §1): no mutation, no posting."""
@@ -2119,9 +2186,11 @@ def flows_payload(root: Path) -> dict:
             issue_n = e.get("issue")
             matches = [le for le in ledger_entries if _ledger_issue(le) == issue_n]
             verdict = matches[-1].get("outcome") if matches else None
+        log_path = Path(e["log"]) if e.get("log") else None
         sessions.append({"role": e.get("role"), "issue": e.get("issue"),
                          "elapsed_min": elapsed_min, "pid": e.get("pid"),
-                         "alive": alive, "verdict": verdict})
+                         "alive": alive, "verdict": verdict,
+                         "last_activity": _session_last_activity(log_path)})
 
     ledger_by_issue: dict[int, dict] = {}
     unattributed = {"sessions": 0, "cost_usd_total": 0.0}

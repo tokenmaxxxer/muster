@@ -1634,6 +1634,33 @@ class FlowsPayload(unittest.TestCase):
         if not s["alive"]:
             self.assertEqual(s["verdict"], "progressed")
 
+    def test_sessions_last_activity_from_tool_use_tail(self):
+        log = self.root / "wk.session.log"
+        log.write_text(
+            json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "writing the role file"},
+                {"type": "tool_use", "name": "Write",
+                 "input": {"file_path": "roles/data-modeling.json"}},
+            ]}}) + "\n",
+            encoding="utf-8")
+        self._patch(spawn, "_roster_load", lambda: {
+            "issue-5/coding": {"role": "coding", "issue": 5, "pid": 999999,
+                               "ts": int(time.time()), "log": str(log)},
+        })
+        payload = spawn.flows_payload(self.root)
+        la = payload["sessions"][0]["last_activity"]
+        self.assertEqual(la["kind"], "tool_use")
+        self.assertEqual(la["detail"], "Write roles/data-modeling.json")
+        self.assertRegex(la["ts"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+    def test_sessions_last_activity_none_when_no_log(self):
+        self._patch(spawn, "_roster_load", lambda: {
+            "issue-5/coding": {"role": "coding", "issue": 5, "pid": 999999,
+                               "ts": int(time.time())},
+        })
+        payload = spawn.flows_payload(self.root)
+        self.assertIsNone(payload["sessions"][0]["last_activity"])
+
     def test_ledger_aggregation_per_issue_and_unattributed_bucket(self):
         spawn.ledger_write({"role": "coding", "cost_usd": 1.5, "outcome": "progressed",
                            "board_delta": ["docs/issue-7/reports/coding.md"]})
@@ -1660,6 +1687,62 @@ class FlowsPayload(unittest.TestCase):
                          [{"kind": "open-pr-on-closed-issue"}])
         self.assertEqual(len(payload["hygiene"]["unapproved_open_prs"]), 1)
         self.assertEqual(payload["hygiene"]["unapproved_open_prs"][0]["pr"], 55)
+
+
+class SessionLastActivity(unittest.TestCase):
+    """issue #172 FEEDBACK: `_session_last_activity` — tail-based session.log
+    parse, never raises, `kind` covers tool_use/text/result."""
+
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.addCleanup(self.td.cleanup)
+        self.log = Path(self.td.name) / "wk.session.log"
+
+    def test_none_when_log_missing(self):
+        self.assertIsNone(spawn._session_last_activity(self.log))
+
+    def test_none_when_log_path_is_none(self):
+        self.assertIsNone(spawn._session_last_activity(None))
+
+    def test_bash_tool_use_detail(self):
+        self.log.write_text(
+            json.dumps({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Bash",
+                 "input": {"command": "pytest test_spawn.py"}},
+            ]}}) + "\n", encoding="utf-8")
+        la = spawn._session_last_activity(self.log)
+        self.assertEqual(la["kind"], "tool_use")
+        self.assertEqual(la["detail"], "pytest test_spawn.py 실행")
+
+    def test_result_record_detail(self):
+        self.log.write_text(
+            json.dumps({"type": "result", "subtype": "success",
+                       "result": "done"}) + "\n", encoding="utf-8")
+        la = spawn._session_last_activity(self.log)
+        self.assertEqual(la["kind"], "result")
+        self.assertEqual(la["detail"], "done")
+
+    def test_last_of_several_lines_wins(self):
+        lines = [
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "first"}]}},
+            {"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "second"}]}},
+        ]
+        self.log.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
+                            encoding="utf-8")
+        la = spawn._session_last_activity(self.log)
+        self.assertEqual(la["detail"], "second")
+
+    def test_malformed_tail_yields_none_not_error(self):
+        self.log.write_text("not json at all\n{also not json\n", encoding="utf-8")
+        self.assertIsNone(spawn._session_last_activity(self.log))
+
+    def test_unreadable_log_yields_none_not_error(self):
+        self.log.write_text("{}\n", encoding="utf-8")
+        self.log.chmod(0o000)
+        self.addCleanup(self.log.chmod, 0o644)
+        self.assertIsNone(spawn._session_last_activity(self.log))
 
 
 if __name__ == "__main__":
