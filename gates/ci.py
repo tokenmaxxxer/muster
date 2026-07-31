@@ -28,6 +28,18 @@ import gates
 import pr_reference
 
 
+def _pr_head_ref(repo: Path, pr: int) -> str | None:
+    """PR 의 head 브랜치 이름. CI 체크아웃은 보통 detached HEAD 라 로컬
+    `git branch --show-current` 로는 못 얻는다 — `gh pr view` 로만 나온다."""
+    import json
+    import subprocess
+    r = subprocess.run(["gh", "pr", "view", str(pr), "--json", "headRefName"],
+                       cwd=repo, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return json.loads(r.stdout).get("headRefName")
+
+
 def check(repo: Path, pr: int | None = None, issue: int | None = None,
           phase: str = "phase1") -> list[str]:
     """차단 사유 목록. 비어 있으면 통과."""
@@ -35,6 +47,12 @@ def check(repo: Path, pr: int | None = None, issue: int | None = None,
            if gates.is_protected(f)]
     if pr is not None and issue is not None:
         bad += pr_reference.check(repo, pr, issue, phase)
+    if pr is not None:
+        branch = _pr_head_ref(repo, pr)
+        if branch is None:
+            bad.append(f"PR #{pr} 의 head 브랜치를 읽을 수 없다 (fail closed)")
+        else:
+            bad += gates.role_scope(repo, branch)
     bad += gates.record_enums(repo, {})
     bad += gates.record_wellformed_in(repo)
     bad += gates.record_no_tool_residue_in(repo)
