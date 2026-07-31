@@ -40,25 +40,25 @@ def t_slug_is_directory_name():
 def t_board_reads_loop_state():
     with tempfile.TemporaryDirectory() as td:
         root = _board(td, "issue-26",
-                      product="kind: product-record\nloop_state: measuring",
-                      feasibility="kind: feasibility-record\nloop_state: verdict\nverdict: go")
+                      **{"product-discovery": "kind: product-record\nloop_state: measuring",
+                         "technical-feasibility": "kind: feasibility-record\nloop_state: verdict\nverdict: go"})
         b = spawn.board(root)
         assert list(b) == ["issue-26"], b
-        assert b["issue-26"]["product"]["loop_state"] == "measuring"
-        assert b["issue-26"]["feasibility"]["verdict"] == "go"
+        assert b["issue-26"]["product-discovery"]["loop_state"] == "measuring"
+        assert b["issue-26"]["technical-feasibility"]["verdict"] == "go"
         line = "\n".join(spawn.status(str(root)))
         assert "loop_state: measuring" in line, line
         assert "verdict: go" in line, line
         # 기록이 없는 역할을 "상태 없음"으로 뭉뚱그리면 누가 안 깨어났는지 못 본다
-        assert "기록 없음" in line and "qa" in line, line
+        assert "기록 없음" in line and "execution-observation" in line, line
 
 
 def t_board_tolerates_trailing_comment():
     """§2: 주석을 못 읽는 파서는 **게이트 결함이지 기록의 위반이 아니다**."""
     with tempfile.TemporaryDirectory() as td:
-        root = _board(td, "issue-1", coding="kind: build-proposal  # re-scoped\n"
-                                      "loop_state: approved   # 사람이 승인함")
-        fm = spawn.board(root)["issue-1"]["coding"]
+        root = _board(td, "issue-1", **{"implementation": "kind: build-proposal  # re-scoped\n"
+                                      "loop_state: approved   # 사람이 승인함"})
+        fm = spawn.board(root)["issue-1"]["implementation"]
         assert fm["kind"] == "build-proposal", fm
         assert fm["loop_state"] == "approved", fm
 
@@ -92,7 +92,7 @@ def t_missing_board_marker_stops_the_spawn():
 def t_rulebook_version_is_recorded():
     """룰북은 로컬 디렉터리로 물리므로 핀이 없다 — 그 순간 체크아웃된 것이 돈다.
     핀을 못 박으면 **무엇이 돌았는지라도 남겨야** ablation 이 검증 가능해진다."""
-    v = spawn.rulebook_version("qa")
+    v = spawn.rulebook_version("execution-observation")
     assert "(" in v and ")" in v, v          # sha (branch)
     assert "커밋안됨" not in v or True       # 더러우면 그 사실이 문자열에 남는다
 
@@ -205,10 +205,11 @@ def t_rulebook_falls_back_to_github():
 
 
 def t_new_roles_resolve_without_a_local_checkout():
-    """ux-design·verify·reflect 는 로컬 체크아웃이 없다. github 폴백이 실제로
-    필요한 첫 사례이고, 없으면 on-the-record 가 계약 §3 의 아홉 줄 중 셋을 못 띄운다."""
+    """interaction-design·defect-verification·issue-retrospective 는 로컬 체크아웃이
+    없다. github 폴백이 실제로 필요한 첫 사례이고, 없으면 on-the-record 가 계약 §3 의
+    아홉 줄 중 셋을 못 띄운다."""
     import json as _json
-    for role in ("ux-design", "verify", "reflect"):
+    for role in ("interaction-design", "defect-verification", "issue-retrospective"):
         spec = _json.loads((spawn.ROOT / "roles" / f"{role}.json").read_text())
         assert "path" not in spec, f"{role}: 로컬 경로를 박으면 다른 기계에서 깨진다"
         assert spawn.rulebook_source(spec)["source"] == "github", role
@@ -225,7 +226,7 @@ def t_board_absent_names_the_v1_location():
 
         (root / "review-record.md").write_text("---\nphase: scoped\n---\n")
         stale = "\n".join(spawn.status(str(root)))
-        assert "계약 v1" in stale and "review" in stale, stale
+        assert "계약 v1" in stale and "conformance-review" in stale, stale
 
 
 
@@ -360,7 +361,7 @@ def t_protected_paths():
     # 미탐: 루트에 있어도 막아야 한다. 뒤 넷은 on-the-record 가 자기 규칙을 다시 쓰는 경로다.
     for p in ["auth.py", "migrations/001.sql", ".env", "config/.env.prod",
               ".github/workflows/ci.yml", "app/secrets.pem", "lib/credentials.json",
-              "protocol.md", "protocol.ko.md", "spawn.py", "roles/qa.json",
+              "protocol.md", "protocol.ko.md", "spawn.py", "roles/execution-observation.json",
               "gates/gates.py"]:
         assert gates.is_protected(p), f"놓침: {p}"
     # 오탐: 평범한 설정 변경까지 막으면 게이트가 꺼진다. 뒤 둘은 **대상 레포**의

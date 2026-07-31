@@ -41,7 +41,7 @@ class ApproveScope(unittest.TestCase):
         spawn._issue_comments = lambda root, n: comments
 
     def test_matching_approver_writes_scope_approved(self):
-        record = _record(self.root, "issue-1", "product", "scope-proposed")
+        record = _record(self.root, "issue-1", "product-discovery", "scope-proposed")
         _approvers(self.root, "alice")
         self._patch_gh([{"login": "alice", "body": "APPROVE issue-1/scope"}])
 
@@ -62,7 +62,7 @@ class ApproveScope(unittest.TestCase):
         self.assertTrue(committed.get("ran"))
 
     def test_non_approver_comment_is_rejected(self):
-        _record(self.root, "issue-2", "product", "scope-proposed")
+        _record(self.root, "issue-2", "product-discovery", "scope-proposed")
         _approvers(self.root, "alice")
         # 문자열은 정확히 맞지만 승인자 allowlist 에 없는 계정이다.
         self._patch_gh([{"login": "mallory", "body": "APPROVE issue-2/scope"}])
@@ -70,21 +70,21 @@ class ApproveScope(unittest.TestCase):
             spawn.approve_scope(str(self.root), 2)
 
     def test_no_matching_comment_text_is_rejected(self):
-        _record(self.root, "issue-3", "product", "scope-proposed")
+        _record(self.root, "issue-3", "product-discovery", "scope-proposed")
         _approvers(self.root, "alice")
         self._patch_gh([{"login": "alice", "body": "looks good to me"}])
         with self.assertRaises(SystemExit):
             spawn.approve_scope(str(self.root), 3)
 
     def test_already_approved_is_idempotent(self):
-        _record(self.root, "issue-4", "product", "scope-approved")
+        _record(self.root, "issue-4", "product-discovery", "scope-approved")
         _approvers(self.root, "alice")
         self._patch_gh([])
         rc = spawn.approve_scope(str(self.root), 4)
         self.assertEqual(rc, 0)
 
     def test_failed_commit_rolls_back_and_does_not_fake_success(self):
-        record = _record(self.root, "issue-6", "product", "scope-proposed")
+        record = _record(self.root, "issue-6", "product-discovery", "scope-proposed")
         _approvers(self.root, "alice")
         self._patch_gh([{"login": "alice", "body": "APPROVE issue-6/scope"}])
 
@@ -104,7 +104,7 @@ class ApproveScope(unittest.TestCase):
         self.assertEqual(spawn.frontmatter(record).get("loop_state"), "scope-proposed")
 
     def test_wrong_loop_state_is_rejected(self):
-        _record(self.root, "issue-5", "product", "in-progress")
+        _record(self.root, "issue-5", "product-discovery", "in-progress")
         _approvers(self.root, "alice")
         self._patch_gh([{"login": "alice", "body": "APPROVE issue-5/scope"}])
         with self.assertRaises(SystemExit):

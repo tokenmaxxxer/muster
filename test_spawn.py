@@ -795,7 +795,7 @@ class OwnershipReport(unittest.TestCase):
 
     def test_granted_subtrees_are_silent(self):
         self.assertEqual(spawn.ownership_report(
-            "/x", "ops", [f"{self.B}/issue-3/reports/postmortems/x.md"]), [])
+            "/x", "release-engineering", [f"{self.B}/issue-3/reports/postmortems/x.md"]), [])
 
     def test_paths_outside_the_board_are_not_its_business(self):
         self.assertEqual(spawn.ownership_report("/x", "execution-observation", ["src/app.py"]), [])
