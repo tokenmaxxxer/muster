@@ -334,6 +334,18 @@ class WebToolPermissionAccess(unittest.TestCase):
             self.assertIn("WebSearch", allow, role)
             self.assertIn("WebFetch", allow, role)
 
+    def test_read_only_tools_allowed_for_every_role(self):
+        """이슈 #153: Read/Grep/Glob 은 sandbox.filesystem 경계를 넓히지 않는
+        읽기 전용 조회이므로, WebSearch/WebFetch 와 같은 TOOL-PERMISSION 층에서
+        모든 역할에 대해 허용된다."""
+        for role_file in (Path(spawn.ROOT) / "roles").glob("*.json"):
+            role = role_file.stem
+            out = spawn.role_settings(role)
+            allow = out["permissions"]["allow"]
+            self.assertIn("Read", allow, role)
+            self.assertIn("Grep", allow, role)
+            self.assertIn("Glob", allow, role)
+
     def test_role_declared_permissions_allow_entries_preserved(self):
         """이슈 #38 의 registry-host 병합과 같은 패턴: 병합이지 교체가 아니다."""
         f = Path(spawn.ROOT) / "roles" / "coding.json"
