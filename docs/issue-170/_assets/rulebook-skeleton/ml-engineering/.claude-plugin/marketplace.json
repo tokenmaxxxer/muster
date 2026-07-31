@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-ml-engineering",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "ml-engineering",
+      "source": "./ml-engineering",
+      "description": "The ml-engineering role on contract v3 (issue-160 round-3 promotion). Decides: 모델을 서비스로 안정적으로 서빙 가능한가."
+    }
+  ]
+}

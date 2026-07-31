@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-security-threat-model",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "security-threat-model",
+      "source": "./security-threat-model",
+      "description": "The security-threat-model role on contract v3 (issue-160 round-3 promotion). Decides: 신뢰 경계의 위협 표면."
+    }
+  ]
+}

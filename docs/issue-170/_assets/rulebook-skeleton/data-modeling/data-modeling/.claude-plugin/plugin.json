@@ -1,0 +1,7 @@
+{
+  "name": "data-modeling",
+  "description": "The data-modeling role on contract v3: 데이터를 어떤 관계/스키마로 모델링할지. use_when: 스키마 신설/변경이 걸릴 때. Hand-off: 파이프라인 이동/변환이 걸리면 → data-engineering.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

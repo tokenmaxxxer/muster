@@ -1,0 +1,22 @@
+{
+  "marketplace": "tokenmaxxxer-accessibility",
+  "repo": "tokenmaxxxer/accessibility-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/accessibility-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "화면/토큰이 WCAG를 만족하는가",
+  "use_when": "신규 인터랙션 패턴·색상 토큰 도입 시",
+  "produces": "WCAG success-criterion checklist w/ pass/fail per criterion",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": ["landed"]
+  }
+}

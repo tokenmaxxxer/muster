@@ -1,0 +1,7 @@
+{
+  "name": "accessibility",
+  "description": "The accessibility role on contract v3: 화면/토큰이 WCAG를 만족하는가. use_when: 신규 인터랙션 패턴·색상 토큰 도입 시. Hand-off: 카피 자체의 이해 가능성이면 → content-design.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

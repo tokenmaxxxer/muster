@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-data-engineering",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "data-engineering",
+      "source": "./data-engineering",
+      "description": "The data-engineering role on contract v3 (issue-160 round-3 promotion). Decides: 파이프라인이 데이터를 안정적으로 이동·변환하는가."
+    }
+  ]
+}

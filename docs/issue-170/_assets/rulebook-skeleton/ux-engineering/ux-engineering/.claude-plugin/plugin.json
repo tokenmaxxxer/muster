@@ -1,0 +1,7 @@
+{
+  "name": "ux-engineering",
+  "description": "The ux-engineering role on contract v3: 디자인 결정 → 토큰/규칙 시스템화. use_when: 화면 스펙이 여러 개 쌓여 시스템화가 필요할 때. Hand-off: 브랜드 정체성 결정이 필요하면 → brand-design; 접근성 기준 미달이면 → accessibility.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

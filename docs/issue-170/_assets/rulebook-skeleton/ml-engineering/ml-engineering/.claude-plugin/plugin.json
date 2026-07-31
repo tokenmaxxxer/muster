@@ -1,0 +1,7 @@
+{
+  "name": "ml-engineering",
+  "description": "The ml-engineering role on contract v3: 모델을 서비스로 안정적으로 서빙 가능한가. use_when: 모델 서빙 표면이 걸릴 때. Hand-off: 학습 데이터 파이프라인이면 → data-engineering.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

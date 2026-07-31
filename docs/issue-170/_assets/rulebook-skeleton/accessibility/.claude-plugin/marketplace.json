@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-accessibility",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "accessibility",
+      "source": "./accessibility",
+      "description": "The accessibility role on contract v3 (issue-160 round-3 promotion). Decides: 화면/토큰이 WCAG를 만족하는가."
+    }
+  ]
+}

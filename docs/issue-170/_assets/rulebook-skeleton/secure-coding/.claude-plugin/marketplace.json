@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-secure-coding",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "secure-coding",
+      "source": "./secure-coding",
+      "description": "The secure-coding role on contract v3 (issue-160 round-3 promotion). Decides: 구현이 공격에 견디는가."
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "marketplace": "tokenmaxxxer-performance-engineering",
+  "repo": "tokenmaxxxer/performance-engineering-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/performance-engineering-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "부하/지연 목표를 만족하는가",
+  "use_when": "성능 예산이 걸린 설계/회귀일 때",
+  "produces": "performance budget, profiling evidence, bottleneck list",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": ["landed"]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "secure-coding",
+  "description": "The secure-coding role on contract v3: 구현이 공격에 견디는가. use_when: 인증/입력처리 코드 랜딩 후. Hand-off: 설계 단계 위협표면 재검토가 필요하면 → security-threat-model.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

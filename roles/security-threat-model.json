@@ -1,0 +1,22 @@
+{
+  "marketplace": "tokenmaxxxer-security-threat-model",
+  "repo": "tokenmaxxxer/security-threat-model-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/security-threat-model-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "신뢰 경계의 위협 표면",
+  "use_when": "스펙에 신뢰 경계·인증·민감데이터가 걸릴 때",
+  "produces": "STRIDE table, mitigation list per threat, residual risk note",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": ["landed"]
+  }
+}
