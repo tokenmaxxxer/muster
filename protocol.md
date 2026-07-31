@@ -131,6 +131,37 @@ plugin from remote HEAD (that still goes through `spawn.py update <role>`, or
 a reinstall). No local clone of any rulebook, and no `TOKENMAXXXER_RULEBOOKS`,
 is required for either path.
 
+### The boundary is bidirectional, and it is a gate — not just prose
+
+A role's phase-2 deliverable must be of the kind its `produces` declares.
+This runs both ways: a judgment role (feasibility/review/qa/verify/
+product/ux-design/reflect/ops) never ships `src/`/`test/` implementation,
+and coding never ships another role's verdict, spec, or record artifact.
+When a role's work surfaces a genuine need for a different kind of
+output, that need routes to the role that produces it — it is never
+self-expanded inside the current session. A boundary-crossing need gets
+recorded in the current role's own record and the session ends there;
+the transition to the other role is an orchestrator-and-human call, not
+something a role does to itself.
+
+This is enforced structurally, not only by convention: each
+`roles/<name>.json` declares a `write_scope` — the glob patterns its
+phase-2 output may touch — and `gates/ci.py` checks every PR's diff
+against the acting role's declared scope (role resolved from the PR's
+`issue-<n>/<role>` branch name), blocking on mismatch. A board repo may
+narrow or relocate a role's scope for its own layout via
+`docs/specs/write_scope.md`, but every role's own record and proposal
+paths (`docs/issue-*/reports/<role>.md`, `docs/issue-*/reports/<role>/**`,
+`docs/issue-*/proposals/<role>.md`) stay writable regardless of any
+override — the record-writing obligation is unconditional and survives
+any scope tightening.
+
+**Non-substitution.** A role's own self-test or confirmation pass (e.g.
+coding's build-and-run-once) is a merge-decision input, never a
+verification role's verdict. It tells the human "this is what I ran and
+what happened"; it does not stand in for qa's execution, review's
+requirements audit, or verify's independent reproduction.
+
 ### Three traps, each one measured
 
 **① `--settings` merges, it does not replace.** A role file naming only the qa

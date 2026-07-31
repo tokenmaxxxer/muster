@@ -640,6 +640,129 @@ def t_closure_sweep_everything_consistent_not_violation():
     assert closure_sweep.classify("CLOSED", "MERGED", "Closes #135", 135) is None
 
 
+def _scope_repo(td: str, role: str, write_scope: list) -> Path:
+    """`role_scope` 전용 픽스처: `_enum_record_repo` 와 같은 방식으로
+    `gates.ON_THE_RECORD_ROOT` 를 별도 checkout 으로 가리킨다. 호출자가
+    `gates.ON_THE_RECORD_ROOT` 를 저장/복원해야 한다."""
+    otr = Path(td) / "otr"
+    (otr / "roles").mkdir(parents=True)
+    (otr / "roles" / f"{role}.json").write_text(
+        json.dumps({"write_scope": write_scope}))
+    gates.ON_THE_RECORD_ROOT = otr
+    return _repo(td)
+
+
+def _commit_baseline(work: Path, rel: str, text: str) -> None:
+    """오버라이드 파일 자체를 diff 밖(= 이미 존재하던 baseline)으로 만든다 —
+    role_scope 는 write_scope.md 도 diff 대상이면 그 경로 자체를 검사하므로,
+    오버라이드 존재 여부만 테스트하려면 origin/main 을 그 커밋까지 밀어야 한다."""
+    p = work / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text)
+    run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                    capture_output=True, check=True)
+    run("add", "-A")
+    run("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "baseline")
+    run("branch", "-f", "origin/main")
+
+
+def t_role_scope_in_scope_passes():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _scope_repo(td, "coding", ["src/**", "test/**"])
+            (work / "src").mkdir()
+            (work / "src" / "app.py").write_text("x")
+            assert gates.role_scope(work, "issue-149/coding") == []
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_role_scope_judgment_role_touching_src_blocks():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _scope_repo(td, "feasibility", [])
+            (work / "src").mkdir()
+            (work / "src" / "app.py").write_text("x")
+            bad = gates.role_scope(work, "issue-149/feasibility")
+            assert bad and "write_scope 이탈" in bad[0], bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_role_scope_coding_touching_other_role_record_blocks():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _scope_repo(td, "coding", ["src/**", "test/**"])
+            rep = work / "docs" / "issue-149" / "reports"
+            rep.mkdir(parents=True)
+            (rep / "review.md").write_text("---\nloop_state: reported\n---\n")
+            bad = gates.role_scope(work, "issue-149/coding")
+            assert bad and "write_scope 이탈" in bad[0] and "review.md" in bad[0], bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_role_scope_branch_not_role_shaped_fails_closed():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _scope_repo(td, "coding", ["src/**"])
+            bad = gates.role_scope(work, "main")
+            assert bad and "역할을 해석할 수 없다" in bad[0], bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_role_scope_own_record_stays_allowed_under_override():
+    """item-5: 오버라이드가 역할의 글롭 목록을 비워도 자기 레코드/제안 경로는
+    합집합으로 계속 허용돼야 한다."""
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _scope_repo(td, "coding", ["src/**"])
+            _commit_baseline(work, "docs/specs/write_scope.md", "- write: coding: *.py\n")
+            rep = work / "docs" / "issue-149" / "reports"
+            rep.mkdir(parents=True)
+            (rep / "coding.md").write_text("---\nloop_state: in-progress\n---\n")
+            assert gates.role_scope(work, "issue-149/coding") == []
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_role_scope_override_replaces_default_glob():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _scope_repo(td, "coding", ["src/**"])
+            _commit_baseline(work, "docs/specs/write_scope.md", "- write: coding: app.py\n")
+            (work / "app.py").write_text("x")     # 오버라이드 글롭(app.py)에만 매치
+            (work / "src").mkdir()
+            (work / "src" / "app.py").write_text("x")   # 기본 글롭(src/**)은 오버라이드로 대체돼 더 이상 안 통함
+            bad = gates.role_scope(work, "issue-149/coding")
+            assert any("src/app.py" in b for b in bad), bad
+            assert not any(b.startswith("write_scope 이탈: app.py ") for b in bad), bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_role_scope_undeclared_write_scope_fails_closed():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            otr = Path(td) / "otr"
+            (otr / "roles").mkdir(parents=True)
+            (otr / "roles" / "coding.json").write_text(json.dumps({}))
+            gates.ON_THE_RECORD_ROOT = otr
+            work = _repo(td)
+            bad = gates.role_scope(work, "issue-149/coding")
+            assert bad and "write_scope 선언이 없다" in bad[0], bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("t_")]
     for t in tests:
