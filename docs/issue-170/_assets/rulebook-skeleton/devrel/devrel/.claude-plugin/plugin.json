@@ -1,0 +1,7 @@
+{
+  "name": "devrel",
+  "description": "The devrel role on contract v3: 외부 개발자가 이 표면을 채택할 수 있는가. use_when: 외부 개발자 대상 API/SDK가 걸릴 때. Hand-off: API 표면 자체 재설계는 → api-design.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

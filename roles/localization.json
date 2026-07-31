@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-localization",
+  "repo": "tokenmaxxxer/localization-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/localization-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "다른 로케일에서도 산출물이 성립하는가",
+  "use_when": "i18n 대상 표면이 걸릴 때",
+  "produces": "locale-fitness verdict per target locale, string-external issue list",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

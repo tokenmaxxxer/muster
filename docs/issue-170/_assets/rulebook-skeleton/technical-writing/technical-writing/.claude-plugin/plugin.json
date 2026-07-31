@@ -1,0 +1,7 @@
+{
+  "name": "technical-writing",
+  "description": "The technical-writing role on contract v3: 독자가 알아야 할 것을 어떻게 구조화할지. use_when: 외부 공개 문서가 필요할 때. Hand-off: 개발자 대상 온보딩이면 → devrel.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

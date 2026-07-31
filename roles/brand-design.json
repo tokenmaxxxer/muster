@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-brand-design",
+  "repo": "tokenmaxxxer/brand-design-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/brand-design-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "브랜드 정체성이 시각적으로 일관되는가",
+  "use_when": "브랜드 자산 신설/변경이 걸릴 때",
+  "produces": "brand guide entry, asset spec, consistency check vs existing guide",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

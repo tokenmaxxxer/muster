@@ -1,0 +1,7 @@
+{
+  "name": "content-design",
+  "description": "The content-design role on contract v3: 문구가 사용자의 실제 결정을 돕는가. use_when: 플로우에 새 카피/마이크로카피가 걸릴 때. Hand-off: 화면/플로우 구조 자체가 바뀌어야 하면 → interaction-design.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-brand-design",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "brand-design",
+      "source": "./brand-design",
+      "description": "The brand-design role on contract v3 (issue-160 round-3 promotion). Decides: 브랜드 정체성이 시각적으로 일관되는가."
+    }
+  ]
+}

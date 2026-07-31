@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-devrel",
+  "repo": "tokenmaxxxer/devrel-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/devrel-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "외부 개발자가 이 표면을 채택할 수 있는가",
+  "use_when": "외부 개발자 대상 API/SDK가 걸릴 때",
+  "produces": "onboarding doc, sample code, adoption-friction list",
+  "write_scope": ["docs/**"],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

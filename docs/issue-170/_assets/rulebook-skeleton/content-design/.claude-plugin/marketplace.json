@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-content-design",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "content-design",
+      "source": "./content-design",
+      "description": "The content-design role on contract v3 (issue-160 round-3 promotion). Decides: 문구가 사용자의 실제 결정을 돕는가."
+    }
+  ]
+}

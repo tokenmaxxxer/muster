@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-devrel",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "devrel",
+      "source": "./devrel",
+      "description": "The devrel role on contract v3 (issue-160 round-3 promotion). Decides: 외부 개발자가 이 표면을 채택할 수 있는가."
+    }
+  ]
+}
