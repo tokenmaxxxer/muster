@@ -1,0 +1,7 @@
+{
+  "name": "brand-design",
+  "description": "The brand-design role on contract v3: 브랜드 정체성이 시각적으로 일관되는가. use_when: 브랜드 자산 신설/변경이 걸릴 때. Hand-off: 토큰 시스템화 구현은 → ux-engineering.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

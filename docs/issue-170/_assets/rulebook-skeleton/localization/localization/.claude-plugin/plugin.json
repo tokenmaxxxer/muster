@@ -1,0 +1,7 @@
+{
+  "name": "localization",
+  "description": "The localization role on contract v3: 다른 로케일에서도 산출물이 성립하는가. use_when: i18n 대상 표면이 걸릴 때. Hand-off: 카피 원문 자체를 다시 써야 하면 → content-design.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

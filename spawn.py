@@ -654,7 +654,8 @@ ROLES = ("product-discovery", "interaction-design", "technical-feasibility",
          "ml-engineering", "data-engineering",
          "market-analysis", "finance-unit-economics", "pricing", "sales", "marketing",
          "growth-analytics", "customer-support", "partnerships-bd", "pr-communications",
-         "risk-management", "legal-compliance")
+         "risk-management", "legal-compliance",
+         "technical-writing", "brand-design", "content-design", "localization", "devrel")
 BOARD = "docs"                          # v3: subject trees live at docs/issue-<n>/
 MARKER = "docs/specs/approvers.md"      # 보드 opt-in + 승인자 allowlist (v3)
 # 계약 v1 이 쓰던 자리. 아직 v2 로 안 옮긴 레포를 **말해주기 위해서만** 본다

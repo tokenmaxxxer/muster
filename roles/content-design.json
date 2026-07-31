@@ -1,0 +1,24 @@
+{
+  "marketplace": "tokenmaxxxer-content-design",
+  "repo": "tokenmaxxxer/content-design-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/content-design-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "문구가 사용자의 실제 결정을 돕는가",
+  "use_when": "플로우에 새 카피/마이크로카피가 걸릴 때",
+  "produces": "copy draft, rationale per string, A/B alternative (if applicable)",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

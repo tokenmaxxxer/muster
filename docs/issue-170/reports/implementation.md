@@ -120,3 +120,40 @@ Matches exactly the 21 PR-A + PR-B files landed so far (plus the same incidental
 - `board()`'s known gap (renders only `ROLES`-listed roles) is now closed for this PR's 11 roles by the `ROLES` extension above; PR C's 5 roles remain outside `ROLES` until PR C lands.
 - GitHub repo creation (11 of the remaining 16 `gh repo create ...-rulebook` commands) and rulebook-skeleton push are human-run, out of this session's write authority — proposal §5 lists the full 26-repo command set; this PR's 11 roles' skeletons are ready to push once their repos exist.
 - PR C (content/comms/docs, 5 roles: `technical-writing`, `brand-design`, `content-design`, `localization`, `devrel`) remains open, per proposal §3.
+
+## PR C — content/comms/docs (5 roles)
+
+`technical-writing`, `brand-design`, `content-design`, `localization`, `devrel`.
+
+### What was done
+
+- 5 new `roles/*.json` files, schema-identical to the existing 38 (`marketplace`/`repo`/`path`/`sandbox`/`decides`/`use_when`/`produces`/`write_scope`/`record_fields.loop_state`). `decides`/`use_when`/`produces`/hand-off values taken verbatim from `docs/issue-160/proposals/role-taxonomy.md`'s "26 promoted roles (round 3)" table. `write_scope` is `[]` for `content-design` and `localization` (report-only, per the canon table); `["docs/**"]` for `technical-writing` (외부공개 한정 — external-facing docs only) and `devrel` (외부 개발자 한정 — external-developer-facing only), matching those two roles' canon `produces` naming a `docs/**`-shaped deliverable (doc outline/draft, onboarding doc/sample code); `brand-design`'s canon write_scope ("design-system source paths") has no concrete tree in this repo yet, so kept `[]`, same treatment `ux-engineering`/`api-design` already got in PR A. `record_fields.loop_state` is the single-state `["landed"]` for all 5 — none of PR C's roles has a non-empty write_scope requiring the 4-state lifecycle.
+- 5 rulebook skeleton subtrees under `docs/issue-170/_assets/rulebook-skeleton/<role>/**`, 10 files each (50 files total), identical shape to PR A/B's: `.claude-plugin/marketplace.json`, `README.md`, `docs/specs/approvers.md` at the skeleton root; `<role>/.claude-plugin/plugin.json`, `<role>/hooks/{hooks.json,directive.sh,record-fields-gate.sh,trailer-gate.sh,handbook-trigger-gate.sh}`, `<role>/agents/warrant-hunter.md`. `record-fields-gate.sh` carries each role's own `produces`-derived required-field slugs (e.g. `technical-writing`: `doc-outline`, `draft`, `target-reader-note`; `devrel`: `onboarding-doc`, `sample-code`, `adoption-friction-list`), not copied from any other role.
+- `spawn.py`'s `ROLES` tuple: extended 38→43 (this PR's 5 roles appended), following PR A/B's settled board-visibility precedent. `test_gates.py:216`'s assertion updated to `len(spawn.ROLES) == 43` to match.
+
+### Upstream basis
+
+Same as PR A/B: `docs/issue-160/proposals/role-taxonomy.md`'s "26 promoted roles (round 3)" table (lines 51-80), and the approved `docs/issue-170/proposals/split-roles-catalog-and-rulebook-skeleton.md`.
+
+### What did not work
+
+Nothing failed on the roles/skeleton content or the pytest suite (117 passed). `python3 test_gates.py`'s `t_repo_local_claude_config_stops_the_spawn` fails in this sandboxed session with the same pre-existing `OSError: [Errno 30] Read-only file system: '/home/jwjung/.tokenmaxxxer/trusted-repo-config.json'` noted in PR A/B's sections — a sandbox filesystem restriction unrelated to this PR's diff (the test writes outside the repo tree, and outside the sandbox's writable set in this session). `t_new_roles_resolve_without_a_local_checkout` (containing the `len(spawn.ROLES) == 43` check) passes, confirmed by output up to (and not including) the unrelated failing test.
+
+### Closed checks — full grep + pytest
+
+```
+$ python3 -m pytest test_spawn.py test_gates.py test_approve_scope.py test_vocab_coherence_roles.py -q
+117 passed in 15.46s
+```
+
+```
+$ grep -rln "market-analysis\|ux-engineering\|api-design\|architecture\|security-threat-model\|legal-compliance\|data-modeling\|performance-engineering\|accessibility\|secure-coding\|ml-engineering\|data-engineering\|technical-writing\|finance-unit-economics\|pricing\|sales\|marketing\|growth-analytics\|customer-support\|partnerships-bd\|pr-communications\|risk-management\|brand-design\|content-design\|localization\|devrel" roles/*.json
+```
+Matches all 26 promoted-role files (PR A's 10 + PR B's 11 + this PR's 5), plus the same incidental `test-authoring.json` substring hit noted in PR A/B's sections (harmless prose match, "architecture" as a common noun — not a role reference). All 43 `roles/*.json` files present; `roles/brand-design.json`, `roles/content-design.json`, `roles/localization.json`, `roles/technical-writing.json`, `roles/devrel.json` all parse as valid JSON.
+
+### Open findings / follow-ups (carried from proposal, not re-opened here)
+
+- `board()`'s known gap (renders only `ROLES`-listed roles) is now closed for all 26 promoted roles — `ROLES` covers the full 43-role registry as of this PR.
+- GitHub repo creation (the remaining 5 of the 26 `gh repo create ...-rulebook` commands, one per PR C role) and rulebook-skeleton push are human-run, out of this session's write authority — proposal §5 lists the full 26-repo command set; this PR's 5 roles' skeletons are ready to push once their repos exist. Combined with PR A/B, all 26 `gh repo create` commands across all three PRs are now listed and none has been executed by any session — that remains a human action item.
+- `brand-design`'s design-system source-path `write_scope` resolution (kept `[]`, no such tree exists in this repo yet) is a follow-up for whichever future issue adds one — same open item PR A logged for `ux-engineering`/`api-design`.
+- PR C was the last of the 3 planned PRs (proposal §3) — issue-170's phase-2 delivery is now complete pending the human repo-creation/seeding action items above.
