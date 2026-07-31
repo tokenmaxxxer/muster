@@ -1,0 +1,210 @@
+/home/jwjung/.local/lib/python3.10/site-packages/pytest_asyncio/plugin.py:208: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+..............................................................FFF..F.... [ 61%]
+............F...F......................FF....                            [100%]
+=================================== FAILURES ===================================
+___________________ GitHead.test_head_of_empty_repo_is_none ____________________
+
+self = <test_spawn.GitHead testMethod=test_head_of_empty_repo_is_none>
+
+    def test_head_of_empty_repo_is_none(self):
+        with tempfile.TemporaryDirectory() as td:
+            import subprocess
+            subprocess.run(["git", "init", "-q"], cwd=td)
+>           self.assertIsNone(spawn._git_head(td))
+E           AssertionError: '' is not None
+
+test_spawn.py:683: AssertionError
+________________ GitHead.test_head_of_repo_with_commit_is_a_sha ________________
+
+self = <test_spawn.GitHead testMethod=test_head_of_repo_with_commit_is_a_sha>
+
+    def test_head_of_repo_with_commit_is_a_sha(self):
+        with tempfile.TemporaryDirectory() as td:
+            import subprocess
+            subprocess.run(["git", "init", "-q"], cwd=td)
+            subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=td)
+            subprocess.run(["git", "config", "user.name", "t"], cwd=td)
+            (Path(td) / "a.txt").write_text("x")
+            subprocess.run(["git", "add", "a.txt"], cwd=td)
+            subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=td)
+            head = spawn._git_head(td)
+            self.assertIsNotNone(head)
+>           self.assertEqual(len(head), 40)
+E           AssertionError: 0 != 40
+
+test_spawn.py:696: AssertionError
+______ IsNewCommit.test_checkout_of_preexisting_branch_is_not_new_commit _______
+
+self = <test_spawn.IsNewCommit testMethod=test_checkout_of_preexisting_branch_is_not_new_commit>
+
+    def test_checkout_of_preexisting_branch_is_not_new_commit(self):
+        # Reproduces hunt-phase2 finding: a session that checks out an
+        # unrelated pre-existing branch (no new commit created) must not be
+        # counted as new_commit, even though HEAD moved.
+        with tempfile.TemporaryDirectory() as td:
+            import subprocess
+    
+            def git(*a):
+                return subprocess.run(["git", "-C", td, *a],
+                                       capture_output=True, text=True, check=True)
+    
+            git("init", "-q")
+            git("config", "user.email", "t@t.t")
+            git("config", "user.name", "t")
+            (Path(td) / "a.txt").write_text("x")
+            git("add", "a.txt")
+            git("commit", "-q", "-m", "init")
+            init_branch = subprocess.run(
+                ["git", "-C", td, "symbolic-ref", "--short", "HEAD"],
+                capture_output=True, text=True).stdout.strip()
+            # Orphan branch with unrelated history — not a descendant of
+            # init_branch — so its tip is a pre-existing commit that is in
+            # no ancestry relationship with before_head at all.
+            git("checkout", "-q", "--orphan", "other")
+            (Path(td) / "b.txt").write_text("y")
+            git("add", "b.txt")
+            git("commit", "-q", "-m", "pre-existing unrelated commit")
+            git("checkout", "-q", init_branch)
+    
+            before_head = spawn._git_head(td)
+            git("checkout", "-q", "other")  # no new commit — just a checkout
+            after_head = spawn._git_head(td)
+    
+>           self.assertNotEqual(before_head, after_head)
+E           AssertionError: '' == ''
+
+test_spawn.py:742: AssertionError
+___________________ IsNewCommit.test_real_new_commit_is_new ____________________
+
+self = <test_spawn.IsNewCommit testMethod=test_real_new_commit_is_new>
+
+    def test_real_new_commit_is_new(self):
+        with tempfile.TemporaryDirectory() as td:
+            import subprocess
+    
+            def git(*a):
+                return subprocess.run(["git", "-C", td, *a],
+                                       capture_output=True, text=True, check=True)
+    
+            git("init", "-q")
+            git("config", "user.email", "t@t.t")
+            git("config", "user.name", "t")
+            (Path(td) / "a.txt").write_text("x")
+            git("add", "a.txt")
+            git("commit", "-q", "-m", "init")
+            before_head = spawn._git_head(td)
+            (Path(td) / "a.txt").write_text("y")
+            git("add", "a.txt")
+            git("commit", "-q", "-m", "progress")
+            after_head = spawn._git_head(td)
+>           self.assertTrue(spawn._is_new_commit(td, before_head, after_head))
+E           AssertionError: False is not true
+
+test_spawn.py:764: AssertionError
+_______ Clean.test_keeps_live_session_workspace_but_deletes_dead_sibling _______
+
+self = <test_spawn.Clean testMethod=test_keeps_live_session_workspace_but_deletes_dead_sibling>
+
+    def test_keeps_live_session_workspace_but_deletes_dead_sibling(self):
+        with tempfile.TemporaryDirectory() as td:
+            wb = Path(td) / "work"
+            wb.mkdir()
+            live_ws = wb / "issue-51-coding"
+            dead_ws = wb / "issue-51-review"
+            self._make_clean_repo(live_ws, Path(td) / "remote-live.git")
+            self._make_clean_repo(dead_ws, Path(td) / "remote-dead.git")
+    
+            roster_path = Path(td) / "runs" / "active.json"
+            roster_path.parent.mkdir(parents=True)
+            roster_path.write_text(json.dumps({
+                "issue-51/coding": {
+                    "pid": os.getpid(),
+                    "work": str(live_ws),
+                    "issue": 51,
+                    "role": "implementation",
+                }
+            }))
+    
+            old_roster = spawn.ROSTER
+            old_argv = sys.argv
+            old_environ = dict(os.environ)
+            spawn.ROSTER = roster_path
+            os.environ["MUSTER_WORK_DIR"] = str(wb)
+            sys.argv = ["spawn.py", "clean"]
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                spawn.main()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                sys.argv = old_argv
+                os.environ.clear()
+                os.environ.update(old_environ)
+    
+            out = buf.getvalue()
+            self.assertTrue(live_ws.is_dir())
+>           self.assertIn("실행 중인 세션 있음", out)
+E           AssertionError: '실행 중인 세션 있음' not found in '정리 끝 — 지움 0, 남김 0\n'
+
+test_spawn.py:1071: AssertionError
+__________________ Watchdog.test_no_commits_late_signal_fires __________________
+
+self = <test_spawn.Watchdog testMethod=test_no_commits_late_signal_fires>
+
+    def test_no_commits_late_signal_fires(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "work"
+            work.mkdir()
+            subprocess.run(["git", "init", "-q", str(work)])
+            subprocess.run(["git", "-C", str(work), "config", "user.email", "t@t.t"])
+            subprocess.run(["git", "-C", str(work), "config", "user.name", "t"])
+            (work / "f").write_text("x")
+            subprocess.run(["git", "-C", str(work), "add", "f"])
+            subprocess.run(["git", "-C", str(work), "commit", "-q", "-m", "init"])
+            head = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+            log = Path(td) / "s.log"
+            log.write_text("")
+            ts = time.time() - (spawn.WATCHDOG_NO_COMMIT_MIN + 5) * 60
+            out = spawn.watchdog_check_one(
+                "k", self._entry(log, work=str(work), ts=ts, before_head=head),
+                state={})
+>           self.assertTrue(any("no-commits-late" in a for a in out))
+E           AssertionError: False is not true
+
+test_spawn.py:1172: AssertionError
+___________ EventExitScope.test_foreign_pr_url_is_not_this_repos_pr ____________
+
+self = <test_spawn.EventExitScope testMethod=test_foreign_pr_url_is_not_this_repos_pr>
+
+    def test_foreign_pr_url_is_not_this_repos_pr(self):
+        prefix = self._origin("git@github.com:tokenmaxxxer/on-the-record.git")
+>       self.assertEqual(prefix, "https://github.com/tokenmaxxxer/on-the-record/pull/")
+E       AssertionError: None != 'https://github.com/tokenmaxxxer/on-the-record/pull/'
+
+test_spawn.py:1546: AssertionError
+___________ EventExitScope.test_pr_prefix_from_https_and_ssh_origin ____________
+
+self = <test_spawn.EventExitScope testMethod=test_pr_prefix_from_https_and_ssh_origin>
+
+    def test_pr_prefix_from_https_and_ssh_origin(self):
+>       self.assertEqual(self._origin("https://github.com/tokenmaxxxer/on-the-record.git"),
+                         "https://github.com/tokenmaxxxer/on-the-record/pull/")
+E       AssertionError: None != 'https://github.com/tokenmaxxxer/on-the-record/pull/'
+
+test_spawn.py:1537: AssertionError
+=========================== short test summary info ============================
+FAILED test_spawn.py::GitHead::test_head_of_empty_repo_is_none - AssertionErr...
+FAILED test_spawn.py::GitHead::test_head_of_repo_with_commit_is_a_sha - Asser...
+FAILED test_spawn.py::IsNewCommit::test_checkout_of_preexisting_branch_is_not_new_commit
+FAILED test_spawn.py::IsNewCommit::test_real_new_commit_is_new - AssertionErr...
+FAILED test_spawn.py::Clean::test_keeps_live_session_workspace_but_deletes_dead_sibling
+FAILED test_spawn.py::Watchdog::test_no_commits_late_signal_fires - Assertion...
+FAILED test_spawn.py::EventExitScope::test_foreign_pr_url_is_not_this_repos_pr
+FAILED test_spawn.py::EventExitScope::test_pr_prefix_from_https_and_ssh_origin
+8 failed, 109 passed in 0.35s

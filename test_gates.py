@@ -167,11 +167,11 @@ def t_unresolved_path_variable_is_not_a_path():
 def t_rulebook_falls_back_to_github():
     """로컬 체크아웃이 있으면 그쪽, 없으면 github."""
     import json as _json
-    spec = _json.loads((spawn.ROOT / "roles" / "qa.json").read_text())
+    spec = _json.loads((spawn.ROOT / "roles" / "execution-observation.json").read_text())
     assert spec.get("repo"), "역할 파일에 repo 가 없으면 github 로 떨어질 수 없다"
 
     with tempfile.TemporaryDirectory() as td:
-        checkout = Path(td) / "qa-agent-rulebook"
+        checkout = Path(td) / "execution-observation-rulebook"
         (checkout / ".claude-plugin").mkdir(parents=True)
         (checkout / ".claude-plugin" / "marketplace.json").write_text('{"plugins": []}')
         os.environ["TOKENMAXXXER_RULEBOOKS"] = td
