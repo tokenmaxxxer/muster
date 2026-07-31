@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-performance-engineering",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "performance-engineering",
+      "source": "./performance-engineering",
+      "description": "The performance-engineering role on contract v3 (issue-160 round-3 promotion). Decides: 부하/지연 목표를 만족하는가."
+    }
+  ]
+}

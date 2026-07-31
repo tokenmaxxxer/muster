@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-data-modeling",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "data-modeling",
+      "source": "./data-modeling",
+      "description": "The data-modeling role on contract v3 (issue-160 round-3 promotion). Decides: 데이터를 어떤 관계/스키마로 모델링할지."
+    }
+  ]
+}

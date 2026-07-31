@@ -1,0 +1,7 @@
+{
+  "name": "api-design",
+  "description": "The api-design role on contract v3: 서비스 경계의 인터페이스 형태. use_when: 여러 소비자가 걸리는 API 표면을 설계/변경할 때. Hand-off: 컴포넌트 경계 자체가 바뀌면 → architecture; 스키마 신설/변경이면 → data-modeling.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

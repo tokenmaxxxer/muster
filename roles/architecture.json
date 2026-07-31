@@ -1,0 +1,22 @@
+{
+  "marketplace": "tokenmaxxxer-architecture",
+  "repo": "tokenmaxxxer/architecture-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/architecture-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "컴포넌트 경계·의존 방향",
+  "use_when": "새 모듈 경계나 기존 경계 변경이 걸릴 때",
+  "produces": "ADR (context/decision/consequences), boundary diagram",
+  "write_scope": ["docs/issue-<n>/decisions/**"],
+  "record_fields": {
+    "loop_state": ["scope-proposed", "scope-approved", "in-progress", "landed"]
+  }
+}

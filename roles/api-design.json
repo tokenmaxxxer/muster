@@ -1,0 +1,22 @@
+{
+  "marketplace": "tokenmaxxxer-api-design",
+  "repo": "tokenmaxxxer/api-design-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/api-design-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "서비스 경계의 인터페이스 형태",
+  "use_when": "여러 소비자가 걸리는 API 표면을 설계/변경할 때",
+  "produces": "interface spec (endpoints/schema/versioning), lifecycle/deprecation plan",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": ["landed"]
+  }
+}

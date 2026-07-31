@@ -1,0 +1,7 @@
+{
+  "name": "security-threat-model",
+  "description": "The security-threat-model role on contract v3: 신뢰 경계의 위협 표면. use_when: 스펙에 신뢰 경계·인증·민감데이터가 걸릴 때. Hand-off: 구현 단계 취약점 점검은 → secure-coding; 법적 노출이면 → legal-compliance.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

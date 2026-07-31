@@ -1,0 +1,7 @@
+{
+  "name": "architecture",
+  "description": "The architecture role on contract v3: 컴포넌트 경계·의존 방향. use_when: 새 모듈 경계나 기존 경계 변경이 걸릴 때. Hand-off: 인터페이스 형태 세부는 → api-design; 성능 예산이 걸리면 → performance-engineering.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

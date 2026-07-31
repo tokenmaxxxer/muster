@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-ux-engineering",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "ux-engineering",
+      "source": "./ux-engineering",
+      "description": "The ux-engineering role on contract v3 (issue-160 round-3 promotion). Decides: 디자인 결정 → 토큰/규칙 시스템화."
+    }
+  ]
+}

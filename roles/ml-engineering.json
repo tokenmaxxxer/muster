@@ -1,0 +1,22 @@
+{
+  "marketplace": "tokenmaxxxer-ml-engineering",
+  "repo": "tokenmaxxxer/ml-engineering-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/ml-engineering-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "모델을 서비스로 안정적으로 서빙 가능한가",
+  "use_when": "모델 서빙 표면이 걸릴 때",
+  "produces": "serving design, risk note (drift/latency/failure mode)",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": ["landed"]
+  }
+}

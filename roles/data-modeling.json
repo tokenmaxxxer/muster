@@ -1,0 +1,22 @@
+{
+  "marketplace": "tokenmaxxxer-data-modeling",
+  "repo": "tokenmaxxxer/data-modeling-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/data-modeling-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "데이터를 어떤 관계/스키마로 모델링할지",
+  "use_when": "스키마 신설/변경이 걸릴 때",
+  "produces": "schema/ERD, migration plan, normalization rationale",
+  "write_scope": ["src/**"],
+  "record_fields": {
+    "loop_state": ["scope-proposed", "scope-approved", "in-progress", "landed"]
+  }
+}

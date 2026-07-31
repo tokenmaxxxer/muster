@@ -1,0 +1,22 @@
+{
+  "marketplace": "tokenmaxxxer-secure-coding",
+  "repo": "tokenmaxxxer/secure-coding-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/secure-coding-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "구현이 공격에 견디는가",
+  "use_when": "인증/입력처리 코드 랜딩 후",
+  "produces": "ASVS checklist, pentest finding list w/ severity",
+  "write_scope": [],
+  "record_fields": {
+    "loop_state": ["landed"]
+  }
+}
