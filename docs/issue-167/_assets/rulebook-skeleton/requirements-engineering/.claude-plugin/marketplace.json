@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-requirements-engineering",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "requirements-engineering",
+      "source": "./requirements-engineering",
+      "description": "The requirements-engineering role on contract v3 (issue-160 round-4 promotion). Decides: 요구사항이 검증가능·일관·추적 가능하게 명세되었는가."
+    }
+  ]
+}

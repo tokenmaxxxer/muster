@@ -645,7 +645,10 @@ def _install_hint(missing: list[str]) -> str:
 # 역할 순서. 보드를 읽을 때 이 순서로 보여준다.
 ROLES = ("product-discovery", "interaction-design", "technical-feasibility",
          "implementation", "execution-observation", "conformance-review",
-         "defect-verification", "issue-retrospective", "release-engineering")
+         "defect-verification", "issue-retrospective", "release-engineering",
+         "user-discovery", "requirements-engineering", "refactoring-legacy",
+         "test-authoring", "observability", "incident-response",
+         "capacity-planning", "knowledge-management")
 BOARD = "docs"                          # v3: subject trees live at docs/issue-<n>/
 MARKER = "docs/specs/approvers.md"      # 보드 opt-in + 승인자 allowlist (v3)
 # 계약 v1 이 쓰던 자리. 아직 v2 로 안 옮긴 레포를 **말해주기 위해서만** 본다

@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-user-discovery",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "user-discovery",
+      "source": "./user-discovery",
+      "description": "The user-discovery role on contract v3 (issue-160 round-4 promotion). Decides: 이 문제가 실제 사용자의 고통인가."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-capacity-planning",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "capacity-planning",
+      "source": "./capacity-planning",
+      "description": "The capacity-planning role on contract v3 (issue-160 round-4 promotion). Decides: 향후 수요 성장 대비 자원이 충분하며 언제 증설해야 하는가."
+    }
+  ]
+}

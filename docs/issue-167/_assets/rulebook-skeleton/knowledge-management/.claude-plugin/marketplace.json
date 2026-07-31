@@ -1,0 +1,13 @@
+{
+  "name": "tokenmaxxxer-knowledge-management",
+  "owner": {
+    "name": "tokenmaxxxer"
+  },
+  "plugins": [
+    {
+      "name": "knowledge-management",
+      "source": "./knowledge-management",
+      "description": "The knowledge-management role on contract v3 (issue-160 round-4 promotion). Decides: 개별 이슈의 교훈이 조직 차원에서 재사용 가능한 형태로 축적·색인되는가."
+    }
+  ]
+}

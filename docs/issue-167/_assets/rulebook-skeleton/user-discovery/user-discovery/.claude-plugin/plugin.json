@@ -1,0 +1,7 @@
+{
+  "name": "user-discovery",
+  "description": "The user-discovery role on contract v3: 이 문제가 실제 사용자의 고통인가. use_when: 가설 검증을 위해 사용자 인터뷰가 필요할 때. Hand-off: 검증된 가설을 스펙화하면 → requirements-engineering.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}

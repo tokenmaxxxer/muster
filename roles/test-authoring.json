@@ -1,0 +1,29 @@
+{
+  "marketplace": "tokenmaxxxer-test-authoring",
+  "repo": "tokenmaxxxer/test-authoring-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/test-authoring-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "테스트 코드 자체가 격리성·fixture 전략 면에서 좋은 설계인가",
+  "use_when": "신규/기존 테스트 스위트를 설계·리뷰할 때",
+  "produces": "suite architecture note, fixture strategy, smell list (Meszaros catalog refs)",
+  "write_scope": [
+    "test/**"
+  ],
+  "record_fields": {
+    "loop_state": [
+      "scope-proposed",
+      "scope-approved",
+      "in-progress",
+      "landed"
+    ]
+  }
+}

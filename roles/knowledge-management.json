@@ -1,0 +1,26 @@
+{
+  "marketplace": "tokenmaxxxer-knowledge-management",
+  "repo": "tokenmaxxxer/knowledge-management-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/knowledge-management-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "개별 이슈의 교훈이 조직 차원에서 재사용 가능한 형태로 축적·색인되는가",
+  "use_when": "여러 이슈의 회고가 쌓여 지식 큐레이션이 필요할 때",
+  "produces": "curated pattern-library entry, cross-issue index, supersession note (if replacing an older pattern)",
+  "write_scope": [
+    "docs/patterns/**"
+  ],
+  "record_fields": {
+    "loop_state": [
+      "landed"
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "capacity-planning",
+  "description": "The capacity-planning role on contract v3: 향후 수요 성장 대비 자원이 충분하며 언제 증설해야 하는가. use_when: 용량 예측/증설 시점 결정이 걸릴 때. Hand-off: 성능 자체의 병목 원인 분석은 → performance-engineering.",
+  "author": {
+    "name": "Jung Jiwon & Lee Jongkwan"
+  }
+}
