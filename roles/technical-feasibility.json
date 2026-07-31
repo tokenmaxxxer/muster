@@ -1,0 +1,23 @@
+{
+  "marketplace": "tokenmaxxxer-technical-feasibility",
+  "repo": "tokenmaxxxer/technical-feasibility-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/technical-feasibility-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "기술적으로 되는가",
+  "use_when": "기술 PoC가 필요할 때. 시장 논리 없이 판정",
+  "produces": "go|no-go|conditional verdict, PoC code/measurement, assumptions list",
+  "write_scope": [],
+  "record_fields": {
+    "verdict": ["go", "no-go", "conditional"],
+    "loop_state": ["measuring", "verdict"]
+  }
+}

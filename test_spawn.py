@@ -31,7 +31,7 @@ class RepoConfigRefusal(unittest.TestCase):
 
 class SpawnCmd(unittest.TestCase):
     def test_flags(self):
-        cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+        cmd, _ = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False)
         self.assertEqual(cmd[:2], ["claude", "-p"])
         self.assertIn("--settings", cmd)
         self.assertEqual(cmd[cmd.index("--settings") + 1], "/tmp/s.json")
@@ -49,7 +49,7 @@ class SpawnCmd(unittest.TestCase):
         # plugin's hooks fire headless (measured 2026-07-27, CLI 2.1.220) and
         # nothing is installed, so the cache-vs-clone divergence and the
         # registry-name-wins trap never enter this path.
-        cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False,
+        cmd, _ = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False,
                                  core_plugins=["/x/tokenmaxxxer-core/core",
                                                "/x/tokenmaxxxer-core/terse"])
         dirs = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == "--plugin-dir"]
@@ -79,15 +79,15 @@ class SpawnCmd(unittest.TestCase):
     def test_env_stamps(self):
         # D1: 스폰된 세션의 UserPromptSubmit 은 오케스트레이터가 쓴 텍스트다.
         # 그 턴이 사람 턴으로 오인되어 mint 되는 일이 없도록 도장을 찍는다.
-        _, env = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
-        self.assertEqual(env["CLAUDE_ROLE"], "qa")
+        _, env = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False)
+        self.assertEqual(env["CLAUDE_ROLE"], "execution-observation")
         self.assertEqual(env["TOKENMAXXXER_SPAWNED"], "1")
         self.assertNotIn("TOKENMAXXXER_UNATTENDED", env)
 
     def test_unattended_is_separate(self):
         # SPAWNED(사람 턴 아님)와 UNATTENDED(사람 부재)는 다른 사실이다.
         # 겹쳐 쓰면 attended 스폰이 깨진다.
-        _, env = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=True)
+        _, env = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=True)
         self.assertEqual(env["TOKENMAXXXER_UNATTENDED"], "1")
         self.assertEqual(env["TOKENMAXXXER_SPAWNED"], "1")
 
@@ -96,7 +96,7 @@ class SpawnCmd(unittest.TestCase):
         # "sonnet" 이 --model 로 붙는다.
         saved = os.environ.pop("MUSTER_ROLE_MODEL", None)
         try:
-            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False)
             self.assertIn("--model", cmd)
             self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
@@ -108,7 +108,7 @@ class SpawnCmd(unittest.TestCase):
         saved = os.environ.get("MUSTER_ROLE_MODEL")
         try:
             os.environ["MUSTER_ROLE_MODEL"] = "sonnet"
-            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False)
             self.assertIn("--model", cmd)
             self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
@@ -123,7 +123,7 @@ class SpawnCmd(unittest.TestCase):
         saved = os.environ.get("MUSTER_ROLE_MODEL")
         try:
             os.environ["MUSTER_ROLE_MODEL"] = "   "
-            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False)
             self.assertIn("--model", cmd)
             self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
@@ -139,7 +139,7 @@ class SpawnCmd(unittest.TestCase):
         saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
         try:
             spawn.ROLE_MODEL_CONFIG.write_text("sonnet")
-            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False)
             self.assertIn("--model", cmd)
             self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
@@ -157,7 +157,7 @@ class SpawnCmd(unittest.TestCase):
         try:
             spawn.ROLE_MODEL_CONFIG.write_text("haiku")
             os.environ["MUSTER_ROLE_MODEL"] = "opus"
-            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False)
             self.assertEqual(cmd[cmd.index("--model") + 1], "opus")
         finally:
             if saved_cfg is None:
@@ -176,7 +176,7 @@ class SpawnCmd(unittest.TestCase):
         saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
         try:
             spawn.ROLE_MODEL_CONFIG.write_text("   ")
-            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False)
             self.assertIn("--model", cmd)
             self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
@@ -196,7 +196,7 @@ class SpawnCmd(unittest.TestCase):
         saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
         try:
             spawn.ROLE_MODEL_CONFIG.write_bytes(b"\xff\xfe\x00\x01")
-            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False)
             self.assertIn("--model", cmd)
             self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
@@ -214,7 +214,7 @@ class SpawnCmd(unittest.TestCase):
         saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
         try:
             spawn.ROLE_MODEL_CONFIG.unlink(missing_ok=True)
-            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "qa", unattended=False)
+            cmd, _ = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False)
             self.assertIn("--model", cmd)
             self.assertEqual(cmd[cmd.index("--model") + 1], "sonnet")
         finally:
@@ -271,7 +271,7 @@ class DryRunModelReflection(unittest.TestCase):
     def test_unset_output_reflects_builtin_default(self):
         saved = os.environ.pop("MUSTER_ROLE_MODEL", None)
         try:
-            out = self._dry_run_output("qa")
+            out = self._dry_run_output("execution-observation")
             self.assertEqual(out.get("model"), "sonnet")
         finally:
             if saved is not None:
@@ -281,7 +281,7 @@ class DryRunModelReflection(unittest.TestCase):
         saved = os.environ.get("MUSTER_ROLE_MODEL")
         try:
             os.environ["MUSTER_ROLE_MODEL"] = "sonnet"
-            out = self._dry_run_output("qa")
+            out = self._dry_run_output("execution-observation")
             self.assertEqual(out.get("model"), "sonnet")
         finally:
             if saved is None:
@@ -295,7 +295,7 @@ class DryRunModelReflection(unittest.TestCase):
         saved = os.environ.get("MUSTER_ROLE_MODEL")
         try:
             os.environ["MUSTER_ROLE_MODEL"] = "   "
-            out = self._dry_run_output("qa")
+            out = self._dry_run_output("execution-observation")
             self.assertEqual(out.get("model"), "sonnet")
         finally:
             if saved is None:
@@ -309,7 +309,7 @@ class DryRunModelReflection(unittest.TestCase):
         saved_cfg = spawn.ROLE_MODEL_CONFIG.read_text() if spawn.ROLE_MODEL_CONFIG.is_file() else None
         try:
             spawn.ROLE_MODEL_CONFIG.write_text("sonnet")
-            out = self._dry_run_output("qa")
+            out = self._dry_run_output("execution-observation")
             self.assertEqual(out.get("model"), "sonnet")
         finally:
             if saved_cfg is None:
@@ -348,13 +348,13 @@ class WebToolPermissionAccess(unittest.TestCase):
 
     def test_role_declared_permissions_allow_entries_preserved(self):
         """이슈 #38 의 registry-host 병합과 같은 패턴: 병합이지 교체가 아니다."""
-        f = Path(spawn.ROOT) / "roles" / "coding.json"
+        f = Path(spawn.ROOT) / "roles" / "implementation.json"
         original_text = f.read_text()
         spec = json.loads(original_text)
         spec["permissions"] = {"allow": ["Bash(git *)"]}
         try:
             f.write_text(json.dumps(spec))
-            out = spawn.role_settings("coding")
+            out = spawn.role_settings("implementation")
             allow = out["permissions"]["allow"]
             self.assertIn("Bash(git *)", allow)
             self.assertIn("WebSearch", allow)
@@ -367,7 +367,7 @@ class PackageRegistryAccess(unittest.TestCase):
     """이슈 #38: 패키지 레지스트리 접근 — 호스트 캐시 마운트 + 레지스트리 허용목록."""
 
     def test_registry_hosts_merged_into_allowed_domains(self):
-        out = spawn.role_settings("coding")
+        out = spawn.role_settings("implementation")
         domains = out["sandbox"]["network"]["allowedDomains"]
         for host in ("proxy.golang.org", "crates.io", "repo.maven.apache.org"):
             self.assertIn(host, domains)
@@ -375,7 +375,7 @@ class PackageRegistryAccess(unittest.TestCase):
     def test_web_access_domain_merged_alongside_registry_hosts(self):
         """이슈 #58: WEB_ACCESS_DOMAINS 도 같은 병합 지점에서 추가되고,
         역할 선언 도메인·레지스트리 호스트는 여전히 남아있다(안 지워짐)."""
-        out = spawn.role_settings("coding")
+        out = spawn.role_settings("implementation")
         domains = out["sandbox"]["network"]["allowedDomains"]
         for host in spawn.WEB_ACCESS_DOMAINS:
             self.assertIn(host, domains)
@@ -391,7 +391,7 @@ class PackageRegistryAccess(unittest.TestCase):
             saved = os.environ.get("GOMODCACHE")
             os.environ["GOMODCACHE"] = td
             try:
-                out = spawn.role_settings("coding")
+                out = spawn.role_settings("implementation")
                 allow_read = out["sandbox"]["filesystem"].get("allowRead", [])
                 self.assertIn(td, allow_read)
             finally:
@@ -405,7 +405,7 @@ class PackageRegistryAccess(unittest.TestCase):
         saved = os.environ.get("GOMODCACHE")
         os.environ["GOMODCACHE"] = missing
         try:
-            out = spawn.role_settings("coding")  # should not raise
+            out = spawn.role_settings("implementation")  # should not raise
             allow_read = out["sandbox"]["filesystem"].get("allowRead", [])
             self.assertNotIn(missing, allow_read)
         finally:
@@ -419,7 +419,7 @@ class PackageRegistryAccess(unittest.TestCase):
             saved = os.environ.get("GOMODCACHE")
             os.environ["GOMODCACHE"] = td
             try:
-                out = spawn.role_settings("coding")
+                out = spawn.role_settings("implementation")
                 proxy = spawn.go_proxy_layer(out)
                 self.assertIsNotNone(proxy)
                 self.assertTrue(proxy.startswith(f"file://{td}/cache/download,"))
@@ -434,7 +434,7 @@ class PackageRegistryAccess(unittest.TestCase):
         saved = os.environ.get("GOMODCACHE")
         os.environ["GOMODCACHE"] = missing
         try:
-            out = spawn.role_settings("coding")
+            out = spawn.role_settings("implementation")
             self.assertIsNone(spawn.go_proxy_layer(out))
         finally:
             if saved is None:
@@ -447,7 +447,7 @@ class PackageRegistryAccess(unittest.TestCase):
             saved = os.environ.get("GOMODCACHE")
             os.environ["GOMODCACHE"] = tf.name
             try:
-                out = spawn.role_settings("coding")  # should not raise
+                out = spawn.role_settings("implementation")  # should not raise
                 allow_read = out["sandbox"]["filesystem"].get("allowRead", [])
                 self.assertNotIn(tf.name, allow_read)
             finally:
@@ -480,14 +480,14 @@ class SandboxDefaultOpenAccess(unittest.TestCase):
 
     def test_role_declared_values_not_clobbered(self):
         """이슈 #38 의 registry-host 병합과 같은 패턴: 병합이지 교체가 아니다."""
-        f = Path(spawn.ROOT) / "roles" / "coding.json"
+        f = Path(spawn.ROOT) / "roles" / "implementation.json"
         original_text = f.read_text()
         spec = json.loads(original_text)
         spec.setdefault("sandbox", {})["enableWeakerNetworkIsolation"] = False
         spec["sandbox"].setdefault("network", {})["allowLocalBinding"] = False
         try:
             f.write_text(json.dumps(spec))
-            out = spawn.role_settings("coding")
+            out = spawn.role_settings("implementation")
             self.assertIs(out["sandbox"]["enableWeakerNetworkIsolation"], False)
             self.assertIs(out["sandbox"]["network"]["allowLocalBinding"], False)
         finally:
@@ -534,7 +534,7 @@ class Classify(unittest.TestCase):
         self.assertEqual(spawn.classify(0, {}, ["records/a/qa.md"], []), "progressed")
 
     def test_waiting_on_human(self):
-        blocked = [("coding", "…§19 가 막는다")]
+        blocked = [("implementation", "…§19 가 막는다")]
         self.assertEqual(spawn.classify(0, {}, [], blocked), "waiting-on-human")
 
     def test_refused_is_not_silent_failure(self):
@@ -554,7 +554,7 @@ class Classify(unittest.TestCase):
 
     def test_human_gate_outranks_refusal(self):
         refused = {"permission_denials": [{"tool_name": "Write"}]}
-        self.assertEqual(spawn.classify(0, refused, [], [("coding", "§19")]),
+        self.assertEqual(spawn.classify(0, refused, [], [("implementation", "§19")]),
                          "waiting-on-human")
 
     def test_silent_failure_is_loud(self):
@@ -598,7 +598,7 @@ class FailClosedDowngrade(unittest.TestCase):
         # run that touched the board while a human gate is still open is
         # classified "progressed" today. The downgrade must not silently
         # erase that honest blocked signal by demoting it to FAILED.
-        blocked = [("coding", "§19")]
+        blocked = [("implementation", "§19")]
         self.assertEqual(
             spawn.fail_closed_downgrade("progressed", 3, blocked, False, []),
             "progressed")
@@ -770,13 +770,13 @@ class Ledger(unittest.TestCase):
             old = spawn.ROOT
             spawn.ROOT = Path(td)
             try:
-                p = spawn.ledger_write({"role": "qa", "outcome": "progressed"})
+                p = spawn.ledger_write({"role": "execution-observation", "outcome": "progressed"})
                 p2 = spawn.ledger_write({"role": "review", "outcome": "errored"})
             finally:
                 spawn.ROOT = old
             self.assertEqual(p, p2)
             lines = [json.loads(l) for l in p.read_text().splitlines()]
-            self.assertEqual([l["role"] for l in lines], ["qa", "review"])
+            self.assertEqual([l["role"] for l in lines], ["execution-observation", "review"])
 
 
 class OwnershipReport(unittest.TestCase):
@@ -785,11 +785,11 @@ class OwnershipReport(unittest.TestCase):
 
     def test_own_record_and_subtree_are_silent(self):
         self.assertEqual(spawn.ownership_report(
-            "/x", "qa", [f"{self.B}/issue-3/reports/qa.md",
-                         f"{self.B}/issue-3/reports/qa/run.log"]), [])
+            "/x", "execution-observation", [f"{self.B}/issue-3/reports/execution-observation.md",
+                         f"{self.B}/issue-3/reports/execution-observation/run.log"]), [])
 
     def test_foreign_record_is_named(self):
-        out = spawn.ownership_report("/x", "qa",
+        out = spawn.ownership_report("/x", "execution-observation",
                                      [f"{self.B}/issue-3/reports/coding.md"])
         self.assertTrue(out and "coding.md" in out[1])
 
@@ -798,7 +798,7 @@ class OwnershipReport(unittest.TestCase):
             "/x", "ops", [f"{self.B}/issue-3/reports/postmortems/x.md"]), [])
 
     def test_paths_outside_the_board_are_not_its_business(self):
-        self.assertEqual(spawn.ownership_report("/x", "qa", ["src/app.py"]), [])
+        self.assertEqual(spawn.ownership_report("/x", "execution-observation", ["src/app.py"]), [])
 
 
 class RequireDoctor(unittest.TestCase):
@@ -911,7 +911,7 @@ class IssueScopedPrompt(unittest.TestCase):
                                        lambda *a, **k: None), \
                      mock.patch.object(spawn, "ledger_write",
                                        lambda *a, **k: None):
-                    spawn._spawn_one(str(work), "qa", "원래 맡긴 일.\n",
+                    spawn._spawn_one(str(work), "execution-observation", "원래 맡긴 일.\n",
                                      unattended=True, issue=7)
             finally:
                 sys.stdout = old_stdout
@@ -964,7 +964,7 @@ class EventReporting(unittest.TestCase):
                                    lambda *a, **k: None), \
                  mock.patch.object(spawn, "_pr_for_branch",
                                    lambda *a, **k: None):
-                spawn._spawn_one(str(work), "qa", task, unattended=True, issue=7)
+                spawn._spawn_one(str(work), "execution-observation", task, unattended=True, issue=7)
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
@@ -1044,7 +1044,7 @@ class Clean(unittest.TestCase):
                     "pid": os.getpid(),
                     "work": str(live_ws),
                     "issue": 51,
-                    "role": "coding",
+                    "role": "implementation",
                 }
             }))
 
@@ -1301,7 +1301,7 @@ class AutoRespawnClaim(unittest.TestCase):
             Path(str(work) + ".events.jsonl").write_text(
                 json.dumps({"type": "session-start", "detail": {"pid": 111, "ts": 1}})
                 + "\n" + json.dumps({"type": "session-end", "detail": "progressed"}) + "\n")
-            entry = {"work": str(work), "issue": 132, "role": "coding", "log": ""}
+            entry = {"work": str(work), "issue": 132, "role": "implementation", "log": ""}
             state = {}
             called = []
             orig = spawn._spawn_one
@@ -1316,7 +1316,7 @@ class AutoRespawnClaim(unittest.TestCase):
     def test_crashed_under_cap_claims_and_respawns(self):
         with tempfile.TemporaryDirectory() as td:
             work = self._crashed_workspace(td)
-            entry = {"work": work, "issue": 132, "role": "coding", "log": "l"}
+            entry = {"work": work, "issue": 132, "role": "implementation", "log": "l"}
             state = {}
             called = []
             orig = spawn._spawn_one
@@ -1339,7 +1339,7 @@ class AutoRespawnClaim(unittest.TestCase):
             with open(work + ".events.jsonl", "a") as fh:
                 fh.write(json.dumps({"type": "respawn-attempt",
                                      "detail": {"session_start_ts": 1, "attempt": 1}}) + "\n")
-            entry = {"work": work, "issue": 132, "role": "coding", "log": "l"}
+            entry = {"work": work, "issue": 132, "role": "implementation", "log": "l"}
             state = {}
             called = []
             orig = spawn._spawn_one
@@ -1360,7 +1360,7 @@ class AutoRespawnClaim(unittest.TestCase):
         import threading
         with tempfile.TemporaryDirectory() as td:
             work = self._crashed_workspace(td)
-            entry = {"work": work, "issue": 132, "role": "coding", "log": "l"}
+            entry = {"work": work, "issue": 132, "role": "implementation", "log": "l"}
             called = []
             lock = threading.Lock()
             orig = spawn._spawn_one
@@ -1384,7 +1384,7 @@ class AutoRespawnClaim(unittest.TestCase):
     def test_cap_reached_posts_comment_instead_of_respawning(self):
         with tempfile.TemporaryDirectory() as td:
             work = self._crashed_workspace(td)
-            entry = {"work": work, "issue": 132, "role": "coding", "log": "l"}
+            entry = {"work": work, "issue": 132, "role": "implementation", "log": "l"}
             state = {"issue-132/coding": {"attempts": spawn.RESPAWN_MAX_ATTEMPTS}}
             called = []
             orig_spawn = spawn._spawn_one
@@ -1459,7 +1459,7 @@ class RosterConcurrency(unittest.TestCase):
                 def register(i):
                     barrier.wait()
                     spawn.roster_register(f"issue-{i}/coding",
-                                           {"pid": i, "role": "coding",
+                                           {"pid": i, "role": "implementation",
                                             "issue": i, "ts": 0,
                                             "log": "", "work": ""})
 

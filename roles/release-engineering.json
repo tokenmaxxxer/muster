@@ -1,0 +1,20 @@
+{
+  "marketplace": "tokenmaxxxer-release-engineering",
+  "repo": "tokenmaxxxer/release-engineering-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/release-engineering-rulebook",
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "allowedDomains": [
+        "api.anthropic.com",
+        "*.github.com",
+        "github.com"
+      ]
+    }
+  },
+  "decides": "배포 가능한가 (릴리스/롤아웃)",
+  "use_when": "변경이 머지되어 배포할 때",
+  "produces": "rollout checklist, rollback plan, go/no-go verdict",
+  "write_scope": [],
+  "record_fields": {}
+}

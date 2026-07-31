@@ -1,7 +1,7 @@
 {
-  "marketplace": "tokenmaxxxer-qa",
-  "repo": "tokenmaxxxer/qa-agent-rulebook",
-  "path": "$TOKENMAXXXER_RULEBOOKS/qa-agent-rulebook",
+  "marketplace": "tokenmaxxxer-execution-observation",
+  "repo": "tokenmaxxxer/execution-observation-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/execution-observation-rulebook",
   "sandbox": {
     "enabled": true,
     "network": {
@@ -12,9 +12,9 @@
       ]
     }
   },
-  "decides": "실행했을 때 실제로 어떻게 동작하는가",
+  "decides": "실행 시 실제 동작",
   "use_when": "실행 가능한 산출물이 랜딩됐을 때. 실행 없는 판정 금지, 고치지 않음",
-  "produces": "증거 인용된 pass/fail/blocked, 버그 리포트(레코드로; 이슈는 사용자가)",
+  "produces": "증거 인용된 claim별 pass/fail/blocked, run command/log reference, 버그 리포트(레코드로; 이슈는 사용자가)",
   "write_scope": [],
   "record_fields": {
     "loop_state": ["handed-off"]

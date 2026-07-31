@@ -31,7 +31,7 @@ sellable-grade — not just demo-grade:
 
 - **Role experts, clean context per task.** Each role gets its own
   sandboxed session with only that role's rulebook loaded — no context
-  bleed from a QA rulebook into a coding session, or vice versa.
+  bleed from an execution-observation rulebook into an implementation session, or vice versa.
 - **The process asset lives in git.** Rulebooks are versioned files a
   better model can pick up and run immediately, with nothing re-taught.
 - **The user stays the sole approver.** Nothing merges without the user's
@@ -146,7 +146,7 @@ role session via --plugin-dir.
 ## Why this exists
 
 Editing a repository's `.claude/settings.json` applies to **every** agent working in
-that repository — the coding agent ends up reading the QA rulebook too. The boundary
+that repository — the implementation agent ends up reading the execution-observation rulebook too. The boundary
 of plugin scoping is the **session**, so the only way to give a role its own
 environment is to start its own session. That is on-the-record.
 
@@ -165,15 +165,15 @@ success** — which contaminates an ablation outright.
 
 | role | rulebook | decides |
 |---|---|---|
-| product | tokenmaxxxer-product | what to build |
-| feasibility | tokenmaxxxer-feasibility | whether it can be built, from the spec alone, with no market reasoning |
-| coding | tokenmaxxxer-coding | builds it — `build-proposal`, `loop_state: proposed,approved,landed` |
-| review | tokenmaxxxer-review | whether it matches the spec, requirement by requirement |
-| qa | tokenmaxxxer-qa | whether it actually runs |
-| ux-design | tokenmaxxxer-ux-design | what it should look like to use |
-| verify | tokenmaxxxer-verify | whether coding's and qa's artifacts agree |
-| reflect | tokenmaxxxer-reflect | what the round taught, once it landed |
-| ops | tokenmaxxxer-ops | ships it and keeps it up |
+| product-discovery | tokenmaxxxer-product-discovery | what to build |
+| technical-feasibility | tokenmaxxxer-technical-feasibility | whether it can be built, from the spec alone, with no market reasoning |
+| implementation | tokenmaxxxer-implementation | builds it — `build-proposal`, `loop_state: proposed,approved,landed` |
+| conformance-review | tokenmaxxxer-conformance-review | whether it matches the spec, requirement by requirement |
+| execution-observation | tokenmaxxxer-execution-observation | whether it actually runs |
+| interaction-design | tokenmaxxxer-interaction-design | what it should look like to use |
+| defect-verification | tokenmaxxxer-defect-verification | whether implementation's and execution-observation's artifacts agree |
+| issue-retrospective | tokenmaxxxer-issue-retrospective | what the round taught, once it landed |
+| release-engineering | tokenmaxxxer-release-engineering | ships it and keeps it up |
 
 ## Using it
 
@@ -188,7 +188,7 @@ That is the whole install for `on-the-record`. `on-the-record`'s own marketplace
 every rulebook plugin from all nine role rulebooks, each sourced straight from its
 own GitHub repo (`{"source": "github", "repo": "tokenmaxxxer/<repo>"}`) — so
 `claude plugin install <plugin>@tokenmaxxxer` resolves any of them (say
-`coding-cycle`, `freelunch`, `qa-cycle`) directly, without adding all nine
+`implementation-cycle`, `freelunch`, `execution-observation-cycle`) directly, without adding all nine
 rulebook repos as separate marketplaces one at a time. No local clone of any
 rulebook is required for this: the rulebooks are **not** cloned by hand — each
 role file names its repo, and the first spawn of a role fetches that rulebook's
@@ -263,7 +263,7 @@ execution writes are refused (fail-closed), so `spawn.py` refuses to
 start rather than burn a doomed session:
 
 ```
-$ python3 spawn.py product "…" -C ~/work/new-app
+$ python3 spawn.py product-discovery "…" -C ~/work/new-app
 대상 레포에 docs/specs/approvers.md 가 없다: …
 ```
 
@@ -287,7 +287,7 @@ files can both say `status: final` and differ by 188 lines. Measured 2026-07-26:
 three rulebooks carried a 345-line contract and three a 533-line one.
 
 `--no-contract` skips the check, for work that is not going near the board (asking
-the coding role for a one-off change, say). It is a flag rather than a warning
+the implementation role for a one-off change, say). It is a flag rather than a warning
 because the failure it prevents is silent, and a warning on stderr in a headless
 run is not read.
 
@@ -298,10 +298,10 @@ judgment call the orchestrating conversation makes by reading the board directly
 (the records under `docs/issue-<n>/`, each one's `loop_state`).
 
 ```bash
-python3 spawn.py product "build me a car-wash timing app" -C ~/work/new-app
+python3 spawn.py product-discovery "build me a car-wash timing app" -C ~/work/new-app
 python3 spawn.py                              -C ~/work/new-app
 #   read docs/issue-<n>/reports/*.md; decide who's up next from loop_state
-python3 spawn.py feasibility "read the board: …" -C ~/work/new-app
+python3 spawn.py technical-feasibility "read the board: …" -C ~/work/new-app
 ```
 
 Human-only gates (approval, scope, round-end) are unaffected by any of this —
@@ -323,7 +323,7 @@ place where work gets handed over is already the conversation.
 /plugin install on-the-record@tokenmaxxxer
 
 /on-the-record:run                          just show the current state
-/on-the-record:run qa /testrun:testrun smoke
+/on-the-record:run execution-observation /testrun:testrun smoke
 ```
 
 ### Every command
@@ -359,7 +359,7 @@ re-measure it once per CLI version before any role spawns.
 
 Two halts are the contract working, not failures to route around:
 
-- **coding, at `proposed → approved`.** Contract §8 reserves approving scope
+- **implementation, at `proposed → approved`.** Contract §8 reserves approving scope
   changes for a human. A headless run stops there and waits.
 - **any role, on a first read of an upstream artifact.** Contract §12 makes the role
   ask once, by name, before acting on it — and forbids guessing the answer.
@@ -378,7 +378,7 @@ macOS it is Seatbelt, so there is nothing to install.
 
 ## Three traps, each one measured
 
-**① `--settings` merges, it does not replace.** A role file naming only the qa rulebook
+**① `--settings` merges, it does not replace.** A role file naming only the execution-observation rulebook
 still drags in all 17 of the user's global plugins. `spawn.py` reads the global list and
 overrides everything the role did not enable to `false`. Without that, the isolation is
 a label.
