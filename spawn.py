@@ -643,13 +643,16 @@ def _install_hint(missing: list[str]) -> str:
 
 
 # 역할 순서. 보드를 읽을 때 이 순서로 보여준다.
-ROLES = ("product", "ux-design", "feasibility", "coding", "qa",
-         "review", "verify", "reflect", "ops")
+ROLES = ("product-discovery", "interaction-design", "technical-feasibility",
+         "implementation", "execution-observation", "conformance-review",
+         "defect-verification", "issue-retrospective", "release-engineering")
 BOARD = "docs"                          # v3: subject trees live at docs/issue-<n>/
 MARKER = "docs/specs/approvers.md"      # 보드 opt-in + 승인자 allowlist (v3)
 # 계약 v1 이 쓰던 자리. 아직 v2 로 안 옮긴 레포를 **말해주기 위해서만** 본다
-LEGACY = {"review": "review-record.md", "feasibility": "feasibility-record.md",
-          "ops": "state.md", "product": "product-record.md"}
+LEGACY = {"conformance-review": "review-record.md",
+          "technical-feasibility": "feasibility-record.md",
+          "release-engineering": "state.md",
+          "product-discovery": "product-record.md"}
 
 
 def slug(cwd: str) -> str:
@@ -856,7 +859,7 @@ def _front_role(root: Path, subject: str, roles: dict) -> str | None:
                 if not _record_upstream(root / BOARD / subject / "reports" / f"{r}.md")]
     if len(rootless) == 1:
         return rootless[0]
-    for r in ("product", "feasibility"):
+    for r in ("product-discovery", "technical-feasibility"):
         if r in roles:
             return r
     return None
@@ -1071,9 +1074,9 @@ def ownership_report(cwd: str, role: str, delta: list) -> list[str]:
         rest = m.group(2)
         if rest == f"{role}.md" or rest.startswith(f"{role}/"):
             continue
-        if role == "feasibility" and rest.startswith("spikes/"):
+        if role == "technical-feasibility" and rest.startswith("spikes/"):
             continue
-        if role == "ops" and rest.startswith("postmortems/"):
+        if role == "release-engineering" and rest.startswith("postmortems/"):
             continue
         bad.append(f"  - {p} (다른 역할의 기록)")
     if not bad:
