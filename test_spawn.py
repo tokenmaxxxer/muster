@@ -928,7 +928,8 @@ class EventReporting(unittest.TestCase):
     """issue #129 phase 2: `.events.jsonl` 기록의 정확성 — 실측된 오탐 3건
     (gate-refusal 오탐 2건, pr-opened 중복 1건)을 보존된 fixture 로 재현."""
 
-    def _run(self, td, task, roster_key="e"):
+    def _run(self, td, task, roster_key="e", pr_for_branch=lambda *a, **k: None,
+             branch="b"):
         import subprocess as sp
         from unittest import mock
 
@@ -955,15 +956,14 @@ class EventReporting(unittest.TestCase):
             with mock.patch.object(spawn, "issue_workspace",
                                    lambda cwd, issue, role: str(work)), \
                  mock.patch.object(spawn, "checkout_issue_branch",
-                                   lambda cwd, issue, role: "b"), \
+                                   lambda cwd, issue, role: branch), \
                  mock.patch.object(spawn, "spawn_cmd",
                                    lambda *a, **k: (["cat"], {})), \
                  mock.patch.object(spawn, "ensure_pushed",
                                    lambda *a, **k: None), \
                  mock.patch.object(spawn, "ledger_write",
                                    lambda *a, **k: None), \
-                 mock.patch.object(spawn, "_pr_for_branch",
-                                   lambda *a, **k: None):
+                 mock.patch.object(spawn, "_pr_for_branch", pr_for_branch):
                 spawn._spawn_one(str(work), "execution-observation", task, unattended=True, issue=7)
         finally:
             sys.stdout = old_stdout
@@ -1006,10 +1006,159 @@ class EventReporting(unittest.TestCase):
         # pr-opened event — dedup is durable across process restarts.
         td = tempfile.mkdtemp()
         url = "https://github.com/o/r/pull/124"
-        self._run(td, url + "\n")
-        events = self._run(td, "이미 있는 PR 링크를 또 echo 한다: " + url + "\n")
+        pr_for_branch = lambda *a, **k: 124  # 이 브랜치의 실제 PR — 두 respawn 모두 같은 값
+        self._run(td, url + "\n", pr_for_branch=pr_for_branch)
+        events = self._run(td, "이미 있는 PR 링크를 또 echo 한다: " + url + "\n",
+                           pr_for_branch=pr_for_branch)
         opened = [e for e in events if e["type"] == "pr-opened" and e["detail"] == url]
         self.assertEqual(len(opened), 1, events)
+
+    def test_read_only_repo_url_does_not_fire_pr_opened_when_no_pr_exists(self):
+        # issue-180 실측: 세션이 자기 레포 PR URL 을 텍스트로 읽기만 했다 —
+        # `_pr_for_branch` 는 이 브랜치에 PR 이 없다는 뜻으로 None 을 낸다.
+        url = "https://github.com/tokenmaxxxer/on-the-record/pull/142"
+        events = self._run(tempfile.mkdtemp(), url + "\n",
+                           pr_for_branch=lambda *a, **k: None)
+        self.assertFalse([e for e in events if e["type"] == "pr-opened"], events)
+
+    def test_read_only_repo_url_does_not_fire_pr_opened_when_different_pr_open(self):
+        # 언급된 번호(142)와 실제 열린 PR 번호(99)가 다르면 여전히 "읽기만"이다.
+        url = "https://github.com/tokenmaxxxer/on-the-record/pull/142"
+        events = self._run(tempfile.mkdtemp(), url + "\n",
+                           pr_for_branch=lambda *a, **k: 99)
+        self.assertFalse([e for e in events if e["type"] == "pr-opened"], events)
+
+    def test_pull_new_branch_url_does_not_fire_pr_opened(self):
+        # 이슈가 명시적으로 요청한 신규 케이스: `git push` 안내가 찍는
+        # `.../pull/new/<branch>` 는 PR 번호가 없어 `_PR_URL_RE` 자체가 안 잡는다.
+        calls = []
+        url = "https://github.com/tokenmaxxxer/on-the-record/pull/new/issue-180/implementation"
+        events = self._run(tempfile.mkdtemp(), url + "\n",
+                           pr_for_branch=lambda *a, **k: calls.append(a) or 555)
+        self.assertFalse([e for e in events if e["type"] == "pr-opened"], events)
+        self.assertEqual(calls, [])  # 후보가 아예 안 뽑혔으니 gh 도 안 불렸다
+
+    def test_actually_opened_pr_fires_pr_opened(self):
+        # 실패 신호(제안서): 이게 없으면 "영원한 대기" 회귀를 못 잡는다.
+        url = "https://github.com/tokenmaxxxer/on-the-record/pull/555"
+        events = self._run(tempfile.mkdtemp(), url + "\n",
+                           pr_for_branch=lambda *a, **k: 555)
+        opened = [e for e in events if e["type"] == "pr-opened"]
+        self.assertEqual(opened, [{"ts": opened[0]["ts"], "type": "pr-opened",
+                                   "detail": url}], events)
+
+    def test_pr_for_branch_call_count_not_proportional_to_candidate_urls(self):
+        # PR #184 리뷰 코멘트의 수용 기준: 브랜치의 실제 PR 번호가 한 번
+        # 풀리고 나면, 그 뒤 후보 URL 이 몇 개 더 나와도(실측: 세션 하나가
+        # 5개 이상 흘렸다) _pr_for_branch 는 다시 불리지 않는다.
+        calls = []
+
+        def counting(root, br):
+            calls.append((str(root), br))
+            return 555
+
+        urls = [f"https://github.com/tokenmaxxxer/on-the-record/pull/{n}\n"
+               for n in (1, 142, 124, 555, 142, 7, 8, 555)]  # 8개 후보, 서로 다른 번호 다수
+        events = self._run(tempfile.mkdtemp(), "".join(urls),
+                           pr_for_branch=counting)
+        self.assertEqual(len(calls), 1, calls)  # 후보 8개인데 호출은 1번
+        opened = [e["detail"] for e in events if e["type"] == "pr-opened"]
+        self.assertEqual(opened, ["https://github.com/tokenmaxxxer/on-the-record/pull/555"])
+
+    def test_pr_for_branch_keeps_retrying_while_unresolved(self):
+        # 위 메모이제이션이 "PR 이 아직 없을 때의 재시도" 성질까지 죽이면
+        # 안 된다 — None 인 동안은 새 후보마다 계속 다시 묻는다.
+        calls = []
+
+        def always_none(root, br):
+            calls.append((str(root), br))
+            return None
+
+        urls = [f"https://github.com/tokenmaxxxer/on-the-record/pull/{n}\n"
+               for n in (1, 142, 124)]
+        events = self._run(tempfile.mkdtemp(), "".join(urls), pr_for_branch=always_none)
+        self.assertEqual(len(calls), 3, calls)  # 미해결 상태론 후보마다 재시도
+        self.assertFalse([e for e in events if e["type"] == "pr-opened"], events)
+
+
+class ProgressEvents(unittest.TestCase):
+    """이슈 #180 ②: 세션 진행(산출물 쓰기 + 검증/커밋/푸시)이 `events.jsonl` 에
+    `progress` 로 남는다 — 탐색성 호출은 안 남는다(입도 실패 방지)."""
+
+    def _run(self, td, lines):
+        return EventReporting()._run(td, "\n".join(json.dumps(l) for l in lines) + "\n")
+
+    def test_write_tool_use_fires_progress(self):
+        events = self._run(tempfile.mkdtemp(), [
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Write",
+                 "input": {"file_path": "docs/issue-180/reports/implementation.md"}},
+            ]}},
+        ])
+        progress = [e for e in events if e["type"] == "progress"]
+        self.assertEqual(progress, [{"ts": progress[0]["ts"], "type": "progress",
+                                     "detail": {"kind": "tool_use",
+                                                "detail": "Write docs/issue-180/reports/implementation.md"}}])
+
+    def test_consecutive_writes_to_same_file_are_deduped(self):
+        events = self._run(tempfile.mkdtemp(), [
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Edit", "input": {"file_path": "spawn.py"}},
+            ]}},
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Edit", "input": {"file_path": "spawn.py"}},
+            ]}},
+        ])
+        self.assertEqual(len([e for e in events if e["type"] == "progress"]), 1, events)
+
+    def test_writes_to_different_files_both_fire(self):
+        events = self._run(tempfile.mkdtemp(), [
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Write", "input": {"file_path": "a.py"}},
+            ]}},
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Write", "input": {"file_path": "b.py"}},
+            ]}},
+        ])
+        self.assertEqual(len([e for e in events if e["type"] == "progress"]), 2, events)
+
+    def test_verification_and_commit_commands_fire_progress(self):
+        for command in ("git commit -q -m x", "git push -q", "gh pr create --title t",
+                        "python3 test_spawn.py", "python3 gates/ci.py ."):
+            with self.subTest(command=command):
+                events = self._run(tempfile.mkdtemp(), [
+                    {"type": "assistant", "message": {"content": [
+                        {"type": "tool_use", "name": "Bash", "input": {"command": command}},
+                    ]}},
+                ])
+                progress = [e for e in events if e["type"] == "progress"]
+                self.assertEqual(len(progress), 1, events)
+                self.assertEqual(progress[0]["detail"]["kind"], "tool_use")
+
+    def test_exploratory_bash_does_not_fire_progress(self):
+        # 실패 신호(제안서): 이게 서면 알림 폭탄이 재현된 것이다.
+        for command in ("ls docs/", "grep -rn foo .", "cat spawn.py", "git status",
+                        "git diff"):
+            with self.subTest(command=command):
+                events = self._run(tempfile.mkdtemp(), [
+                    {"type": "assistant", "message": {"content": [
+                        {"type": "tool_use", "name": "Bash", "input": {"command": command}},
+                    ]}},
+                ])
+                self.assertFalse([e for e in events if e["type"] == "progress"], events)
+
+    def test_gate_refusal_parsing_still_works_alongside_progress(self):
+        # gate-refusal 판별과 같은 obj 를 재사용하도록 바꾼 뒤에도 기존 동작이
+        # 그대로인지 — result 라인은 여전히 result 로만 처리된다.
+        events = self._run(tempfile.mkdtemp(), [
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "name": "Write", "input": {"file_path": "x.py"}},
+            ]}},
+            {"type": "result", "is_error": False,
+             "permission_denials": [{"tool_name": "Write"}]},
+        ])
+        self.assertEqual(len([e for e in events if e["type"] == "progress"]), 1, events)
+        self.assertEqual(len([e for e in events if e["type"] == "gate-refusal"]), 1, events)
 
 
 class Clean(unittest.TestCase):
@@ -1748,6 +1897,114 @@ class SessionLastActivity(unittest.TestCase):
         self.log.chmod(0o000)
         self.addCleanup(self.log.chmod, 0o644)
         self.assertIsNone(self.flows._session_last_activity(self.log))
+
+
+class WatchFollow(unittest.TestCase):
+    """이슈 #180 ③: `--follow` 는 `_await_bounded` 시그니처·동작을 바꾸지
+    않고 반복 호출하기만 한다 — 가장 최근에 소비한 이벤트 타입이
+    session-end 일 때만 멈춘다(실패 신호: 안 멈추면 영원한 대기)."""
+
+    def setUp(self):
+        self.td = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.td, ignore_errors=True)
+        self.work = Path(self.td) / "wk"
+        self.work.mkdir()
+        self.events = spawn._events_path(self.work)
+        self.offset = spawn._offset_path(self.work)
+        self.log = Path(str(self.work) + ".session.log")
+        self.log.write_text("")
+        old_idx = spawn.WORKSPACE_INDEX
+        spawn.WORKSPACE_INDEX = Path(self.td) / "workspaces.json"
+        self.addCleanup(setattr, spawn, "WORKSPACE_INDEX", old_idx)
+        spawn._workspace_index_put(180, "implementation", str(self.work), str(self.log))
+
+    def test_follow_stops_only_at_session_end(self):
+        from unittest import mock
+        spawn._append_event(self.events, "progress", {"kind": "tool_use", "detail": "x"})
+        spawn._append_event(self.events, "gate-refusal", "denied")
+        spawn._append_event(self.events, "session-end", "progressed")
+        calls = []
+
+        def fake_await_bounded(events_path, offset_path, stall_timeout_min, log_path):
+            calls.append(1)
+            seen = spawn._read_offset(offset_path)
+            lines = events_path.read_text(encoding="utf-8").splitlines()
+            if seen < len(lines):
+                spawn._write_offset(offset_path, seen + 1)
+            return 0
+
+        with mock.patch.object(spawn, "_await_bounded", fake_await_bounded):
+            rc = spawn._watch(180, "implementation", 5.0, follow=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 3, calls)  # progress, gate-refusal, session-end — 각 한 번
+
+    def test_follow_ignores_stall_and_keeps_going(self):
+        from unittest import mock
+        spawn._append_event(self.events, "session-end", "progressed")
+        calls = []
+
+        def fake_await_bounded(events_path, offset_path, stall_timeout_min, log_path):
+            calls.append(1)
+            if len(calls) < 3:
+                return 0  # stall 흉내: offset 은 그대로
+            spawn._write_offset(offset_path, spawn._read_offset(offset_path) + 1)
+            return 0
+
+        with mock.patch.object(spawn, "_await_bounded", fake_await_bounded):
+            rc = spawn._watch(180, "implementation", 5.0, follow=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 3, calls)  # stall 2번을 지나 session-end 에서만 멈춘다
+
+    def test_non_follow_mode_calls_await_bounded_exactly_once(self):
+        from unittest import mock
+        spawn._append_event(self.events, "progress", {"kind": "tool_use", "detail": "x"})
+        calls = []
+
+        def fake_await_bounded(events_path, offset_path, stall_timeout_min, log_path):
+            calls.append(1)
+            spawn._write_offset(offset_path, spawn._read_offset(offset_path) + 1)
+            return 0
+
+        with mock.patch.object(spawn, "_await_bounded", fake_await_bounded):
+            rc = spawn._watch(180, "implementation", 5.0, follow=False)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 1, calls)  # 기존 단일-이벤트 모드는 그대로
+
+    def test_main_wires_follow_flag_through_to_watch(self):
+        from unittest import mock
+        old_argv = sys.argv
+        sys.argv = ["spawn.py", "watch", "--issue", "180", "--follow"]
+        captured = {}
+
+        def fake_watch(issue, role, stall_timeout_min, follow=False):
+            captured["follow"] = follow
+            return 0
+
+        try:
+            with mock.patch.object(spawn, "_watch", fake_watch):
+                rc = spawn.main()
+        finally:
+            sys.argv = old_argv
+        self.assertEqual(rc, 0)
+        self.assertTrue(captured["follow"])
+
+    def test_main_defaults_follow_to_false(self):
+        from unittest import mock
+        old_argv = sys.argv
+        sys.argv = ["spawn.py", "watch", "--issue", "180"]
+        captured = {}
+
+        def fake_watch(issue, role, stall_timeout_min, follow=False):
+            captured["follow"] = follow
+            return 0
+
+        try:
+            with mock.patch.object(spawn, "_watch", fake_watch):
+                rc = spawn.main()
+        finally:
+            sys.argv = old_argv
+        self.assertEqual(rc, 0)
+        self.assertFalse(captured["follow"])
 
 
 if __name__ == "__main__":
