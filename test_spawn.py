@@ -76,6 +76,25 @@ class SpawnCmd(unittest.TestCase):
                 if v is not None:
                     os.environ[k] = v
 
+    def test_claude_plugin_root_core_matches_attached_core_dir(self):
+        # 이슈#182: 룰북 게이트는 core 공유 라이브러리를
+        # ${CLAUDE_PLUGIN_ROOT_CORE:-<상대경로>/core} 로 참조한다. 이 변수가
+        # 없으면 상대 fallback 이 룰북 클론 내부를 가리켜 실배포에서 해석
+        # 실패 → 게이트 전면 fail-open. 주입된 경로는 --plugin-dir 로 실제
+        # 로드되는 core 플러그인 경로와 문자열까지 정확히 일치해야 한다.
+        _, env = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False,
+                                  core_plugins=["/x/tokenmaxxxer-core/core",
+                                                "/x/tokenmaxxxer-core/terse"])
+        self.assertEqual(env["CLAUDE_PLUGIN_ROOT_CORE"], "/x/tokenmaxxxer-core/core")
+
+    def test_claude_plugin_root_core_unset_without_core_plugin(self):
+        # core 가 결손 상태(plugin.json 없음)여서 core_plugin_dirs() 목록에서
+        # 아예 빠지면 변수를 주입하지 않는다 — 조용히 fallback 에 빠지게
+        # 두지 않고 stderr 경고로 드러낸다.
+        _, env = spawn.spawn_cmd("/tmp/s.json", "execution-observation", unattended=False,
+                                  core_plugins=["/x/tokenmaxxxer-core/terse"])
+        self.assertNotIn("CLAUDE_PLUGIN_ROOT_CORE", env)
+
     def test_env_stamps(self):
         # D1: 스폰된 세션의 UserPromptSubmit 은 오케스트레이터가 쓴 텍스트다.
         # 그 턴이 사람 턴으로 오인되어 mint 되는 일이 없도록 도장을 찍는다.

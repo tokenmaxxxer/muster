@@ -1995,6 +1995,21 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
         env["GIT_TERMINAL_PROMPT"] = "0"
     if unattended:
         env["TOKENMAXXXER_UNATTENDED"] = "1"
+    # 룰북 게이트는 core 공유 라이브러리를
+    # ${CLAUDE_PLUGIN_ROOT_CORE:-<상대경로>/core} 로 참조한다(이슈#182). 이
+    # 변수를 주입하지 않으면 상대 fallback 이 룰북 클론 내부를 가리켜
+    # 실배포에서 해석 실패 → 무가드 source 와 결합 시 게이트 전면
+    # fail-open. core_plugins 는 core_plugin_dirs() 가 이미 해결해
+    # --plugin-dir 로 넘기는 그 경로이므로, 여기서 재사용하면 "주입된
+    # 경로 == 실제 로드된 core 플러그인 경로" 불변식이 코드 구조로
+    # 보장된다.
+    core_dir = next((p for p in (core_plugins or []) if Path(p).name == "core"), None)
+    if core_dir:
+        env["CLAUDE_PLUGIN_ROOT_CORE"] = str(core_dir)
+    else:
+        print("spawn_cmd: core_plugins 에 'core' 엔트리가 없다 — "
+              "CLAUDE_PLUGIN_ROOT_CORE 미주입, 게이트가 fallback 경로로 "
+              "빠질 수 있다", file=sys.stderr)
     return cmd, env
 
 
