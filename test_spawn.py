@@ -1561,13 +1561,15 @@ class FlowsPayload(unittest.TestCase):
         self.addCleanup(self.td.cleanup)
         self._patched = []
         self._patch(spawn, "_repo_slug", lambda root: "acme/repo")
-        self._patch(spawn, "_pr_list_all", lambda root: [])
         self._patch(spawn, "_issue_comments", lambda root, n: [])
         self._patch(spawn, "_roster_load", lambda: {})
         old_root = spawn.ROOT
         spawn.ROOT = self.root
         self.addCleanup(setattr, spawn, "ROOT", old_root)
         sys.path.insert(0, str((Path(spawn.__file__).parent / "gates").resolve()))
+        import flows
+        self.flows = flows
+        self._patch(flows, "_pr_list_all", lambda root: [])
         import closure_sweep
         self.closure_sweep = closure_sweep
         self._patch(closure_sweep, "find_violations", lambda root, subjects=None: [])
@@ -1589,7 +1591,7 @@ class FlowsPayload(unittest.TestCase):
         (rec / f"{role}.md").write_text(body, encoding="utf-8")
 
     def test_schema_top_level_keys(self):
-        payload = spawn.flows_payload(self.root)
+        payload = self.flows.flows_payload(self.root)
         for key in ("schema_version", "generated_at", "repo", "decision_queue",
                     "flows", "sessions", "ledger", "hygiene"):
             self.assertIn(key, payload)
@@ -1600,7 +1602,7 @@ class FlowsPayload(unittest.TestCase):
     def test_flows_section_stage_mapping_and_unmapped_fallback(self):
         self._write_record("issue-10", "product-discovery", "scope-proposed")
         self._write_record("issue-11", "product-discovery", "some-downstream-state")
-        payload = spawn.flows_payload(self.root)
+        payload = self.flows.flows_payload(self.root)
         by_issue = {f["issue"]: f for f in payload["flows"]}
         self.assertEqual(by_issue[10]["stage"], "proposal")
         self.assertTrue(by_issue[10]["stage_derived"])
@@ -1609,11 +1611,11 @@ class FlowsPayload(unittest.TestCase):
 
     def test_decision_queue_from_open_pr(self):
         self._write_record("issue-20", "product-discovery", "scope-proposed")
-        self._patch(spawn, "_pr_list_all", lambda root: [
+        self._patch(self.flows, "_pr_list_all", lambda root: [
             {"number": 99, "headRefName": "issue-20/product-discovery",
              "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
         ])
-        payload = spawn.flows_payload(self.root)
+        payload = self.flows.flows_payload(self.root)
         self.assertEqual(len(payload["decision_queue"]), 1)
         entry = payload["decision_queue"][0]
         self.assertEqual(entry["pr"], 99)
@@ -1627,7 +1629,7 @@ class FlowsPayload(unittest.TestCase):
         })
         spawn.ledger_write({"role": "coding", "cost_usd": 1.0, "outcome": "progressed",
                            "board_delta": ["docs/issue-5/reports/coding.md"]})
-        payload = spawn.flows_payload(self.root)
+        payload = self.flows.flows_payload(self.root)
         self.assertEqual(len(payload["sessions"]), 1)
         s = payload["sessions"][0]
         # pid 999999 is assumed not alive in the test sandbox
@@ -1647,7 +1649,7 @@ class FlowsPayload(unittest.TestCase):
             "issue-5/coding": {"role": "coding", "issue": 5, "pid": 999999,
                                "ts": int(time.time()), "log": str(log)},
         })
-        payload = spawn.flows_payload(self.root)
+        payload = self.flows.flows_payload(self.root)
         la = payload["sessions"][0]["last_activity"]
         self.assertEqual(la["kind"], "tool_use")
         self.assertEqual(la["detail"], "Write roles/data-modeling.json")
@@ -1658,7 +1660,7 @@ class FlowsPayload(unittest.TestCase):
             "issue-5/coding": {"role": "coding", "issue": 5, "pid": 999999,
                                "ts": int(time.time())},
         })
-        payload = spawn.flows_payload(self.root)
+        payload = self.flows.flows_payload(self.root)
         self.assertIsNone(payload["sessions"][0]["last_activity"])
 
     def test_ledger_aggregation_per_issue_and_unattributed_bucket(self):
@@ -1666,7 +1668,7 @@ class FlowsPayload(unittest.TestCase):
                            "board_delta": ["docs/issue-7/reports/coding.md"]})
         spawn.ledger_write({"role": "coding", "cost_usd": 0.5, "outcome": "refused",
                            "board_delta": []})
-        payload = spawn.flows_payload(self.root)
+        payload = self.flows.flows_payload(self.root)
         self.assertEqual(len(payload["ledger"]), 1)
         self.assertEqual(payload["ledger"][0]["issue"], 7)
         self.assertEqual(payload["ledger"][0]["sessions"], 1)
@@ -1676,13 +1678,13 @@ class FlowsPayload(unittest.TestCase):
 
     def test_hygiene_includes_closure_sweep_and_unapproved_prs(self):
         self._write_record("issue-30", "implementation", "scope-approved")
-        self._patch(spawn, "_pr_list_all", lambda root: [
+        self._patch(self.flows, "_pr_list_all", lambda root: [
             {"number": 55, "headRefName": "issue-30/implementation",
              "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
         ])
         self._patch(self.closure_sweep, "find_violations",
                     lambda root, subjects=None: [{"kind": "open-pr-on-closed-issue"}])
-        payload = spawn.flows_payload(self.root)
+        payload = self.flows.flows_payload(self.root)
         self.assertEqual(payload["hygiene"]["closure_sweep"],
                          [{"kind": "open-pr-on-closed-issue"}])
         self.assertEqual(len(payload["hygiene"]["unapproved_open_prs"]), 1)
@@ -1697,12 +1699,15 @@ class SessionLastActivity(unittest.TestCase):
         self.td = tempfile.TemporaryDirectory()
         self.addCleanup(self.td.cleanup)
         self.log = Path(self.td.name) / "wk.session.log"
+        sys.path.insert(0, str((Path(spawn.__file__).parent / "gates").resolve()))
+        import flows
+        self.flows = flows
 
     def test_none_when_log_missing(self):
-        self.assertIsNone(spawn._session_last_activity(self.log))
+        self.assertIsNone(self.flows._session_last_activity(self.log))
 
     def test_none_when_log_path_is_none(self):
-        self.assertIsNone(spawn._session_last_activity(None))
+        self.assertIsNone(self.flows._session_last_activity(None))
 
     def test_bash_tool_use_detail(self):
         self.log.write_text(
@@ -1710,7 +1715,7 @@ class SessionLastActivity(unittest.TestCase):
                 {"type": "tool_use", "name": "Bash",
                  "input": {"command": "pytest test_spawn.py"}},
             ]}}) + "\n", encoding="utf-8")
-        la = spawn._session_last_activity(self.log)
+        la = self.flows._session_last_activity(self.log)
         self.assertEqual(la["kind"], "tool_use")
         self.assertEqual(la["detail"], "pytest test_spawn.py 실행")
 
@@ -1718,7 +1723,7 @@ class SessionLastActivity(unittest.TestCase):
         self.log.write_text(
             json.dumps({"type": "result", "subtype": "success",
                        "result": "done"}) + "\n", encoding="utf-8")
-        la = spawn._session_last_activity(self.log)
+        la = self.flows._session_last_activity(self.log)
         self.assertEqual(la["kind"], "result")
         self.assertEqual(la["detail"], "done")
 
@@ -1731,18 +1736,18 @@ class SessionLastActivity(unittest.TestCase):
         ]
         self.log.write_text("\n".join(json.dumps(l) for l in lines) + "\n",
                             encoding="utf-8")
-        la = spawn._session_last_activity(self.log)
+        la = self.flows._session_last_activity(self.log)
         self.assertEqual(la["detail"], "second")
 
     def test_malformed_tail_yields_none_not_error(self):
         self.log.write_text("not json at all\n{also not json\n", encoding="utf-8")
-        self.assertIsNone(spawn._session_last_activity(self.log))
+        self.assertIsNone(self.flows._session_last_activity(self.log))
 
     def test_unreadable_log_yields_none_not_error(self):
         self.log.write_text("{}\n", encoding="utf-8")
         self.log.chmod(0o000)
         self.addCleanup(self.log.chmod, 0o644)
-        self.assertIsNone(spawn._session_last_activity(self.log))
+        self.assertIsNone(self.flows._session_last_activity(self.log))
 
 
 if __name__ == "__main__":
