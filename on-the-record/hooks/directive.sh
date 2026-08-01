@@ -84,7 +84,10 @@ issue/PR model (on-the-record at ${CHECKOUT}). When the user brings work:
   not a different code path. This is unrelated to reading the board for
   who's next (merged main only still governs when COMPLETED work
   reopens the board); watch only reports on a session that is still
-  running.
+  running. \`spawn.py watch --issue <n> --follow\` streams the same
+  \`_await_bounded\` results in one call until session-end, so the
+  manual re-arm loop above is not required with it — the loop remains a
+  valid alternative when you want to see each event land one at a time.
 - Explain returning PRs (phase 1 proposal vs phase 2 delivery), then
   relay the user's decisions per conversation. The exact relay actions
   (feedback/approval/acceptance/refusal comment forms, issue-close, and

@@ -1464,6 +1464,11 @@ EVENTS_SUFFIX = ".events.jsonl"
 OFFSET_SUFFIX = ".events.offset"
 WORKSPACE_INDEX = ROOT / "runs" / "workspaces.json"
 _PR_URL_RE = re.compile(r"https://github\.com/[^\s\"'\\]+/pull/\d+")
+# progress 이벤트를 세우는 Bash 명령 접두사 — 산출물 쓰기(Write/Edit)와 함께
+# "무슨 일이 있었는지"의 저비용 신호. ls/grep/cat 같은 탐색성 호출은 여기
+# 없으니 안 걸린다 (이슈 #180).
+_PROGRESS_BASH_PREFIXES = ("git commit", "git push", "gh pr create",
+                           "python3 test_spawn.py", "python3 gates/ci.py")
 
 
 def _events_path(work: str) -> Path:
@@ -1695,7 +1700,8 @@ def _await_bounded(events_path: Path, offset_path: Path, stall_timeout_min: floa
         time.sleep(2)
 
 
-def _watch(issue: int, role: str | None, stall_timeout_min: float) -> int:
+def _watch(issue: int, role: str | None, stall_timeout_min: float,
+           follow: bool = False) -> int:
     idx = _workspace_index_load()
     if role:
         entry = idx.get(f"issue-{issue}/{role}")
@@ -1710,8 +1716,25 @@ def _watch(issue: int, role: str | None, stall_timeout_min: float) -> int:
               f"아직 스폰된 적이 없다", file=sys.stderr)
         return 1
     work = entry["work"]
-    return _await_bounded(_events_path(work), _offset_path(work),
-                           stall_timeout_min, Path(entry["log"]))
+    events_path = _events_path(work)
+    offset_path = _offset_path(work)
+    log_path = Path(entry["log"])
+    if not follow:
+        return _await_bounded(events_path, offset_path, stall_timeout_min, log_path)
+    # --follow: _await_bounded 자체는 바꾸지 않고 반복 호출한다 — 매 호출이
+    # 소비한 이벤트를 계속 찍다가, 그 이벤트 타입이 session-end 일 때만
+    # 멈춘다. _await_bounded 는 이벤트 소비 여부와 무관하게 항상 0 을
+    # 리턴하므로(stall 도 0), 무엇을 멈출 신호로 볼지는 offset 진행분을
+    # 직접 읽어 판단한다 (이슈 #180).
+    while True:
+        before = _read_offset(offset_path)
+        rc = _await_bounded(events_path, offset_path, stall_timeout_min, log_path)
+        after = _read_offset(offset_path)
+        if after > before:
+            lines = events_path.read_text(encoding="utf-8").splitlines()
+            ev = json.loads(lines[after - 1])
+            if ev.get("type") == "session-end":
+                return rc
 
 
 def roster_kill(issue: int, role: str) -> int:
@@ -1996,6 +2019,9 @@ def main() -> int:
                     help="분 단위. role task/watch 가 이벤트 없이 블록하는 최대 시간 (기본 5)")
     ap.add_argument("--role", dest="watch_role",
                     help="watch: 같은 이슈에 역할이 여럿 기록돼 있을 때 지정")
+    ap.add_argument("--follow", action="store_true",
+                    help="watch: 이벤트마다 재무장하지 않고 session-end 까지 "
+                         "_await_bounded 를 반복 호출하며 스트리밍한다")
     ap.add_argument("--auto-respawn", action="store_true",
                     help="watchdog: crashed 세션에 한해 최대 2회 자동 재스폰, "
                          "상한 도달 시 이슈 코멘트 (기본 off, 관찰-전용 유지)")
@@ -2039,7 +2065,7 @@ def main() -> int:
         if a.issue is None:
             sys.exit("사용법: spawn.py watch --issue <n> [--role <역할>] "
                      "[--stall-timeout <분>]")
-        return _watch(a.issue, a.watch_role, a.stall_timeout)
+        return _watch(a.issue, a.watch_role, a.stall_timeout, follow=a.follow)
     if a.role == "clean":
         # 안전한 것만 지운다: 미커밋 변경 없음 + origin 에 없는 커밋 없음.
         base = os.environ.get("MUSTER_WORK_DIR")
@@ -2426,6 +2452,18 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         # 실측 2026-07-30 — 그 URL 하나로 pr-opened 가 서고 스폰이 조기 복귀했다
         # (이슈 #142). origin 을 못 읽으면 접두사는 None 이고 예전처럼 전부 받는다.
         pr_prefix = _origin_pr_prefix(cwd) if issue is not None else None
+        # br 의 실제(또는 과거) PR 번호를 세션당 한 번만 gh 로 풀고 메모이즈한다.
+        # 후보 URL 마다 부르면 gh 서브프로세스가 후보 수만큼 뜨고, 이 호출이
+        # `for line in proc.stdout:` 루프 안이라 gh 가 네트워크에서 블록하는
+        # 동안 세션의 stdout 파이프가 차면 세션 자신이 멈춘다 — _pr_for_branch
+        # 는 URL 이 아니라 브랜치의 함수라 세션 안에서 값이 같다(PR #184 리뷰).
+        # PR 이 아직 없으면(None) 다음 후보에서 다시 풀어, 일시적 gh 실패 후
+        # 재시도 성질은 유지한다.
+        pr_number: int | None = None
+        # 연속으로 같은 file_path 에 나는 Write/Edit progress 를 억제하는
+        # 상태 — 직전에 기록한 progress 이벤트의 file_path(Write/Edit 가
+        # 아니었으면 None)를 들고 있는다.
+        last_progress_file: str | None = None
         with open(log_path, "w", encoding="utf-8") as lf:
             for line in proc.stdout:
                 lf.write(line)
@@ -2434,19 +2472,46 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                     for m in _PR_URL_RE.findall(line):
                         if pr_prefix and not m.startswith(pr_prefix):
                             continue
-                        if m not in pr_seen:
+                        if m in pr_seen:
+                            continue
+                        if pr_number is None:
+                            pr_number = _pr_for_branch(Path(cwd), br)
+                        if pr_number is not None and int(m.rsplit("/", 1)[-1]) == pr_number:
                             pr_seen.add(m)
                             _append_event(events_path, "pr-opened", m)
                 try:
                     obj = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(obj, dict) and obj.get("type") == "result":
+                if not isinstance(obj, dict):
+                    continue
+                if obj.get("type") == "result":
                     result = obj
                     denials = result.get("permission_denials") or []
                     if issue is not None and not gate_refusal_seen and denials:
                         gate_refusal_seen = True
                         _append_event(events_path, "gate-refusal", str(denials)[:200])
+                elif issue is not None and obj.get("type") == "assistant":
+                    # gate-refusal/pr-opened 와 같은 파싱 결과(obj)를 재사용한다
+                    # — 이 줄에 대해 json.loads 를 두 번 부르지 않는다.
+                    for block in (obj.get("message") or {}).get("content") or []:
+                        if not isinstance(block, dict) or block.get("type") != "tool_use":
+                            continue
+                        name = block.get("name")
+                        inp = block.get("input") or {}
+                        if name in ("Write", "Edit"):
+                            fp = inp.get("file_path")
+                            if fp and fp != last_progress_file:
+                                last_progress_file = fp
+                                _append_event(events_path, "progress",
+                                             {"kind": "tool_use", "detail": f"{name} {fp}"})
+                        elif name == "Bash":
+                            command = str(inp.get("command") or "")
+                            if command.startswith(_PROGRESS_BASH_PREFIXES):
+                                last_progress_file = None
+                                _append_event(events_path, "progress",
+                                             {"kind": "tool_use",
+                                              "detail": f"{command[:60]} 실행"})
         rc = proc.wait()
         roster_remove(roster_key)
     finally:
