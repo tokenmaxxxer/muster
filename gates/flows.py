@@ -74,17 +74,34 @@ def _plan_from_body(body: str) -> list[dict] | None:
     `None`. 있으면 다음 `##`(또는 본문 끝)까지 스캔해 `- [ ] step <N>
     <role>[ ‖ <role2> ...]` 형태의 줄만 골라 `[{step, roles, done}, ...]`
     로 돌려준다 — 헤더는 있지만 유효한 step 줄이 하나도 없어도 `None`이
-    아니라 빈 리스트(블록 자체는 존재하므로)."""
+    아니라 빈 리스트(블록 자체는 존재하므로). 코드펜스(```) 안 내용은 헤더
+    탐색·스텝 수집 둘 다에서 건너뛴다(issue #197) — `gates.py`의
+    `record_no_tool_residue_in`과 같은 `in_fence` 토글. 헤더는 정확히
+    `## 실행 계획`이거나 뒤에 공백을 두고 부가 설명이 붙은 형태
+    (`## 실행 계획 (...)`)까지 매치한다."""
     lines = (body or "").splitlines()
     start = None
+    in_fence = False
     for i, line in enumerate(lines):
-        if line.strip() == "## 실행 계획":
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        stripped = line.strip()
+        if stripped == "## 실행 계획" or stripped.startswith("## 실행 계획 "):
             start = i + 1
             break
     if start is None:
         return None
     steps = []
+    in_fence = False
     for line in lines[start:]:
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         stripped = line.strip()
         if stripped.startswith("##"):
             break
