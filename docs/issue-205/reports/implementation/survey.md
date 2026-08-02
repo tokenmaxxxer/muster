@@ -53,33 +53,43 @@ $ git log --oneline | grep -E "^(1ed27b9|7d11c9e)"
 (결함 2, 아래) 하나뿐이었고, `uncommitted`가 비어있지 않으니 `new_commit=True`
 체크에 닿기도 전에 `"failed-no-commit"`을 리턴한다.
 
-### 기존 테스트가 잠근 계약 — 그대로 두어야 하는 이유
+### 기존 테스트가 잠근 계약 — 어디까지가 진짜 제약인가 (오케스트레이터 중계로 수정)
 
 `test_spawn.py:585-655` `FailClosedDowngrade` 클래스가 `fail_closed_downgrade()`를
-직접 호출해 지금 순서를 못박아 뒀다. 특히:
+직접 호출해 지금 순서를 못박아 뒀다. 이 중 두 테스트가 이슈 #205의 설계
+결정에 직접 걸리는데, 성격이 다르다:
 
 - `test_new_commit_dirty_tree_is_still_downgraded`(`:600-606`): `new_commit=True`
-  + dirty tree → `"failed-no-commit"`을 **기대**한다. 주석: "a new commit landed
-  but the tree is dirty afterwards — the proposal's 'and/or dirty tree' clause
-  still fires" (이슈 #89 phase 2 결정).
+  + dirty tree → `"failed-no-commit"`을 **기대**한다. 이 단언 자체가 이슈 #205가
+  고치려는 바로 그 오판정(원장 실측 두 건이 이 케이스)을 문서화한 것이다 —
+  결함을 단언하는 테스트다.
 - `test_already_delivered_with_dirty_tree_still_downgrades`(`:648-655`): 주석
   "'already delivered' covers prior commits, not this session's own uncommitted
   leftovers" — 이 세션 **자신이** 남긴 dirty 파일은 already_delivered와 무관하게
-  여전히 위험 신호로 다룬다는 명시적 근거.
+  여전히 위험 신호로 다룬다는, 이슈 #205와 **무관한** 독립적 근거다. 결함을
+  단언하는 테스트가 아니다.
 
-이슈 #205 요구사항 1("커밋이 있는 세션은 실패로 찍히지 않는다")은 이 두
-테스트가 지금 고정한 값과 정면으로 다르다. 제약("기존 테스트 무변경
-통과")과 요구사항 1을 동시에 만족하려면 `fail_closed_downgrade()` 자체의
-순서/리턴값은 건드리지 않고(위 두 테스트가 그대로 통과), 그 뒤에 별도
-단계를 하나 더 두어 "새 커밋(`new_commit=True`)이 있는데 dirty tree 때문에
-`failed-no-commit`으로 깎인" 경우만 골라 되돌리는 방식이 유일하게 두 조건을
-동시에 만족한다 — 제안에서 이 설계를 채택한다.
+phase-1 PR #206에 대한 사용자 피드백(오케스트레이터 중계, PR #206 코멘트,
+2026-08-02): "'기존 테스트 무변경' 제약을 완화한다 — 결함 자체를 단언하는
+테스트는 수정 허용... 제약의 의도는 무관한 동작 보호였지 버그 보존이
+아니다." 이 결정으로 위 두 테스트는 더는 같은 취급을 받지 않는다:
+`test_new_commit_dirty_tree_is_still_downgraded`는 수정 대상(새 기대값
+`"progressed-dirty-tree"`), `test_already_delivered_with_dirty_tree_still_downgrades`는
+결함을 단언하지 않으므로 무변경 제약이 그대로 적용된다.
+
+이 구분을 적용하면 `fail_closed_downgrade()` 내부 검사 순서를 직접
+고치는 것(이슈 본문이 원인으로 지목한 바로 그 순서)과 "기존 테스트
+무변경" 제약이 더는 충돌하지 않는다 — 재분류를 별도 단계로 분리해 원래
+함수를 우회할 이유가 없다. 사용자 결정에 따라 이전 phase-1 제안에서
+기각했던 이 직접 교정안을 재채택한다(아래 Rationale 갱신 절 참조).
 
 `already_delivered`(이 세션 자체는 새 커밋이 없고, 브랜치에 이전 phase의
 커밋+PR만 있는 경우)는 이슈의 실측 두 건(두 건 다 `new_commit=True`) 어디에도
-해당하지 않고, 위 테스트 주석이 "이 세션 자신의 dirty 잔재는 여전히 위험"이라는
-독립적 근거를 이미 대고 있다 — 되돌리는 대상에서 `already_delivered` 단독
-케이스는 제외한다(범위를 이슈가 실측한 것만큼만 좁힌다).
+해당하지 않고, 위 두 번째 테스트가 "이 세션 자신의 dirty 잔재는 여전히
+위험"이라는 독립적 근거를 이미 대고 있다 — 되돌리는 대상에서
+`already_delivered` 단독 케이스는 제외한다(범위를 이슈가 실측한 것만큼만
+좁힌다). 이 부분은 사용자 피드백도 "실측 범위 밖 확장 금지"로 그대로
+수용해, 변경하지 않는다.
 
 ## 결함 2 — `.warrant-hunt.count`
 

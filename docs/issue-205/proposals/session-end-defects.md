@@ -31,35 +31,48 @@ files:
 - 원장 스키마 소비자(`gates/flows.py`의 `_ledger_read`/`flows_payload` ledger
   구역)가 깨지지 않는다(요구사항 4) — survey에서 확인: 이 소비자는 `outcome`을
   불투명 문자열로 버킷팅만 하지, 특정 값 집합으로 분기하지 않는다.
-- 기존 테스트는 무변경으로 통과해야 한다 — 특히 `test_spawn.py`의
+- 기존 테스트는 원칙적으로 무변경으로 통과해야 한다 — 특히 `test_spawn.py`의
   `FailClosedDowngrade`(`:585-655`)와 `Clean`(`:1252-1374`) 두 클래스는 이번
-  결함들과 정확히 겹치는 영역이라 회귀에 가장 취약하다.
+  결함들과 정확히 겹치는 영역이라 회귀에 가장 취약하다. 다만 **결함 자체를
+  단언하는 테스트는 수정 허용**(phase-1 PR #206에 대한 사용자 피드백,
+  오케스트레이터 중계, 2026-08-02) — 최소 `test_new_commit_dirty_tree_is_still_downgraded`
+  (`new_commit=True`+dirty → `"failed-no-commit"` 단언은 이 이슈가 고치려는
+  바로 그 오판정의 문서화)는 수정 대상이다. 제약의 의도는 이번 수정과 무관한
+  동작의 보호였지 버그의 보존이 아니다. `test_already_delivered_with_dirty_tree_still_downgrades`처럼
+  결함을 단언하지 않는 테스트는 이 완화 대상이 아니며 무변경으로 남는다.
 
 ## Rationale
 
-**결함 1 — 채택: `fail_closed_downgrade()`는 손대지 않고, 그 뒤에 재분류 단계를
-하나 더 둔다.** 새 함수(가칭 `reclassify_dirty_but_committed()`)가
-`fail_closed_downgrade()`의 리턴값·`new_commit`·`uncommitted`를 받아, "새 커밋은
-있는데(`new_commit=True`) dirty tree 때문에 `failed-no-commit`으로 깎인" 경우만
-`"progressed-dirty-tree"`(신규 outcome 값)로 되돌린다. `already_delivered`
-단독(이 세션 자체는 새 커밋 없음, 브랜치에 이전 phase 커밋만 있음) 케이스는
-되돌리지 않는다 — 이슈가 실측한 두 사례(1ed27b9, 7d11c9e) 다 이 세션 자신의
-새 커밋이 있는 경우였고, `already_delivered`+dirty를 여전히 실패로 다루는
-기존 테스트(`test_already_delivered_with_dirty_tree_still_downgrades`)에 이미
-"이 세션 자신의 dirty 잔재는 여전히 위험 신호"라는 독립적 근거가 있다 —
-실측 범위 밖까지 넓히지 않는다.
+**결함 1 — 채택(사용자 결정으로 재채택, 2026-08-02): `fail_closed_downgrade()`
+내부에서 `uncommitted`/`new_commit` 검사 순서를 직접 교정한다 — 재분류
+우회층 없이.** 이슈 본문이 "원인은 검사 순서"라고 지목한 그대로를 고치는
+가장 직접적인 방법. 현재 순서(`if uncommitted: return "failed-no-commit"`이
+`new_commit` 확인보다 먼저)의 앞에 `new_commit and uncommitted`인 경우만 골라
+`"progressed-dirty-tree"`(신규 outcome 값)를 직접 리턴하는 분기 한 줄을
+추가한다. 그 뒤로 기존 `if uncommitted: return "failed-no-commit"` 이하는
+그대로 둔다 — `new_commit=False`(진짜 커밋 없음)인 dirty tree는 여전히
+`"failed-no-commit"`을 받는다.
 
-거부한 대안(rejected alternative) 셋:
+`already_delivered` 단독(이 세션 자체는 새 커밋 없음, 브랜치에 이전 phase
+커밋만 있음) 케이스는 승격 대상에서 제외한다 — 이슈가 실측한 두 사례
+(1ed27b9, 7d11c9e) 다 이 세션 자신의 새 커밋이 있는 경우였고,
+`already_delivered`+dirty를 여전히 실패로 다루는 기존 테스트
+(`test_already_delivered_with_dirty_tree_still_downgrades`)에 이미 "이 세션
+자신의 dirty 잔재는 여전히 위험 신호"라는 독립적 근거가 있다 — 실측 범위
+밖까지 넓히지 않는다(사용자 결정에서도 이 부분은 원안대로 수용).
 
-1. **`fail_closed_downgrade()` 내부에서 `uncommitted`/`new_commit` 검사 순서를
-   직접 뒤집는다.** 이슈 본문이 "원인은 검사 순서"라고 지목한 그대로를
-   고치는 가장 직접적인 방법이지만, 이 함수를 직접 호출하는 기존 테스트 중
-   `test_new_commit_dirty_tree_is_still_downgraded`와
-   `test_already_delivered_with_dirty_tree_still_downgrades`가 지금 순서의
-   결과값(`"failed-no-commit"`)을 그대로 단언하고 있어, 순서를 뒤집으면 두
-   테스트가 깨진다. "기존 테스트 무변경 통과" 제약과 정면 충돌이라 **기각한다
-   (rejected)** — 재분류를 별도 단계로 분리하면 이 함수의 기존 계약(및 그
-   계약을 지키는 두 테스트)은 그대로 두면서 요구사항 1을 만족할 수 있다.
+거부한 대안(rejected alternative) 둘:
+
+1. **(이전 phase-1 제안에서 채택했다가 이번에 기각) `fail_closed_downgrade()`는
+   손대지 않고, 그 뒤에 재분류 단계(가칭 `reclassify_dirty_but_committed()`)를
+   별도로 둔다.** 앞선 제안에서는 "기존 테스트 무변경" 제약을 절대적으로
+   읽어, 이 함수를 직접 호출하는 `test_new_commit_dirty_tree_is_still_downgraded`가
+   지금 순서의 결과값(`"failed-no-commit"`)을 단언하고 있다는 이유로 직접
+   교정을 기각하고 우회층을 채택했다. 그러나 그 단언 자체가 이슈 #205가
+   고치려는 오판정의 문서화이고, 제약의 의도는 무관한 동작 보호였지 버그
+   보존이 아니라는 사용자 피드백에 따라 이 제약 해석이 뒤집혔다 — 우회층은
+   이제 필요 없는 간접 계층일 뿐이라 **기각한다(rejected)**. 직접 교정이
+   이슈가 지목한 원인을 그대로 고치는 더 단순한 형태다.
 2. **새 outcome 문자열 대신 ledger 엔트리에 `"dirty_tree": bool` 필드를 추가하고
    `outcome`은 그대로 `"progressed"`로 둔다.** 구조적으로는 더 깔끔해 보이지만,
    `gates/flows.py`의 유일한 ledger 소비 지점(`flows_payload`의
@@ -97,41 +110,38 @@ gitignore) 자체는 이슈가 확정했고, 추적 해제는 `1c230db`(issue-19
 
 ## What will be done
 
-1. `spawn.py` — `fail_closed_downgrade()` 정의 바로 뒤에
-   `reclassify_dirty_but_committed(downgraded, new_commit, uncommitted) -> str`
-   추가: `downgraded == "failed-no-commit"`이고 `new_commit`이고 `uncommitted`가
-   비어있지 않으면 `"progressed-dirty-tree"`를 리턴, 그 외엔 `downgraded`를
-   그대로 리턴.
-2. `spawn.py:2590` 부근 호출부: `downgraded = fail_closed_downgrade(...)` 다음
-   줄에 `downgraded = reclassify_dirty_but_committed(downgraded, new_commit,
-   uncommitted)`를 추가. 이어지는 `if downgraded != outcome:` 로그 블록의
-   문구를 두 경로로 분기 — `downgraded == "failed-no-commit"`이면 기존 문구
-   그대로, `downgraded == "progressed-dirty-tree"`이면 "커밋은 있지만 워크스페이스에
-   정리 안 된 파일이 남았다"는 취지의 새 문구. 기존 `if outcome ==
-   "refused":`/`if outcome == "silent-failure":` 안내 블록과 같은 자리에
-   `if outcome == "progressed-dirty-tree":` 블록 하나 추가(같은 stderr 안내
-   패턴).
+1. `spawn.py` — `fail_closed_downgrade()`(`:1232-1263`) 내부, 기존
+   `if uncommitted: return "failed-no-commit"` 줄 바로 앞에 한 줄 추가:
+   `if new_commit and uncommitted: return "progressed-dirty-tree"`. 그 아래
+   기존 로직(`if uncommitted: return "failed-no-commit"` 이하)은 무변경 —
+   `new_commit=False`인 dirty tree(진짜 커밋 없음)와 `already_delivered`+dirty는
+   그대로 `"failed-no-commit"`을 받는다. 우회 재분류 함수는 두지 않는다.
+2. `spawn.py:2590` 부근 호출부: `downgraded = fail_closed_downgrade(...)`
+   다음의 `if downgraded != outcome:` 로그 블록 문구를 두 경로로 분기 —
+   `downgraded == "progressed-dirty-tree"`이면 "새 커밋은 있지만 워크스페이스에
+   정리 안 된 변경이 남았다"는 취지의 새 문구, 그 외(`"failed-no-commit"`)면
+   기존 문구 그대로.
 3. `.gitignore`에 `.warrant-hunt.*` 한 줄 추가.
 4. `spawn.py:2125-2126`: `for sibling in w.parent.glob(w.name + ".*"):` 안,
    `sibling.unlink()` 앞에 `if not sibling.is_file(): continue` 추가(또는 동치인
    `if sibling.is_file(): sibling.unlink()`로 감싸기 — 스타일은 구현 시 결정).
-5. `test_spawn.py`에 신규 테스트만 추가(기존 줄 수정 없음):
-   - 새 클래스 `ReclassifyDirtyButCommitted`: (a) `downgraded="failed-no-commit"`
-     + `new_commit=True` + dirty → `"progressed-dirty-tree"`, (b) 같은 조건에서
-     `uncommitted=[]` → 그대로 `"failed-no-commit"`(승격 안 함), (c)
-     `new_commit=False` + dirty → 그대로 `"failed-no-commit"`(1ed27b9/7d11c9e류가
-     아닌, 진짜 커밋 없는 실패는 승격되면 안 됨), (d) `downgraded="progressed"`
-     (애초에 안 깎인 경우) → 그대로 통과.
-   - `Clean` 클래스에 테스트 1건 추가: 죽은 워크스페이스의 형제 글롭 안에
-     디렉터리 하나(예: `<name>.somedir/`)와 파일 하나를 같이 만들고 `clean`
-     실행 — 예외 없이 끝나고, 파일 형제는 지워지고, 디렉터리 형제는 (가드만
-     추가하므로) 그대로 남는다는 것과, 목록의 다음 워크스페이스도 정상
-     처리된다는 것을 단언.
+5. `test_spawn.py`:
+   - `FailClosedDowngrade.test_new_commit_dirty_tree_is_still_downgraded`
+     (`:600-606`)를 수정한다 — 결함을 단언하는 테스트라 수정 허용 대상(위
+     Constraints 참조). 이름을 실제 동작에 맞게 바꾸고
+     (`test_new_commit_dirty_tree_is_promoted_not_downgraded` 등), 기대값을
+     `"failed-no-commit"`에서 `"progressed-dirty-tree"`로 바꾼다. 그 외
+     `FailClosedDowngrade`의 8개 테스트(특히
+     `test_already_delivered_with_dirty_tree_still_downgrades`)는 한 줄도
+     건드리지 않는다.
+   - `Clean` 클래스에 테스트 1건 추가(기존 줄 수정 없음): 죽은 워크스페이스의
+     형제 글롭 안에 디렉터리 하나(예: `<name>.somedir/`)와 파일 하나를 같이
+     만들고 `clean` 실행 — 예외 없이 끝나고, 파일 형제는 지워지고, 디렉터리
+     형제는 (가드만 추가하므로) 그대로 남는다는 것과, 목록의 다음 워크스페이스도
+     정상 처리된다는 것을 단언.
 
 ## Out of scope
 
-- `fail_closed_downgrade()` 자체의 검사 순서 변경 — Rationale에서 기각한
-  대안 1.
 - `already_delivered`만 있고 이 세션 자체 새 커밋은 없는 경우의 재분류 —
   이슈가 실측한 두 사례 밖이고, 기존 테스트가 이미 그 케이스를 위험 신호로
   다루는 근거를 대고 있다.
@@ -149,15 +159,16 @@ gitignore) 자체는 이슈가 확정했고, 추적 해제는 `1c230db`(issue-19
 phase 2에서 구현 후 아래가 전부 성립해야 한다:
 
 ```
-python3 -m pytest test_spawn.py -k "FailClosedDowngrade or Clean or ReclassifyDirtyButCommitted" -v
+python3 -m pytest test_spawn.py -k "FailClosedDowngrade or Clean" -v
 ```
 
-- 기존 `FailClosedDowngrade`(9건)와 `Clean`(기존 2건 + 신규 1건)이 문구 그대로
-  전부 통과 — 특히 `test_new_commit_dirty_tree_is_still_downgraded`와
-  `test_already_delivered_with_dirty_tree_still_downgraded`가 여전히
-  `"failed-no-commit"`을 리턴받는 것으로 통과(이 두 테스트는 `fail_closed_downgrade()`를
-  직접 부르므로 변경 대상 밖).
-- 새 `ReclassifyDirtyButCommitted` 클래스 전 건 통과.
+- `FailClosedDowngrade`의 9건 전부 통과 — 8건은 문구까지 그대로(특히
+  `test_already_delivered_with_dirty_tree_still_downgrades`가 여전히
+  `"failed-no-commit"`을 리턴받는 것으로 통과), 수정된 1건
+  (`test_new_commit_dirty_tree_is_promoted_not_downgraded`, 옛
+  `test_new_commit_dirty_tree_is_still_downgraded`)은 새 기대값
+  `"progressed-dirty-tree"`로 통과.
+- `Clean`(기존 2건 + 신규 1건) 전부 통과.
 - `python3 -m pytest test_spawn.py -q`가 이 세션에서 확인한 베이스라인(관련
   없는 18건 실패는 그대로, 네트워크·룰북-clone 샌드박스 아티팩트) 대비 새
   실패를 추가하지 않는다 — 새로 추가/수정되는 테스트 개수만큼 `collected`
