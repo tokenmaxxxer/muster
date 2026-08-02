@@ -641,6 +641,54 @@ def t_closure_sweep_everything_consistent_not_violation():
     assert closure_sweep.classify("CLOSED", "MERGED", "Closes #135", 135) is None
 
 
+def t_find_violations_uses_prefetched_issue_state_skips_issue_view():
+    """issue #189: `issue_states` 로 이슈 상태가 이미 있으면 `_issue_view`
+    를 호출하지 않는다 — 레포 전체 `gh issue list` 프리페치를 그대로 쓴다."""
+    original_issue_view = closure_sweep._issue_view
+    original_pr_for_branch = spawn._pr_for_branch
+
+    def boom(root, issue):
+        raise AssertionError("issue_states 에 있는 이슈는 _issue_view 를 부르면 안 된다")
+
+    closure_sweep._issue_view = boom
+    spawn._pr_for_branch = lambda root, branch: None
+    try:
+        subjects = {"issue-135": {"implementation": {}}}
+        violations = closure_sweep.find_violations(
+            Path("."), subjects=subjects, issue_states={135: "OPEN"})
+        assert violations == [], violations
+    finally:
+        closure_sweep._issue_view = original_issue_view
+        spawn._pr_for_branch = original_pr_for_branch
+
+
+def t_find_violations_without_issue_states_still_calls_issue_view():
+    """회귀 가드(issue #189): `issue_states` 를 안 주거나 그 이슈가 안에
+    없으면 오늘처럼 여전히 `_issue_view` 를 부른다."""
+    original_issue_view = closure_sweep._issue_view
+    original_pr_for_branch = spawn._pr_for_branch
+    calls = []
+
+    def fake_issue_view(root, issue):
+        calls.append(issue)
+        return "OPEN"
+
+    closure_sweep._issue_view = fake_issue_view
+    spawn._pr_for_branch = lambda root, branch: None
+    try:
+        subjects = {"issue-135": {"implementation": {}}}
+        closure_sweep.find_violations(Path("."), subjects=subjects)
+        assert calls == [135], calls
+
+        calls.clear()
+        closure_sweep.find_violations(Path("."), subjects=subjects,
+                                      issue_states={999: "CLOSED"})
+        assert calls == [135], calls
+    finally:
+        closure_sweep._issue_view = original_issue_view
+        spawn._pr_for_branch = original_pr_for_branch
+
+
 def _scope_repo(td: str, role: str, write_scope: list) -> Path:
     """`role_scope` 전용 픽스처: `_enum_record_repo` 와 같은 방식으로
     `gates.ON_THE_RECORD_ROOT` 를 별도 checkout 으로 가리킨다. 호출자가
