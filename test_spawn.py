@@ -820,6 +820,13 @@ class Ledger(unittest.TestCase):
             old_roster = spawn.ROSTER
             spawn.ROSTER = roster
             entries = []
+            roster_calls = []
+            orig_roster_register = spawn.roster_register
+
+            def spy_roster_register(key, entry):
+                roster_calls.append((key, dict(entry)))
+                return orig_roster_register(key, entry)
+
             buf = io.StringIO()
             old_stdout = sys.stdout
             sys.stdout = buf
@@ -832,6 +839,8 @@ class Ledger(unittest.TestCase):
                                        lambda *a, **k: (["cat"], {})), \
                      mock.patch.object(spawn, "ensure_pushed",
                                        lambda *a, **k: None), \
+                     mock.patch.object(spawn, "roster_register",
+                                       spy_roster_register), \
                      mock.patch.object(spawn, "ledger_write",
                                        lambda entry: entries.append(entry)):
                     spawn._spawn_one(str(work), "execution-observation", "task\n",
@@ -840,7 +849,8 @@ class Ledger(unittest.TestCase):
                 sys.stdout = old_stdout
                 spawn.ROSTER = old_roster
 
-            roster_entry = json.loads(roster.read_text())["issue-9/execution-observation"]
+            roster_entry = dict([e for k, e in roster_calls
+                                 if k == "issue-9/execution-observation"][0])
             self.assertEqual(len(entries), 1, entries)
             self.assertEqual(entries[0]["log"], roster_entry["log"])
             self.assertTrue(Path(entries[0]["log"]).exists())
@@ -966,6 +976,13 @@ class IssueScopedPrompt(unittest.TestCase):
             roster = Path(td) / "active.json"
             old_roster = spawn.ROSTER
             spawn.ROSTER = roster
+            roster_calls = []
+            orig_roster_register = spawn.roster_register
+
+            def spy_roster_register(key, entry):
+                roster_calls.append((key, dict(entry)))
+                return orig_roster_register(key, entry)
+
             buf = io.StringIO()
             old_stdout = sys.stdout
             sys.stdout = buf
@@ -976,6 +993,8 @@ class IssueScopedPrompt(unittest.TestCase):
                                        lambda *a, **k: (["cat"], {})), \
                      mock.patch.object(spawn, "ensure_pushed",
                                        lambda *a, **k: None), \
+                     mock.patch.object(spawn, "roster_register",
+                                       spy_roster_register), \
                      mock.patch.object(spawn, "ledger_write",
                                        lambda *a, **k: None):
                     spawn._spawn_one(str(work), "execution-observation", "원래 맡긴 일.\n",
@@ -984,7 +1003,8 @@ class IssueScopedPrompt(unittest.TestCase):
                 sys.stdout = old_stdout
                 spawn.ROSTER = old_roster
 
-            log_path = json.loads(roster.read_text())["issue-7/execution-observation"]["log"]
+            log_path = [e for k, e in roster_calls
+                       if k == "issue-7/execution-observation"][0]["log"]
             delivered = Path(log_path).read_text()
             self.assertEqual(delivered.count("당신의 이슈:"), 1, delivered)
             self.assertEqual(delivered.count("원래 맡긴 일."), 1, delivered)
