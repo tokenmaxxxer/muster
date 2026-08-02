@@ -797,6 +797,54 @@ class Ledger(unittest.TestCase):
             lines = [json.loads(l) for l in p.read_text().splitlines()]
             self.assertEqual([l["role"] for l in lines], ["execution-observation", "review"])
 
+    def test_entry_carries_the_live_log_path(self):
+        # 이슈 #192 요구사항 2: ledger 엔트리의 `log` 필드가 그 세션이 실제
+        # 쓴 라이브 로그(로스터에 등록된 값)와 같아야, 세션 종료 뒤 그
+        # 로그를 session_id 로 되짚어 찾을 수 있다.
+        import subprocess as sp
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "issue-9-eo"
+            work.mkdir()
+            run = lambda *a: sp.run(a, cwd=str(work), capture_output=True,
+                                    text=True, check=True)
+            run("git", "init", "-q")
+            run("git", "config", "user.email", "t@example.com")
+            run("git", "config", "user.name", "t")
+            (work / "f.txt").write_text("x")
+            run("git", "add", "f.txt")
+            run("git", "commit", "-q", "-m", "init")
+
+            roster = Path(td) / "active.json"
+            old_roster = spawn.ROSTER
+            spawn.ROSTER = roster
+            entries = []
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                with mock.patch.object(spawn, "issue_workspace",
+                                       lambda cwd, issue, role: str(work)), \
+                     mock.patch.object(spawn, "checkout_issue_branch",
+                                       lambda cwd, issue, role: "b"), \
+                     mock.patch.object(spawn, "spawn_cmd",
+                                       lambda *a, **k: (["cat"], {})), \
+                     mock.patch.object(spawn, "ensure_pushed",
+                                       lambda *a, **k: None), \
+                     mock.patch.object(spawn, "ledger_write",
+                                       lambda entry: entries.append(entry)):
+                    spawn._spawn_one(str(work), "execution-observation", "task\n",
+                                     unattended=True, issue=9)
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+
+            roster_entry = json.loads(roster.read_text())["issue-9/execution-observation"]
+            self.assertEqual(len(entries), 1, entries)
+            self.assertEqual(entries[0]["log"], roster_entry["log"])
+            self.assertTrue(Path(entries[0]["log"]).exists())
+
 
 class OwnershipReport(unittest.TestCase):
     """세션 안 게이트가 안 돌았을 때의 마지막 흔적. 막지는 않고 말만 한다."""
@@ -936,7 +984,8 @@ class IssueScopedPrompt(unittest.TestCase):
                 sys.stdout = old_stdout
                 spawn.ROSTER = old_roster
 
-            delivered = Path(str(work) + ".session.log").read_text()
+            log_path = json.loads(roster.read_text())["issue-7/execution-observation"]["log"]
+            delivered = Path(log_path).read_text()
             self.assertEqual(delivered.count("당신의 이슈:"), 1, delivered)
             self.assertEqual(delivered.count("원래 맡긴 일."), 1, delivered)
             self.assertEqual([p for p, _ in prep].count("workspace"), 1, prep)
@@ -1239,6 +1288,71 @@ class Clean(unittest.TestCase):
             self.assertIn("실행 중인 세션 있음", out)
             self.assertFalse(dead_ws.exists())
 
+    def test_removes_all_generation_logs_and_sibling_files(self):
+        # 이슈 #192 요구사항 4: 재스폰 세대마다 로그가 늘어나므로, `clean`
+        # 은 고정 접미사 하나가 아니라 워크스페이스-이름 프리픽스의 형제
+        # 파일을 전부(세대별 로그 2개 이상 + events.jsonl + task.txt +
+        # respawn-claim 락 파일) 치워야 한다. 살아있는 세션의 형제 파일은
+        # 그대로 남는다.
+        with tempfile.TemporaryDirectory() as td:
+            wb = Path(td) / "work"
+            wb.mkdir()
+            live_ws = wb / "issue-51-coding"
+            dead_ws = wb / "issue-51-review"
+            self._make_clean_repo(live_ws, Path(td) / "remote-live.git")
+            self._make_clean_repo(dead_ws, Path(td) / "remote-dead.git")
+
+            live_siblings = [
+                Path(str(live_ws) + ".session.20260802T150000.111.log"),
+                Path(str(live_ws) + ".events.jsonl"),
+            ]
+            dead_siblings = [
+                Path(str(dead_ws) + ".session.20260802T140000.222.log"),
+                Path(str(dead_ws) + ".session.20260802T150500.333.log"),
+                Path(str(dead_ws) + ".events.jsonl"),
+                Path(str(dead_ws) + ".events.offset"),
+                Path(str(dead_ws) + ".task.txt"),
+                Path(str(dead_ws) + ".respawn-claim-20260802T140500"),
+            ]
+            for p in live_siblings + dead_siblings:
+                p.write_text("x")
+
+            roster_path = Path(td) / "runs" / "active.json"
+            roster_path.parent.mkdir(parents=True)
+            roster_path.write_text(json.dumps({
+                "issue-51/coding": {
+                    "pid": os.getpid(),
+                    "work": str(live_ws),
+                    "issue": 51,
+                    "role": "implementation",
+                }
+            }))
+
+            old_roster = spawn.ROSTER
+            old_argv = sys.argv
+            old_environ = dict(os.environ)
+            spawn.ROSTER = roster_path
+            os.environ["MUSTER_WORK_DIR"] = str(wb)
+            sys.argv = ["spawn.py", "clean"]
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                spawn.main()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                sys.argv = old_argv
+                os.environ.clear()
+                os.environ.update(old_environ)
+
+            self.assertTrue(live_ws.is_dir())
+            for p in live_siblings:
+                self.assertTrue(p.exists(), p)
+            self.assertFalse(dead_ws.exists())
+            for p in dead_siblings:
+                self.assertFalse(p.exists(), p)
+
 
 class Watchdog(unittest.TestCase):
     """이슈 #90 phase-2: observe-only 이상 신호 네 가지."""
@@ -1387,7 +1501,8 @@ class SessionEndVerdict(unittest.TestCase):
     def test_no_events_file_is_normal(self):
         with tempfile.TemporaryDirectory() as td:
             work = Path(td) / "w"
-            self.assertEqual(spawn.session_end_verdict(str(work)), "normal")
+            self.assertEqual(
+                spawn.session_end_verdict(str(work), log_path=None), "normal")
 
     def test_matched_session_end_is_normal(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1397,7 +1512,8 @@ class SessionEndVerdict(unittest.TestCase):
                 {"type": "session-end", "detail": "progressed"},
             ])
             self.assertEqual(
-                spawn.session_end_verdict(str(work), alive_fn=lambda pid: False),
+                spawn.session_end_verdict(str(work), log_path=None,
+                                          alive_fn=lambda pid: False),
                 "normal")
 
     def test_unmatched_and_dead_is_crashed(self):
@@ -1409,7 +1525,8 @@ class SessionEndVerdict(unittest.TestCase):
                 {"type": "session-start", "detail": {"pid": 111, "ts": 1}},
             ])
             self.assertEqual(
-                spawn.session_end_verdict(str(work), alive_fn=lambda pid: False),
+                spawn.session_end_verdict(str(work), log_path=None,
+                                          alive_fn=lambda pid: False),
                 "crashed")
 
     def test_benign_race_resolves_to_normal_not_crashed(self):
@@ -1423,7 +1540,8 @@ class SessionEndVerdict(unittest.TestCase):
                 {"type": "session-end", "detail": "progressed"},
             ])
             self.assertEqual(
-                spawn.session_end_verdict(str(work), alive_fn=lambda pid: False),
+                spawn.session_end_verdict(str(work), log_path=None,
+                                          alive_fn=lambda pid: False),
                 "normal")
 
     def test_unmatched_alive_stale_log_is_stalled(self):
@@ -1432,12 +1550,13 @@ class SessionEndVerdict(unittest.TestCase):
             self._write_events(work, [
                 {"type": "session-start", "detail": {"pid": 111, "ts": 1}},
             ])
-            log = Path(str(work) + ".session.log")
+            log = Path(str(work) + ".session.20260802T150000.111.log")
             log.write_text("still going")
             stale = time.time() - (spawn.WATCHDOG_SILENCE_MIN + 5) * 60
             os.utime(log, (stale, stale))
             self.assertEqual(
-                spawn.session_end_verdict(str(work), alive_fn=lambda pid: True),
+                spawn.session_end_verdict(str(work), log_path=log,
+                                          alive_fn=lambda pid: True),
                 "stalled")
 
     def test_unmatched_alive_fresh_log_is_in_progress(self):
@@ -1446,10 +1565,11 @@ class SessionEndVerdict(unittest.TestCase):
             self._write_events(work, [
                 {"type": "session-start", "detail": {"pid": 111, "ts": 1}},
             ])
-            log = Path(str(work) + ".session.log")
+            log = Path(str(work) + ".session.20260802T150000.111.log")
             log.write_text("still going")
             self.assertEqual(
-                spawn.session_end_verdict(str(work), alive_fn=lambda pid: True),
+                spawn.session_end_verdict(str(work), log_path=log,
+                                          alive_fn=lambda pid: True),
                 "in-progress")
 
 

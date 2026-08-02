@@ -1181,7 +1181,7 @@ def classify(rc: int, result: dict, delta: list, blocked: list) -> str:
     return "silent-failure"
 
 
-def session_end_verdict(work: str, now: float | None = None,
+def session_end_verdict(work: str, log_path: Path | None, now: float | None = None,
                         alive_fn=None) -> str:
     """워크스페이스 하나의 세션-종료 3분법: `normal` / `crashed` / `stalled` /
     `in-progress` (이슈 #132).
@@ -1191,6 +1191,10 @@ def session_end_verdict(work: str, now: float | None = None,
     그 찰나에 정상 종료했을 수도 있는 벤인 레이스를, `_alive()` 보다 먼저
     확인해 `normal` 로 되돌린다. 매치가 없을 때만 `_alive()`/로그 mtime 을
     본다.
+
+    `log_path` 는 호출자가 넘긴다 — 이 함수가 스스로 고정 접미사로
+    재구성하면 세대별로 고유해진 로그 명명 규약(이슈 #192,
+    `_session_log_path()`)을 놓친다.
     """
     now = time.time() if now is None else now
     alive_fn = _alive if alive_fn is None else alive_fn
@@ -1218,8 +1222,7 @@ def session_end_verdict(work: str, now: float | None = None,
     pid = detail.get("pid")
     if not alive_fn(pid):
         return "crashed"
-    log_path = Path(str(work) + ".session.log")
-    if log_path.exists():
+    if log_path is not None and log_path.exists():
         silent_min = (now - log_path.stat().st_mtime) / 60
         if silent_min > WATCHDOG_SILENCE_MIN:
             return "stalled"
@@ -1549,7 +1552,8 @@ def _auto_respawn_check(key: str, entry: dict, state: dict) -> None:
     role = entry.get("role")
     if not work or issue is None or not role:
         return
-    verdict = session_end_verdict(work)
+    log_path = Path(entry["log"]) if entry.get("log") else None
+    verdict = session_end_verdict(work, log_path)
     print(f"[watchdog] {key}: {verdict}")
     if verdict != "crashed":
         return
@@ -2114,9 +2118,12 @@ def main() -> int:
                 continue
             import shutil
             shutil.rmtree(w)
-            log = Path(str(w) + ".session.log")
-            if log.exists():
-                log.unlink()
+            # 세대별 로그(`.session.<ts>.<pid>.log`, 이슈 #192)와
+            # `.events.jsonl`/`.events.offset`/`.task.txt`/
+            # `.respawn-claim-*` 같은 형제 산출 파일을 전부 글롭으로 잡는다 —
+            # 접미사를 하나씩 나열하면 다음에 하나 더 생길 때 또 빠뜨린다.
+            for sibling in w.parent.glob(w.name + ".*"):
+                sibling.unlink()
             print(f"지움: {w.name}")
             removed += 1
         print(f"정리 끝 — 지움 {removed}, 남김 {kept}")
@@ -2328,6 +2335,16 @@ def ensure_pushed(work: str, issue: int, role: str) -> None:
             print(f"[{role}] PR 생성 실패: {c.stderr.strip()[:200]}", file=sys.stderr)
 
 
+def _session_log_path(cwd: str) -> Path:
+    """이슈-스코프 세션 하나의 라이브 로그 경로 — 타임스탬프+PID 접미사로
+    세대마다 고유하게 만든다 (이슈 #192). 같은 워크스페이스로 재스폰해도
+    이전 세대의 로그(`<work>.session.<ts>.<pid>.log`)를 truncate-open 으로
+    덮어쓰지 않는다. `ts` 는 `time.strftime` 이라 사전순 정렬이 생성 순서와
+    일치한다."""
+    ts = time.strftime("%Y%m%dT%H%M%S", time.localtime())
+    return Path(str(cwd) + f".session.{ts}.{os.getpid()}.log")
+
+
 def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                issue: int | None = None, bounded: bool = False,
                stall_timeout_min: float = 5.0) -> int:
@@ -2395,7 +2412,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         # stream-json 을 줄 단위로 받아 라이브 로그에 tee 한다 — "지금 뭐
         # 하는 중인가"가 세션이 끝나기 전에도 보이게. 최종 result 이벤트가
         # 옛 --output-format json 의 결과 오브젝트와 같은 필드를 든다.
-        log_path = (Path(str(cwd) + ".session.log") if issue is not None
+        log_path = (_session_log_path(cwd) if issue is not None
                     else ROOT / "runs" / "last-session.log")
         log_path.parent.mkdir(parents=True, exist_ok=True)
         print(f"[{role}] 라이브 로그: {log_path}", file=sys.stderr)
@@ -2591,6 +2608,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         "duration_s": round(time.monotonic() - t0, 1),
         "rulebook": checkout_version(role, spec),
         "gates": gates,
+        "log": str(log_path),
     })
 
     for line in gates:
