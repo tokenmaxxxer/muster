@@ -597,13 +597,14 @@ class FailClosedDowngrade(unittest.TestCase):
                                         ["M some/file.py"]),
             "failed-no-commit")
 
-    def test_new_commit_dirty_tree_is_still_downgraded(self):
-        # a new commit landed but the tree is dirty afterwards — the
-        # proposal's "and/or dirty tree" clause still fires.
+    def test_new_commit_dirty_tree_is_promoted_not_downgraded(self):
+        # issue #205 defect 1: a new commit landed but the tree is dirty
+        # afterwards — this is not "no commit", so it must not collapse
+        # into failed-no-commit. It gets its own outcome value instead.
         self.assertEqual(
             spawn.fail_closed_downgrade("progressed", 3, [], True,
                                         ["M some/file.py"]),
-            "failed-no-commit")
+            "progressed-dirty-tree")
 
     def test_new_commit_clean_tree_is_left_alone(self):
         # honest-success path: real commit landed, tree is clean — no
@@ -1372,6 +1373,53 @@ class Clean(unittest.TestCase):
             self.assertFalse(dead_ws.exists())
             for p in dead_siblings:
                 self.assertFalse(p.exists(), p)
+
+    def test_directory_sibling_does_not_abort_the_clean_loop(self):
+        # issue #205 defect 3: a directory sibling in the glob used to hit
+        # sibling.unlink() unguarded and raise IsADirectoryError, aborting
+        # the whole clean loop before later workspaces were reached. The
+        # glob currently only ever matches files, so this is latent — the
+        # guard must not crash and must still let the rest of the sweep run.
+        with tempfile.TemporaryDirectory() as td:
+            wb = Path(td) / "work"
+            wb.mkdir()
+            dead_ws_a = wb / "issue-51-review"
+            dead_ws_b = wb / "issue-52-review"
+            self._make_clean_repo(dead_ws_a, Path(td) / "remote-a.git")
+            self._make_clean_repo(dead_ws_b, Path(td) / "remote-b.git")
+
+            dir_sibling = Path(str(dead_ws_a) + ".somedir")
+            dir_sibling.mkdir()
+            (dir_sibling / "inner.txt").write_text("x")
+            file_sibling = Path(str(dead_ws_a) + ".events.jsonl")
+            file_sibling.write_text("x")
+
+            roster_path = Path(td) / "runs" / "active.json"
+            roster_path.parent.mkdir(parents=True)
+            roster_path.write_text(json.dumps({}))
+
+            old_roster = spawn.ROSTER
+            old_argv = sys.argv
+            old_environ = dict(os.environ)
+            spawn.ROSTER = roster_path
+            os.environ["MUSTER_WORK_DIR"] = str(wb)
+            sys.argv = ["spawn.py", "clean"]
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                spawn.main()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                sys.argv = old_argv
+                os.environ.clear()
+                os.environ.update(old_environ)
+
+            self.assertFalse(dead_ws_a.exists())
+            self.assertFalse(dead_ws_b.exists())
+            self.assertFalse(file_sibling.exists())
+            self.assertTrue(dir_sibling.is_dir())
 
 
 class Watchdog(unittest.TestCase):

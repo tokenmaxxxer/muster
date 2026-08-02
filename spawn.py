@@ -1256,6 +1256,8 @@ def fail_closed_downgrade(outcome: str, issue: int | None, blocked: list,
         return outcome
     if blocked:
         return outcome
+    if new_commit and uncommitted:
+        return "progressed-dirty-tree"
     if uncommitted:
         return "failed-no-commit"
     if new_commit or already_delivered:
@@ -2123,7 +2125,8 @@ def main() -> int:
             # `.respawn-claim-*` 같은 형제 산출 파일을 전부 글롭으로 잡는다 —
             # 접미사를 하나씩 나열하면 다음에 하나 더 생길 때 또 빠뜨린다.
             for sibling in w.parent.glob(w.name + ".*"):
-                sibling.unlink()
+                if sibling.is_file():
+                    sibling.unlink()
             print(f"지움: {w.name}")
             removed += 1
         print(f"정리 끝 — 지움 {removed}, 남김 {kept}")
@@ -2590,13 +2593,22 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     downgraded = fail_closed_downgrade(outcome, issue, blocked, new_commit, uncommitted,
                                        already_delivered)
     if downgraded != outcome:
-        print(f"[{role}] 페일-클로즈드: progressed 로 자기보고 했지만 "
-              f"새 커밋이 없고(before {before_head}, after {after_head})"
-              + (f" 미커밋 변경 {len(uncommitted)}건도 남았다" if uncommitted else "")
-              + f" — {outcome} 를 failed-no-commit 으로 깎는다. 기대한 것: "
-              f"이 세션이 끝나기 전에 실제 커밋. 관찰한 것: 커밋 없음"
-              + (" + 더러운 트리" if uncommitted else "") + ".",
-              file=sys.stderr)
+        if downgraded == "progressed-dirty-tree":
+            print(f"[{role}] 페일-클로즈드: progressed 로 자기보고 했고 새 "
+                  f"커밋도 있지만(before {before_head}, after {after_head}) "
+                  f"워크스페이스에 미커밋 변경 {len(uncommitted)}건이 남았다 — "
+                  f"{outcome} 를 progressed-dirty-tree 로 표기한다. 기대한 것: "
+                  f"이 세션이 끝나기 전에 트리까지 clean. 관찰한 것: 커밋은 "
+                  f"있으나 더러운 트리.",
+                  file=sys.stderr)
+        else:
+            print(f"[{role}] 페일-클로즈드: progressed 로 자기보고 했지만 "
+                  f"새 커밋이 없고(before {before_head}, after {after_head})"
+                  + (f" 미커밋 변경 {len(uncommitted)}건도 남았다" if uncommitted else "")
+                  + f" — {outcome} 를 failed-no-commit 으로 깎는다. 기대한 것: "
+                  f"이 세션이 끝나기 전에 실제 커밋. 관찰한 것: 커밋 없음"
+                  + (" + 더러운 트리" if uncommitted else "") + ".",
+                  file=sys.stderr)
         outcome = downgraded
     denials = result.get("permission_denials") or []
     ledger_write({
