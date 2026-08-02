@@ -50,6 +50,54 @@ def _pr_list_all(root: Path) -> list[dict]:
     return data if isinstance(data, list) else []
 
 
+def _issue_list_all(root: Path) -> list[dict]:
+    """레포 전체 이슈 목록, 한 번의 호출 — `flows[].plan`과 closure_sweep 의
+    이슈-상태 프리페치(issue #189)에 함께 쓴다. `_pr_list_all`과 같은
+    에러 처리 모양(비정상 종료·JSON 디코드 실패 시 빈 리스트)."""
+    r = subprocess.run(["gh", "issue", "list", "--state", "all", "--json",
+                        "number,state,body", "--limit", "1000"],
+                       cwd=root, capture_output=True, text=True)
+    if r.returncode != 0:
+        return []
+    try:
+        data = json.loads(r.stdout)
+    except ValueError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+_PLAN_STEP_RE = re.compile(r"^-\s\[([ xX])\]\s+step\s+(\d+)\s+(.+)$")
+
+
+def _plan_from_body(body: str) -> list[dict] | None:
+    """이슈 본문에서 `## 실행 계획` 블록을 파싱한다(issue #189). 헤더가 없으면
+    `None`. 있으면 다음 `##`(또는 본문 끝)까지 스캔해 `- [ ] step <N>
+    <role>[ ‖ <role2> ...]` 형태의 줄만 골라 `[{step, roles, done}, ...]`
+    로 돌려준다 — 헤더는 있지만 유효한 step 줄이 하나도 없어도 `None`이
+    아니라 빈 리스트(블록 자체는 존재하므로)."""
+    lines = (body or "").splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip() == "## 실행 계획":
+            start = i + 1
+            break
+    if start is None:
+        return None
+    steps = []
+    for line in lines[start:]:
+        stripped = line.strip()
+        if stripped.startswith("##"):
+            break
+        m = _PLAN_STEP_RE.match(stripped)
+        if not m:
+            continue
+        done = m.group(1) in ("x", "X")
+        step_n = int(m.group(2))
+        roles = [r.strip() for r in m.group(3).split("‖")]
+        steps.append({"step": step_n, "roles": roles, "done": done})
+    return steps
+
+
 def _pr_approved(pr: dict, comments: list[dict], approvers: set[str],
                  subject: str, role: str) -> bool:
     """Two detection paths from contract v3 s19: an `APPROVE <subject>/<role>`
@@ -163,6 +211,21 @@ def flows_payload(root: Path) -> dict:
     b = spawn.board(root)
     approvers = spawn._approvers(root)
     prs = _pr_list_all(root)
+    issues = _issue_list_all(root)
+    issue_state_by_n: dict[int, str] = {}
+    plan_by_issue: dict[int, list | None] = {}
+    for iss in issues:
+        n = iss.get("number")
+        if n is None:
+            continue
+        issue_state_by_n[n] = iss.get("state")
+        plan_by_issue[n] = _plan_from_body(iss.get("body") or "")
+
+    all_subjects = dict(b)
+    for n, state in issue_state_by_n.items():
+        if state == "OPEN" and plan_by_issue.get(n) is not None:
+            all_subjects.setdefault(f"issue-{n}", {})
+
     pr_by_branch = {}
     for pr in prs:
         m = _BRANCH_RE.match(pr.get("headRefName") or "")
@@ -185,7 +248,7 @@ def flows_payload(root: Path) -> dict:
     unapproved_open_prs = []
     flows_out = []
 
-    for subject, roles in sorted(b.items()):
+    for subject, roles in sorted(all_subjects.items()):
         issue_n = int(subject.split("-", 1)[1])
         role_entries = []
         stage_source = None
@@ -220,6 +283,7 @@ def flows_payload(root: Path) -> dict:
             "roles": role_entries,
             "prs": sorted({pr_by_branch[(subject, r)]["number"]
                           for r in roles if (subject, r) in pr_by_branch}),
+            "plan": plan_by_issue.get(issue_n),
         })
 
     roster = spawn._roster_load()
@@ -257,7 +321,8 @@ def flows_payload(root: Path) -> dict:
         agg["outcomes"][outcome] = agg["outcomes"].get(outcome, 0) + 1
 
     import closure_sweep
-    violations = closure_sweep.find_violations(root, subjects=b)
+    violations = closure_sweep.find_violations(root, subjects=b,
+                                               issue_states=issue_state_by_n)
 
     return {
         "schema_version": FLOWS_SCHEMA_VERSION,

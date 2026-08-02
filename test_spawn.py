@@ -1738,9 +1738,11 @@ class FlowsPayload(unittest.TestCase):
         import flows
         self.flows = flows
         self._patch(flows, "_pr_list_all", lambda root: [])
+        self._patch(flows, "_issue_list_all", lambda root: [])
         import closure_sweep
         self.closure_sweep = closure_sweep
-        self._patch(closure_sweep, "find_violations", lambda root, subjects=None: [])
+        self._patch(closure_sweep, "find_violations",
+                    lambda root, subjects=None, issue_states=None: [])
 
     def _patch(self, obj, name, fn):
         orig = getattr(obj, name)
@@ -1851,12 +1853,55 @@ class FlowsPayload(unittest.TestCase):
              "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
         ])
         self._patch(self.closure_sweep, "find_violations",
-                    lambda root, subjects=None: [{"kind": "open-pr-on-closed-issue"}])
+                    lambda root, subjects=None, issue_states=None: [{"kind": "open-pr-on-closed-issue"}])
         payload = self.flows.flows_payload(self.root)
         self.assertEqual(payload["hygiene"]["closure_sweep"],
                          [{"kind": "open-pr-on-closed-issue"}])
         self.assertEqual(len(payload["hygiene"]["unapproved_open_prs"]), 1)
         self.assertEqual(payload["hygiene"]["unapproved_open_prs"][0]["pr"], 55)
+
+    def test_flows_plan_is_null_without_plan_block(self):
+        self._write_record("issue-40", "product-discovery", "scope-proposed")
+        self._patch(self.flows, "_issue_list_all", lambda root: [
+            {"number": 40, "state": "OPEN", "body": "일반 이슈 본문, 계획 없음"},
+        ])
+        payload = self.flows.flows_payload(self.root)
+        by_issue = {f["issue"]: f for f in payload["flows"]}
+        self.assertIsNone(by_issue[40]["plan"])
+
+    def test_flows_plan_parses_step_lines(self):
+        self._write_record("issue-41", "product-discovery", "scope-proposed")
+        body = (
+            "본문 설명\n\n"
+            "## 실행 계획\n"
+            "- [x] step 1  product-discovery\n"
+            "- [ ] step 2  architecture ‖ security-threat-model\n"
+            "\n## 다른 섹션\n"
+            "무시되어야 하는 줄\n"
+        )
+        self._patch(self.flows, "_issue_list_all", lambda root: [
+            {"number": 41, "state": "OPEN", "body": body},
+        ])
+        payload = self.flows.flows_payload(self.root)
+        by_issue = {f["issue"]: f for f in payload["flows"]}
+        self.assertEqual(by_issue[41]["plan"], [
+            {"step": 1, "roles": ["product-discovery"], "done": True},
+            {"step": 2, "roles": ["architecture", "security-threat-model"], "done": False},
+        ])
+
+    def test_flows_plan_only_issue_with_no_board_record_still_gets_entry(self):
+        """requirement-4 gap this issue closes: an open issue with a plan
+        block but zero merged role records still shows up in `flows[]`."""
+        body = "## 실행 계획\n- [ ] step 1  product-discovery\n"
+        self._patch(self.flows, "_issue_list_all", lambda root: [
+            {"number": 50, "state": "OPEN", "body": body},
+        ])
+        payload = self.flows.flows_payload(self.root)
+        by_issue = {f["issue"]: f for f in payload["flows"]}
+        self.assertIn(50, by_issue)
+        self.assertEqual(by_issue[50]["roles"], [])
+        self.assertEqual(by_issue[50]["plan"],
+                         [{"step": 1, "roles": ["product-discovery"], "done": False}])
 
 
 class SessionLastActivity(unittest.TestCase):

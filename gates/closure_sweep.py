@@ -68,11 +68,16 @@ def _pr_view_state_body(root: Path, pr: int) -> tuple[str, str] | None:
     return data.get("state", ""), data.get("body", "") or ""
 
 
-def find_violations(root: Path, subjects: dict | None = None) -> list[dict]:
+def find_violations(root: Path, subjects: dict | None = None,
+                     issue_states: dict[int, str] | None = None) -> list[dict]:
     """보드의 각 subject x role 브랜치에 대해 이슈/PR 상태를 읽고 위반을 모은다.
 
     `subjects` 는 `spawn.board(root)` 와 같은 모양(subject -> role -> ...) —
-    안 주면 직접 읽는다. 네트워크(`gh`)만 쓰고 아무것도 쓰지 않는다.
+    안 주면 직접 읽는다. `issue_states` 는 이슈번호 -> state 사전(선택,
+    issue #189) — 주어지고 그 subject 의 이슈가 안에 있으면 `_issue_view`
+    호출을 건너뛰고 그 값을 그대로 쓴다(레포 전체 한 번짜리 프리페치 재사용,
+    새 `gh` 호출 종류를 추가하지 않는다). 네트워크(`gh`)만 쓰고 아무것도
+    쓰지 않는다.
     """
     if subjects is None:
         subjects = spawn.board(root)
@@ -82,7 +87,10 @@ def find_violations(root: Path, subjects: dict | None = None) -> list[dict]:
         if len(m) != 2 or not m[1].isdigit():
             continue
         issue = int(m[1])
-        issue_state = _issue_view(root, issue)
+        if issue_states is not None and issue in issue_states:
+            issue_state = issue_states[issue]
+        else:
+            issue_state = _issue_view(root, issue)
         if issue_state is None:
             continue
         for role in roles:

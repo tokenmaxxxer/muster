@@ -71,7 +71,8 @@ One entry per subject.
   "roles": [
     { "role": "implementation", "loop_state": "scope-approved", "verdict": "progressed" }
   ],
-  "prs": [201]
+  "prs": [201],
+  "plan": null
 }
 ```
 
@@ -82,6 +83,7 @@ One entry per subject.
 | `stage_derived` | boolean | `true` when `stage` was mapped from a rulebook-defined `loop_state`→stage rule; `false` when no mapping exists and `stage` holds the raw `loop_state` string verbatim |
 | `roles` | array of `{role, loop_state, verdict}` | per-role status within the subject |
 | `prs` | array of integers | PR numbers associated with the subject |
+| `plan` | `array<{step, roles, done}>` \| `null` | parsed from the subject's issue body `## 실행 계획` block (issue #189); `null` when the issue body has no such block; otherwise a list — possibly empty if the header is present with no valid step lines — of `{"step": <int>, "roles": [<string>, ...], "done": <bool>}`, one entry per `- [ ]`/`- [x]` step line |
 
 When a subject's `loop_state` has no rulebook-defined mapping to one of
 the five named stages, `flows[].stage` is **not** forced into the
@@ -218,7 +220,8 @@ For one board repo with `S` open subjects, `R` roles per subject, and
 
 - **1** call — `gh repo view` (cached)
 - **1** call — `gh pr list --state all --json number,headRefName,createdAt,state,body,reviews --limit <cap>`, repo-wide; this single call's results are matched locally (by parsing `headRefName` against `issue-<n>/<role>`) to cover `decision_queue`, `flows[].prs`, and the PR-review side of `hygiene.unapproved_open_prs`
-- **up to `S`** calls — `gh issue view`, one per subject
+- **1** call — `gh issue list --state all --json number,state,body --limit 1000`, repo-wide (issue #189); results are matched locally by issue number to prefetch each subject's issue `state` (reused by `hygiene.closure_sweep`, see below) and to parse `flows[].plan` from each issue's body, and to find open issues carrying a `## 실행 계획` block with no board record yet (the union-expansion subjects)
+- **up to `S`** calls — `gh issue view`, one per subject — in the steady state this call is **not** made: `hygiene.closure_sweep` (`closure_sweep.find_violations`) is passed the issue-state map already fetched by the repo-wide `gh issue list` call above and skips its own `gh issue view` for any subject whose issue is in that map. This call is now only a fallback path, for a subject whose issue number falls outside the prefetched set (e.g. the `--limit 1000` cap)
 - **up to `S`** calls — `gh api .../comments`, one per subject, for phase-1/2 comment-approval detection
 
 Total: **linear in `S`, flat in `R`** (independent of both `R` and
@@ -280,7 +283,8 @@ violation:
       "roles": [
         { "role": "implementation", "loop_state": "scope-approved", "verdict": "pending" }
       ],
-      "prs": [201]
+      "prs": [201],
+      "plan": null
     }
   ],
   "sessions": [
