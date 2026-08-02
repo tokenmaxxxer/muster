@@ -1980,13 +1980,43 @@ class FlowsPayload(unittest.TestCase):
         self.assertEqual(entry["phase"], 1)
         self.assertEqual(entry["awaiting"], "approve-scope")
 
+    def test_decision_queue_from_open_pr_with_no_board_record(self):
+        """issue #216 결함 1 회귀: 머지된 레코드도 계획 블록도 없는 이슈의
+        PR(PR #86 재현)이 decision_queue 에 phase 1 로 떠야 한다."""
+        self._patch(self.flows, "_pr_list_all", lambda root: [
+            {"number": 86, "headRefName": "issue-86/product-discovery",
+             "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
+        ])
+        payload = self.flows.flows_payload(self.root)
+        self.assertEqual(len(payload["decision_queue"]), 1)
+        entry = payload["decision_queue"][0]
+        self.assertEqual(entry["issue"], 86)
+        self.assertEqual(entry["pr"], 86)
+        self.assertEqual(entry["phase"], 1)
+        self.assertEqual(entry["awaiting"], "approve-scope")
+
+    def test_decision_queue_phase_2_when_board_record_is_scope_approved(self):
+        """issue #216: 레코드가 scope-approved(scope-proposed 아님)면 기존대로
+        phase 2 로 분류돼야 한다 — 회귀 방지."""
+        self._write_record("issue-31", "implementation", "scope-approved")
+        self._patch(self.flows, "_pr_list_all", lambda root: [
+            {"number": 56, "headRefName": "issue-31/implementation",
+             "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
+        ])
+        payload = self.flows.flows_payload(self.root)
+        self.assertEqual(len(payload["decision_queue"]), 1)
+        entry = payload["decision_queue"][0]
+        self.assertEqual(entry["phase"], 2)
+        self.assertEqual(entry["awaiting"], "approve-full")
+
     def test_sessions_alive_is_pending_dead_looks_up_ledger(self):
         self._patch(spawn, "_roster_load", lambda: {
             "issue-5/coding": {"role": "coding", "issue": 5, "pid": 999999,
                                "ts": int(time.time())},
         })
         spawn.ledger_write({"role": "coding", "cost_usd": 1.0, "outcome": "progressed",
-                           "board_delta": ["docs/issue-5/reports/coding.md"]})
+                           "board_delta": ["docs/issue-5/reports/coding.md"],
+                           "repo": "repo"})
         payload = self.flows.flows_payload(self.root)
         self.assertEqual(len(payload["sessions"]), 1)
         s = payload["sessions"][0]
@@ -2023,9 +2053,10 @@ class FlowsPayload(unittest.TestCase):
 
     def test_ledger_aggregation_per_issue_and_unattributed_bucket(self):
         spawn.ledger_write({"role": "coding", "cost_usd": 1.5, "outcome": "progressed",
-                           "board_delta": ["docs/issue-7/reports/coding.md"]})
+                           "board_delta": ["docs/issue-7/reports/coding.md"],
+                           "repo": "repo"})
         spawn.ledger_write({"role": "coding", "cost_usd": 0.5, "outcome": "refused",
-                           "board_delta": []})
+                           "board_delta": [], "repo": "repo"})
         payload = self.flows.flows_payload(self.root)
         self.assertEqual(len(payload["ledger"]), 1)
         self.assertEqual(payload["ledger"][0]["issue"], 7)
@@ -2033,6 +2064,28 @@ class FlowsPayload(unittest.TestCase):
         self.assertAlmostEqual(payload["ledger"][0]["cost_usd_total"], 1.5)
         self.assertEqual(payload["unattributed"]["sessions"], 1)
         self.assertAlmostEqual(payload["unattributed"]["cost_usd_total"], 0.5)
+
+    def test_ledger_filtered_by_repo_field_and_cwd_fallback(self):
+        """issue #216 결함 2 회귀: `repo` 필드가 다른 엔트리는 걸러지고,
+        `repo` 필드 없이 `cwd` 만 있는 옛 형태 엔트리도 basename 파싱으로
+        올바르게 필터링돼야 한다(매칭/불일치 둘 다)."""
+        spawn.ledger_write({"role": "coding", "cost_usd": 1.0, "outcome": "progressed",
+                           "board_delta": ["docs/issue-8/reports/coding.md"],
+                           "repo": "repo"})
+        spawn.ledger_write({"role": "coding", "cost_usd": 5.0, "outcome": "progressed",
+                           "board_delta": ["docs/issue-8/reports/coding.md"],
+                           "repo": "other-repo"})
+        spawn.ledger_write({"role": "coding", "cost_usd": 2.0, "outcome": "progressed",
+                           "board_delta": ["docs/issue-9/reports/coding.md"],
+                           "cwd": "/work/repo-issue-9-coding"})
+        spawn.ledger_write({"role": "coding", "cost_usd": 9.0, "outcome": "progressed",
+                           "board_delta": ["docs/issue-9/reports/coding.md"],
+                           "cwd": "/work/other-repo-issue-9-coding"})
+        payload = self.flows.flows_payload(self.root)
+        by_issue = {l["issue"]: l for l in payload["ledger"]}
+        self.assertEqual(set(by_issue), {8, 9})
+        self.assertAlmostEqual(by_issue[8]["cost_usd_total"], 1.0)
+        self.assertAlmostEqual(by_issue[9]["cost_usd_total"], 2.0)
 
     def test_hygiene_includes_closure_sweep_and_unapproved_prs(self):
         self._write_record("issue-30", "implementation", "scope-approved")

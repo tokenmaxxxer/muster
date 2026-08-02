@@ -812,6 +812,12 @@ def _repo_slug(root: Path) -> str | None:
     return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
 
 
+def _repo_name(root: Path) -> str | None:
+    """`_repo_slug`의 owner 뗀 짧은 이름 — ledger 엔트리 귀속용(issue #216)."""
+    slug = _repo_slug(root)
+    return slug.split("/")[-1] if slug else None
+
+
 def _pr_for_branch(root: Path, branch: str) -> int | None:
     r = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "all",
                         "--json", "number", "-q", ".[0].number"],
@@ -2613,6 +2619,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     denials = result.get("permission_denials") or []
     ledger_write({
         "ts": int(time.time()), "role": role, "cwd": str(Path(cwd).resolve()),
+        "repo": _repo_name(Path(cwd).resolve()),
         "session_id": result.get("session_id"),
         "cost_usd": result.get("total_cost_usd"),
         "turns": result.get("num_turns"), "rc": rc, "outcome": outcome,

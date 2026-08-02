@@ -155,6 +155,26 @@ def _ledger_issue(entry: dict) -> int | None:
     return None
 
 
+_CWD_REPO_RE = re.compile(r"^(.+)-issue-[0-9]+-[a-z0-9-]+$")
+
+
+def _cwd_repo_name(cwd: str | None) -> str | None:
+    """`<repo>-issue-<n>-<role>` 작업 디렉터리 명명 관례(강제되지 않는
+    호출자 쪽 관례, issue #216 survey)에서 레포 짧은 이름을 되짚는
+    소급 폴백. 관례에 안 맞으면 basename 그대로 돌려준다."""
+    if not cwd:
+        return None
+    name = Path(cwd).name
+    m = _CWD_REPO_RE.match(name)
+    return m.group(1) if m else name
+
+
+def _entry_repo_name(entry: dict) -> str | None:
+    """`repo` 필드(신규 엔트리)를 우선 신뢰하고, 없으면(과거 엔트리)
+    `cwd` 파싱 폴백으로 되짚는다(issue #216)."""
+    return entry.get("repo") or _cwd_repo_name(entry.get("cwd"))
+
+
 def _activity_tool_summary(name: str, inp: dict) -> str:
     if not isinstance(inp, dict):
         return name
@@ -227,6 +247,7 @@ def flows_payload(root: Path) -> dict:
     `status()`'s own invariant (protocol.md §1): no mutation, no posting."""
     b = spawn.board(root)
     approvers = spawn._approvers(root)
+    repo_slug = spawn._repo_slug(root)
     prs = _pr_list_all(root)
     issues = _issue_list_all(root)
     issue_state_by_n: dict[int, str] = {}
@@ -265,6 +286,24 @@ def flows_payload(root: Path) -> dict:
     unapproved_open_prs = []
     flows_out = []
 
+    # `pr_by_branch`는 브랜치명만으로 (subject, role)을 뽑아내므로 보드
+    # 순회(all_subjects → roles.items())와 무관하게 완전한 소스다 — 머지된
+    # 레코드도 계획 블록도 없는 subject의 PR도 여기서는 보인다(issue #216).
+    # 보드 레코드는 있으면 loop_state/phase 판단에만 조인한다.
+    for (subject, role), pr in sorted(pr_by_branch.items()):
+        issue_n = int(subject.split("-", 1)[1])
+        loop_state = (b.get(subject, {}).get(role, {}) or {}).get("loop_state")
+        comments = comments_for(subject, pr["number"])
+        approved = _pr_approved(pr, comments, approvers, subject, role)
+        phase = 1 if loop_state in (None, "scope-proposed") else 2
+        if not approved:
+            decision_queue.append({
+                "issue": issue_n, "pr": pr["number"], "phase": phase,
+                "role": role, "opened_at": pr.get("createdAt"),
+                "age_hours": _age_hours(pr.get("createdAt")),
+                "awaiting": "approve-scope" if phase == 1 else "approve-full",
+            })
+
     for subject, roles in sorted(all_subjects.items()):
         issue_n = int(subject.split("-", 1)[1])
         role_entries = []
@@ -280,14 +319,6 @@ def flows_payload(root: Path) -> dict:
                 continue
             comments = comments_for(subject, pr["number"])
             approved = _pr_approved(pr, comments, approvers, subject, role)
-            phase = 1 if loop_state == "scope-proposed" else 2
-            if not approved:
-                decision_queue.append({
-                    "issue": issue_n, "pr": pr["number"], "phase": phase,
-                    "role": role, "opened_at": pr.get("createdAt"),
-                    "age_hours": _age_hours(pr.get("createdAt")),
-                    "awaiting": "approve-scope" if phase == 1 else "approve-full",
-                })
             if loop_state and loop_state != "scope-proposed" and not approved:
                 unapproved_open_prs.append({
                     "issue": issue_n, "pr": pr["number"], "role": role,
@@ -305,7 +336,8 @@ def flows_payload(root: Path) -> dict:
 
     roster = spawn._roster_load()
     sessions = []
-    ledger_entries = _ledger_read()
+    repo_name = repo_slug.split("/")[-1] if repo_slug else None
+    ledger_entries = [e for e in _ledger_read() if _entry_repo_name(e) == repo_name]
     for key, e in sorted(roster.items()):
         alive = spawn._alive(e.get("pid", 0))
         elapsed_min = (int(time.time()) - e.get("ts", 0)) // 60
@@ -344,7 +376,7 @@ def flows_payload(root: Path) -> dict:
     return {
         "schema_version": FLOWS_SCHEMA_VERSION,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "repo": spawn._repo_slug(root),
+        "repo": repo_slug,
         "decision_queue": decision_queue,
         "flows": flows_out,
         "sessions": sessions,
