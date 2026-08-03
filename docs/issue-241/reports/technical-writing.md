@@ -157,3 +157,41 @@ proposal's stated scope.
 None. Every row in the section-correspondence table above resolved to a
 destination or a documented, issue-mandated removal; no orphaned content,
 broken link, or unrendered diagram was found during accuracy review.
+
+## Follow-up correction 3 (2026-08-03)
+
+Issue #241's final comment: the user-loop sequence diagram showed the role
+posting a PR (`R->>G`) with no step showing how the user learns about it —
+in reality the orchestrator watches the session, detects the opened PR, and
+reports/explains it to the user in conversation before the user decides.
+Missing for both phase 1 (proposal PR) and phase 2 (delivery).
+
+**Before → after (README.md, both diagram spots):**
+```diff
+     R->>G: phase 1 proposal PR
++    G-->>O: watch detects the PR
++    O->>U: reports and explains the PR in conversation
+     U->>O: gives feedback, or approves, in conversation
+     ...
+     R->>G: phase 2 delivery (same PR, includes the record document)
++    G-->>O: watch detects the delivery
++    O->>U: reports and explains the delivery in conversation
+     U->>O: accepts, or rejects, in conversation
+```
+Mirrored identically (node structure, Korean labels) in README.ko.md.
+
+**Prose (one sentence added, dry tone, both languages):**
+- EN: "The orchestrator also watches for each PR the role opens and reports
+  its contents back to the user in conversation before the user decides."
+- KO: "오케스트레이터는 역할이 여는 각 PR도 감시하다가, 사용자가 결정하기
+  전에 그 내용을 대화로 보고·설명한다."
+
+**Verification:** `npx @mermaid-js/mermaid-cli` rendering was attempted but
+the sandboxed Chromium exits silently in this session (no stderr, exit 1) —
+an environment limitation, not a syntax signal. Verified instead by manual
+syntax check: every added line follows the file's existing
+`Actor->>Actor: label` / `Actor-->>Actor: label` grammar, the
+participant/node set (U/O/R/G) is unchanged, and README.md/README.ko.md
+diagrams were diffed line-by-line to confirm identical structure (same
+line count, same arrow types, same insertion points) with only the labels
+differing by language.
