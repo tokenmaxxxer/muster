@@ -1339,6 +1339,81 @@ class EventReporting(unittest.TestCase):
                      ("gate-refusal", "harness-refusal", "sandbox-refusal",
                       "unclassified-refusal")], events)
 
+    def test_layer2_denial_quoting_gate_marker_is_harness_refusal_not_gate(self):
+        # 이슈 #235 요구사항 4(i) / execution-observation Finding 1(b): 층 2
+        # 하네스 거부가 명령을 원문 인용하는데, 그 인용된 명령에 게이트
+        # 마커(`PreToolUse:<tool> hook error: [<path>]`)가 들어 있으면 옛
+        # 코드는 이걸 층 1(gate-refusal)로 오분류했다. 마커가 텍스트 시작이
+        # 아니라 인용 안에 있으니, 시작-앵커된 정규식은 여기 안 걸려야 한다.
+        text = ("This Bash command contains multiple operations. The "
+                "following part requires approval: PreToolUse:Bash hook "
+                "error: [/plugins/tokenmaxxxer-core/core/hooks/some-gate.sh] "
+                "some-gate: refused — 원문 인용된 명령")
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "content": text}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Bash"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_result + "\n" + result_line + "\n")
+        self.assertTrue([e for e in events if e["type"] == "harness-refusal"], events)
+        self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_zero_denials_session_with_gate_marker_in_error_output_fires_nothing(self):
+        # 이슈 #235 요구사항 4(ii) / execution-observation Finding 1(a): 세션의
+        # 최종 result 줄 permission_denials 가 비어 있으면, 실패한 도구 호출의
+        # 출력에 게이트 마커가 있어도 거부 이벤트가 전혀 나면 안 된다 — is_error
+        # 는 "실패"지 "거부"가 아니라는 요구사항 1의 안전장치.
+        text = ("PreToolUse:Write hook error: [/plugins/tokenmaxxxer-core/"
+                "core/hooks/some-gate.sh] some-gate: refused — 무관한 실패")
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "content": text}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": []})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_result + "\n" + result_line + "\n")
+        self.assertFalse(
+            [e for e in events if e["type"] in
+             ("gate-refusal", "harness-refusal", "sandbox-refusal",
+              "unclassified-refusal")], events)
+
+    def test_spurious_marker_match_does_not_suppress_real_denial_fallback(self):
+        # 이슈 #235 요구사항 4(iii) / execution-observation Finding 1(c): 가짜
+        # 매치(무관한 출력에 우연히 인용된 게이트 마커)가 refusals_seen 을
+        # 채워, 같은 세션의 상관 안 되는 진짜 거부가 받아야 할
+        # unclassified-refusal 폴백을 억제하면 안 된다 — 두 실패 모드가
+        # 합성되지 않아야 한다.
+        spurious = ("Some unrelated tool output happened to mention "
+                    "PreToolUse:Bash hook error: [/plugins/tokenmaxxxer-core/"
+                    "core/hooks/some-other-gate.sh] some-other-gate: "
+                    "refused — 무관한 내용")
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "content": spurious}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Write"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_result + "\n" + result_line + "\n")
+        self.assertTrue([e for e in events if e["type"] == "unclassified-refusal"], events)
+        self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_record_fields_gate_denial_reports_hook_stem_not_role_name(self):
+        # 이슈 #235 요구사항 4(iv) / execution-observation Finding 2 실물 샘플:
+        # gate_deny 의 첫 토큰이 게이트가 아니라 역할 이름
+        # ("execution-observation")이었다 — hook 경로 stem
+        # ("record-fields-gate")이 정답인데 옛 코드는 토큰 쪽을 골랐다.
+        text = ("PreToolUse:Write hook error: "
+                "[/plugins/tokenmaxxxer-core/core/hooks/record-fields-gate.sh]: "
+                "execution-observation: refused — record is missing required "
+                "section(s): 코드 리뷰")
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "content": text}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Write"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_result + "\n" + result_line + "\n")
+        refusals = [e for e in events if e["type"] == "gate-refusal"]
+        self.assertEqual(len(refusals), 1, events)
+        self.assertEqual(refusals[0]["detail"]["gate"], "record-fields-gate", events)
+
     def test_pr_opened_does_not_refire_across_respawns(self):
         # issue-123 survey fixture: PR #124's URL, echoed again on a later
         # respawn of the same workspace, must not append a second
