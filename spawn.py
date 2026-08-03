@@ -2324,6 +2324,27 @@ def main() -> int:
                       stall_timeout_min=a.stall_timeout)
 
 
+def _fetch_or_halt(work_dir: str, label: str, after=None) -> None:
+    """fail-closed fetch. returncode 만 보면 놓치는 실패가 있다 — 실측:
+    core issue-90 관찰 세션에서 `git fetch origin`이 stderr 에 "failed to
+    store: 100001"을 남기고도 exit 0으로 끝났다. returncode != 0 이거나
+    stderr 에 "failed to store"가 있으면 낡은 코드로 조용히 진행하는 대신
+    중단한다(ensure_pushed 의 2380/2420 라인과 같은 house style).
+
+    `after`(있으면)는 halt 여부 판정 **전에** 실행한다 — 신규 clone 직후의
+    `remote set-head origin -a` 처럼, fetch 가 fail-closed 로 halt 하더라도
+    반드시 시도돼야 하는 부수 효과가 있어서다. 순서를 반대로 하면(halt
+    먼저) fetch 가 실패할 때마다 그 부수 효과가 영영 안 돌 수 있다 — 신규
+    clone 경로 한정으로, `.git`은 이미 생겨 재사용 분기로 넘어가 버려 다시
+    시도할 기회 자체가 없다(hunt 발견, composition-regression stance)."""
+    r = subprocess.run(["git", "-C", work_dir, "fetch", "-q", "origin"],
+                       capture_output=True, text=True)
+    if after is not None:
+        after()
+    if r.returncode != 0 or "failed to store" in r.stderr:
+        sys.exit(f"{label}: fetch 실패 — {r.stderr.strip()[:200]}")
+
+
 def issue_workspace(cwd: str, issue: int, role: str) -> str:
     """이슈 스폰마다 on-the-record 소유의 격리 클론을 만든다.
 
@@ -2366,12 +2387,10 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
     work = work_base / f"{repo_name}-issue-{issue}-{role}"
     # cwd 가 이미 이 (이슈,역할)의 워크스페이스면 그대로 쓴다 — 중첩 금지.
     if src == work.resolve():
-        subprocess.run(["git", "-C", str(src), "fetch", "-q", "origin"],
-                       capture_output=True, text=True)
+        _fetch_or_halt(str(src), "재사용 워크스페이스")
         return str(src)
     if (work / ".git").exists():
-        subprocess.run(["git", "-C", str(work), "fetch", "-q", "origin"],
-                       capture_output=True, text=True)
+        _fetch_or_halt(str(work), "재사용 워크스페이스")
         return str(work)
     work.parent.mkdir(parents=True, exist_ok=True)
     c = subprocess.run(["git", "clone", "-q", str(src), str(work)],
@@ -2393,8 +2412,13 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
     subprocess.run(["git", "-C", str(work), "config", "credential.helper",
                     "!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f"],
                    capture_output=True, text=True)
-    subprocess.run(["git", "-C", str(work), "fetch", "-q", "origin"],
-                   capture_output=True, text=True)
+    # clone 은 clone 시점 src 의 HEAD 를 origin/HEAD 로 물려받는다 — 방금
+    # origin 을 실제 원격으로 바꿨으니 origin/HEAD 도 그 원격 기준으로
+    # 다시 계산해야 `_base()`가 오염된 기본 브랜치를 읽지 않는다. `after=`
+    # 로 넘겨서 fetch 가 fail-closed 로 halt 하더라도 먼저 시도되게 한다.
+    _fetch_or_halt(str(work), "신규 워크스페이스", after=lambda: subprocess.run(
+        ["git", "-C", str(work), "remote", "set-head", "origin", "-a"],
+        capture_output=True, text=True))
     return str(work)
 
 
@@ -2408,9 +2432,15 @@ def checkout_issue_branch(cwd: str, issue: int, role: str) -> str:
     br = f"issue-{issue}/{role}"
     def git(*a):
         return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True)
-    git("fetch", "origin")
+    _fetch_or_halt(cwd, "브랜치 체크아웃")
     if git("rev-parse", "--verify", "-q", br).returncode == 0:
         r = git("checkout", br)
+    elif git("rev-parse", "--verify", "-q", f"origin/{br}").returncode == 0:
+        # rev-parse --verify -q br 는 로컬 ref 만 본다 — 워크스페이스가 새로
+        # 클론된 직후라면 origin 에는 이미 있는 브랜치도 로컬엔 없어, 여기서
+        # base 로 새로 파면 origin 의 기존 이력을 버리고 영구 분기한다
+        # (실측: issue-235 phase 2). origin 전용이면 그걸 트래킹해 만든다.
+        r = git("checkout", "-b", br, f"origin/{br}")
     else:
         base = _base(cwd)
         r = git("checkout", "-b", br, base)
