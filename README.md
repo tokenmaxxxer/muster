@@ -28,15 +28,17 @@ gates.
 
 ### The user-facing loop
 
-The user states a need in conversation. The orchestrator drafts an issue,
-the user confirms it, and from there the user's input and the AI's
-activity each land in one fixed place: a requirement is an issue, a
-decision is an approval comment, work is a PR on an `issue-<n>/<role>`
-branch, and the rationale is that PR's record document. A role ships
-phase 1 (proposal) first; phase 2 (delivery) opens only once the user
-approves. The user gives feedback by commenting, approves with an
-`APPROVE issue-<n>/<role>` comment, accepts by merging, and rejects by
-closing.
+The user states a need in conversation. The orchestrator drafts an issue
+and relays it to GitHub under the user's account, the user confirms in
+conversation, and from there the user's input and the AI's activity each
+land in one fixed place: a requirement is an issue, a decision is an
+approval comment, work is a PR on an `issue-<n>/<role>` branch, and the
+rationale is that PR's record document. A role ships phase 1 (proposal)
+first; phase 2 (delivery) opens only once the user approves. The user
+never writes to GitHub directly — every decision is made in conversation
+with the orchestrator, which relays it to GitHub under the user's
+account: feedback as a comment, approval as an `APPROVE issue-<n>/<role>`
+comment, acceptance as a merge, rejection as a close.
 
 ```mermaid
 sequenceDiagram
@@ -46,16 +48,19 @@ sequenceDiagram
     participant G as GitHub (issue/PR)
 
     U->>O: states a need in conversation
-    O->>G: drafts the issue
+    O->>G: relays: drafts the issue (user's account)
     G-->>U: asks for confirmation
-    U->>G: confirms (issue = the requirement record)
+    U->>O: confirms in conversation
+    O->>G: relays: confirms (issue = the requirement record)
     O->>R: musters the role (spawn)
     R->>G: phase 1 proposal PR
-    U->>G: comment = feedback, or
-    U->>G: "APPROVE issue-<n>/<role>" comment = approval
+    U->>O: gives feedback, or approves, in conversation
+    O->>G: relays: comment = feedback, or
+    O->>G: relays: "APPROVE issue-<n>/<role>" comment = approval
     G-->>R: approval confirmed
     R->>G: phase 2 delivery (same PR, includes the record document)
-    U->>G: merge = acceptance, or close = rejection
+    U->>O: accepts, or rejects, in conversation
+    O->>G: relays: merge = acceptance, or close = rejection
 ```
 
 ### Spawn, rulebook, core, protocol
