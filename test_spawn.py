@@ -1250,11 +1250,94 @@ class EventReporting(unittest.TestCase):
         events = self._run(tempfile.mkdtemp(), echoed + result_line + "\n")
         self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
 
-    def test_real_denial_still_reported(self):
+    def test_denials_with_no_correlating_tool_result_are_unclassified(self):
+        # 층을 확정할 tool_result 줄이 없어도(스트림 누락 등) 최종 result 의
+        # permission_denials 가 실려 있으면 거부 자체는 놓치지 않는다 — 다만
+        # 예전처럼 layer-1 로 위장하지 않고 별도 라벨(unclassified-refusal)로
+        # 남는다(제안서 5번). 옛 코드는 이 케이스에서 gate-refusal 을 냈다.
         result_line = json.dumps({"type": "result", "is_error": False,
                                   "permission_denials": [{"tool_name": "Write"}]})
         events = self._run(tempfile.mkdtemp(), result_line + "\n")
-        self.assertTrue([e for e in events if e["type"] == "gate-refusal"], events)
+        self.assertTrue([e for e in events if e["type"] == "unclassified-refusal"], events)
+        self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_gate_hook_denial_is_gate_refusal_with_gate_name(self):
+        # 이슈 #232 층 1 실물 샘플: PreToolUse hook 이 감싼 gate-lib.sh 의
+        # gate_deny 메시지(`<게이트>: refused — <사유>`) — 게이트 이름과
+        # 사유가 이미 이 텍스트 안에 있다. 옛 코드는 detail 에
+        # `str(denials)[:200]` 만 실어 게이트 이름을 못 냈다.
+        text = ("PreToolUse:Bash hook error: "
+                "[/Users/jk/.claude/plugins/marketplaces/tokenmaxxxer-core/core/hooks/board-gate.sh] "
+                "board-gate: refused — 보드에 없는 파일을 쓰려 했다")
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "content": text}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Write"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_result + "\n" + result_line + "\n")
+        refusals = [e for e in events if e["type"] == "gate-refusal"]
+        self.assertEqual(len(refusals), 1, events)
+        self.assertEqual(refusals[0]["detail"]["gate"], "board-gate", events)
+        self.assertFalse([e for e in events if e["type"] == "unclassified-refusal"], events)
+
+    def test_harness_permission_denial_is_not_labeled_gate_refusal(self):
+        # 이슈 #232 실측 사건 재현: 순수 읽기 명령이 하네스 권한(2층)에
+        # 막혔는데 옛 코드는 이걸 gate-refusal 로 잘못 보고해 오케스트레이터가
+        # "board-gate 가 오탐한다"고 사용자에게 근거 없이 전달했다. 다섯
+        # 샘플 모두 이슈 본문에서 그대로 가져온 실물 문자열이다.
+        samples = (
+            "Permission to use Bash has been denied",
+            "This Bash command contains multiple operations. The "
+            "following part requires approval: git show <sha>:<path>",
+            "This command requires approval",
+            "Contains shell syntax (string) that cannot be statically analyzed",
+            "Contains simple_expansion",
+        )
+        for text in samples:
+            with self.subTest(text=text):
+                tool_result = json.dumps({"type": "user", "message": {"content": [
+                    {"type": "tool_result", "is_error": True, "content": text}]}})
+                result_line = json.dumps({"type": "result", "is_error": False,
+                                          "permission_denials": [{"tool_name": "Bash"}]})
+                events = self._run(tempfile.mkdtemp(),
+                                   tool_result + "\n" + result_line + "\n")
+                self.assertTrue([e for e in events if e["type"] == "harness-refusal"], events)
+                self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_sandbox_denial_is_not_labeled_gate_refusal(self):
+        # 이슈 #232 층 3 실물 샘플 — 옛 코드는 이것도 gate-refusal 로 뭉갰다.
+        samples = (
+            "mkdir: /tmp/foo: Operation not permitted",
+            "Claude requested permissions to write to /some/path, but "
+            "you haven't granted it yet",
+        )
+        for text in samples:
+            with self.subTest(text=text):
+                tool_result = json.dumps({"type": "user", "message": {"content": [
+                    {"type": "tool_result", "is_error": True, "content": text}]}})
+                result_line = json.dumps({"type": "result", "is_error": False,
+                                          "permission_denials": [{"tool_name": "Write"}]})
+                events = self._run(tempfile.mkdtemp(),
+                                   tool_result + "\n" + result_line + "\n")
+                self.assertTrue([e for e in events if e["type"] == "sandbox-refusal"], events)
+                self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_non_error_tool_result_matching_refusal_text_fires_nothing(self):
+        # issue-129 의 구조적 판정(is_error 우선, 텍스트 매치만으로 판정하지
+        # 않기) 회귀 방지를 층 분류에도 적용한다 — 성공한(is_error 없는)
+        # tool_result 가 거부 문구를 우연히 담아도 아무 이벤트가 없어야 한다.
+        for text in ("Permission to use Bash has been denied",
+                     "mkdir: /tmp/foo: Operation not permitted",
+                     "PreToolUse:Bash hook error: [board-gate.sh] "
+                     "board-gate: refused — x"):
+            with self.subTest(text=text):
+                tool_result = json.dumps({"type": "user", "message": {"content": [
+                    {"type": "tool_result", "is_error": False, "content": text}]}})
+                events = self._run(tempfile.mkdtemp(), tool_result + "\n")
+                self.assertFalse(
+                    [e for e in events if e["type"] in
+                     ("gate-refusal", "harness-refusal", "sandbox-refusal",
+                      "unclassified-refusal")], events)
 
     def test_pr_opened_does_not_refire_across_respawns(self):
         # issue-123 survey fixture: PR #124's URL, echoed again on a later
@@ -1403,9 +1486,11 @@ class ProgressEvents(unittest.TestCase):
                 ])
                 self.assertFalse([e for e in events if e["type"] == "progress"], events)
 
-    def test_gate_refusal_parsing_still_works_alongside_progress(self):
-        # gate-refusal 판별과 같은 obj 를 재사용하도록 바꾼 뒤에도 기존 동작이
-        # 그대로인지 — result 라인은 여전히 result 로만 처리된다.
+    def test_refusal_parsing_still_works_alongside_progress(self):
+        # 거부 판별과 같은 obj 를 재사용하도록 바꾼 뒤에도 기존 동작이
+        # 그대로인지 — result 라인은 여전히 result 로만 처리된다. 여기엔
+        # 층을 확정할 tool_result 줄이 없으니 unclassified-refusal 이 된다
+        # (이슈 #232) — 예전엔 이 케이스가 gate-refusal 이었다.
         events = self._run(tempfile.mkdtemp(), [
             {"type": "assistant", "message": {"content": [
                 {"type": "tool_use", "name": "Write", "input": {"file_path": "x.py"}},
@@ -1414,7 +1499,7 @@ class ProgressEvents(unittest.TestCase):
              "permission_denials": [{"tool_name": "Write"}]},
         ])
         self.assertEqual(len([e for e in events if e["type"] == "progress"]), 1, events)
-        self.assertEqual(len([e for e in events if e["type"] == "gate-refusal"]), 1, events)
+        self.assertEqual(len([e for e in events if e["type"] == "unclassified-refusal"]), 1, events)
 
 
 class Clean(unittest.TestCase):
