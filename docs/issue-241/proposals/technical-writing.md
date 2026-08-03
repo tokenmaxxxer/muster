@@ -25,17 +25,42 @@ configuring or operating the tool day-to-day (Diátaxis: reference/how-to).
 
 ## Proposed structure
 
-**README.md / README.ko.md**, same 3-part shape in both:
+**README.md / README.ko.md**, same 5-part shape in both:
 
 1. Title + language switch (unchanged).
 2. **Quickstart** (one screen): `gh auth login`, `claude plugin marketplace add
    tokenmaxxxer/on-the-record`, `claude plugin install on-the-record@tokenmaxxxer`,
    `/on-the-record:run`. Pulled from current 시작하기 §1-2 only; deeper config knobs
    (env vars, `role_model.txt`, project init) move to the handbook.
-3. **Essay body**: full text verbatim in README.ko.md; README.md carries a faithful
+3. **Interaction flow** (new — PR #242 feedback): a short section, placed between the
+   quickstart and the essay, that shows concretely what the essay argues abstractly.
+   Content, per the two feedback comments:
+   - **User-facing loop**: how a user interacts after installing the plugin —
+     conversational ask → orchestrator drafts an issue → user confirms; where the
+     user's input lands (requirement = issue, decision = an approval comment); where
+     AI activity lands (work = a PR on an `issue-<n>/<role>` branch, rationale = the
+     record document, phase-1 proposal → phase-2 delivery); how the user gives
+     feedback and approves/accepts/rejects (comment = feedback, `APPROVE` comment =
+     approval, merge = acceptance, close = rejection). Visualized as a
+     `sequenceDiagram` (or `flowchart`) across user / orchestrator / role session /
+     GitHub (issue/PR).
+   - **Spawn / rulebook / core / protocol internals** (added per the follow-up
+     feedback comment): how the orchestrator spawns a role session with `spawn.py`
+     (issue anchor, `issue-<n>/<role>` branch, isolated workspace); how the role's
+     rulebook (its methodology plugin set) and `tokenmaxxxer-core`'s shared
+     plugins/gates get attached to that session at spawn time; and which gates
+     mechanically enforce which contract-v3 rules inside the session (write-path
+     restriction, required record fields, commit trailer, approval-string match).
+     Visualized as a `flowchart` (spawn architecture suits flowchart better than
+     sequence).
+   Both diagrams ship in both README.md (English) and README.ko.md (Korean) — labels
+   and surrounding prose translated per the existing bilingual-maintenance
+   convention; Mermaid node/edge structure is otherwise identical across the two so
+   the diagrams stay in sync.
+4. **Essay body**: full text verbatim in README.ko.md; README.md carries a faithful
    English translation (own voice, not machine pass-through — matching the
    existing bilingual-maintenance convention).
-4. **Operational docs links** (tail): pointers to `docs/handbooks/setup.md`,
+5. **Operational docs links** (tail): pointers to `docs/handbooks/setup.md`,
    `docs/handbooks/operations.md`, `docs/handbooks/on-the-record.md`.
 
 **New/changed docs/ files:**
@@ -67,14 +92,25 @@ problem, not merely a length problem. Grouping by "how do I get running"
 committed user actually returns to the docs, rather than mirroring the old README's
 section order for its own sake.
 
+Per PR #242 review feedback, the essay alone leaves the loop it describes
+abstract — a reader can't see where "인간이 판단만 한다" or "기록이 협업을
+지탱한다" actually happen in this repo's mechanics. The interaction-flow section
+closes that gap by grounding the essay's claims in the concrete objects a reader can
+go look at (issues, PRs, branches, record docs, gates), and the two Mermaid diagrams
+make the user-facing loop and the spawn/rulebook/core/protocol internals legible at a
+glance instead of requiring a prose walkthrough of `spawn.py` and contract v3.
+
 ## Plan for phase 2
 
 1. Draft `docs/handbooks/setup.md` and `docs/handbooks/operations.md`; extend
    `docs/handbooks/on-the-record.md`, carrying content verbatim per the survey
    table (no rewriting of operational prose beyond re-flowing headings/anchors).
-2. Rewrite README.md and README.ko.md to the 4-part shape, including the essay
-   translation.
-3. Produce the phase-2 record with a before/after section-correspondence table
+2. Rewrite README.md and README.ko.md to the 5-part shape, including the new
+   interaction-flow section (user-facing loop + spawn/rulebook/core/protocol
+   diagrams, both bilingual) and the essay translation.
+3. Validate both Mermaid diagrams render (lint via `mmdc` or a manual Mermaid Live
+   check) before the phase-2 PR is opened, so a syntax error doesn't ship silently.
+4. Produce the phase-2 record with a before/after section-correspondence table
    (derived from survey.md, verified against the actual diff), a minimalism check,
    a style-guide compliance note, and accuracy-review evidence (grep/diff proof that
    every moved section landed somewhere and every command/path referenced still
