@@ -67,28 +67,61 @@ approval detection, for two different purposes:
    ("보드는 절대 행동을 취하지 않는다 — 집계·표시만 한다"), the board never
    blocks anything; it only reports.
 
-**Direct inspection of the two real comment bodies against
-`gates/flows.py:132`'s exact check**: both bodies contain the token as their
-first line followed by additional text (a blank line or newline, then
-prose). `str.strip()` removes only leading/trailing whitespace of the whole
-string — it does not shorten an already-non-whitespace-terminated body down
-to its first line. So for both rsb #23 and rsb #20, `c["body"].strip() ==
-needle` evaluates to `False`: neither comment is whole-body-identical to its
-needle. This is a plain structural fact about the two strings, verifiable by
-reading them character-for-character against `gates/flows.py:131-132` — no
-code execution needed to see that a longer string cannot equal a shorter
-prefix of itself.
+**Empirical run (2026-08-03, this survey) — reproducing the rsb #20/#23
+comment shapes as real inputs to the real functions**: per PR #254 reviewer
+feedback, the earlier draft of this survey stopped at the structural
+argument below ("a longer string cannot equal a shorter prefix of itself")
+without actually executing the two gate functions. That argument is not
+wrong, but it is not evidence on its own — it substitutes reasoning about
+the code for running it. This revision runs both `spawn.py::approve_scope()`
+and `gates/flows.py::_pr_approved()` directly, feeding each the real rsb
+comment bodies (verbatim) or a needle-isolated variant (see below), with all
+GitHub I/O monkeypatched exactly as `test_approve_scope.py`'s existing
+harness does (no network, no gate-code change). Script:
+`tmp_issue227_repro.py` (repo root, not committed — throwaway evidence
+script; reproduce by re-running the snippet below against this branch).
 
-**Conclusion**: this repo's own coded matcher (`gates/flows.py`) — which is
-the only known place in this codebase implementing the contract-v3-s19
-detection rule — would **not** recognize either real "successful" approval.
-Whatever actually let phase 2 proceed in both rsb cases is not this
-function; it is either a human/orchestrator judgment call at the moment
-phase 2 was spawned, or a different (undocumented, out-of-repo) check in a
-role-side plugin. Either way, the two real cases currently sit as
-"technically unapproved" from this repo's own status-board's point of view
-even though work already shipped — exactly the contract-vs-practice gap
-the issue names.
+`gates/flows.py::_pr_approved()` — real subject/role names match the
+function's own needle shape (`APPROVE {subject}/{role}`), so the two rsb
+bodies are used **verbatim, unmodified**:
+
+| input (verbatim body) | subject/role | `_pr_approved()` result |
+| --- | --- | --- |
+| rsb #23: `"APPROVE issue-23/implementation\n\n조건부 승인 — PR #24 리뷰 코멘트(2차 교차 검토 4건)를 phase 2에서 반영할 것."` | issue-23/implementation | **`False`** |
+| rsb #20: `"APPROVE issue-20/finance-unit-economics\n(phase 2 반영 사항 — 승인자 피드백 2건: ① ... ② ...)"` | issue-20/finance-unit-economics | **`False`** |
+| control — token only, no trailing text | issue-99/implementation | `True` |
+| synthetic supplement — prose *before* the token (issue text says "토큰 앞뒤", real specimens only show *after*; added to cover the "before" half) | issue-99/implementation | **`False`** |
+
+`spawn.py::approve_scope()` — its needle is hardcoded to the literal suffix
+`/scope` (line 917), never the role name; feeding it the rsb bodies verbatim
+fails immediately on that literal mismatch, which is issue #224's defect,
+not this issue's question. To isolate the variable this issue actually asks
+about (does trailing/leading prose break the match, holding the needle
+itself correct), the same rsb shapes are re-run with the suffix swapped to
+`scope`:
+
+| input | `approve_scope()` result |
+| --- | --- |
+| rsb #23 shape, needle-isolated: `"APPROVE issue-23/scope\n\n조건부 승인 — ..."` | **`SystemExit`** — "승인 코멘트를 못 찾았다" (rejected, no commit made) |
+| rsb #20 shape, needle-isolated: `"APPROVE issue-20/scope\n(phase 2 반영 사항 — ...)"` | **`SystemExit`** — rejected, no commit made |
+| control — token only | `rc=0`, `loop_state` written to `scope-approved`, commit made |
+| synthetic supplement — prose before + token | **`SystemExit`** — rejected |
+| reference run — rsb #23 body verbatim, **no** needle isolation | `SystemExit` — rejected (here for the `/scope`-vs-`/role` literal mismatch, i.e. issue #224's defect, confirmed separately and not conflated with the above) |
+
+**Conclusion, now evidence-backed by execution, not just inspection**: both
+real gate functions in this repo reject both real rsb comments outright —
+`_pr_approved()` returns `False`, `approve_scope()` raises `SystemExit` and
+writes nothing. The structural argument from the first draft ("a longer
+string cannot equal a shorter prefix of itself") turns out to agree with the
+execution, which is itself a useful confirmation, not a substitute for
+having run it. Whatever actually let phase 2 proceed in both rsb cases is
+not either function in this repo; it is either a human/orchestrator
+judgment call at the moment phase 2 was spawned, or a different
+(undocumented, out-of-repo) check in a role-side plugin. Either way, the two
+real cases currently sit as "technically unapproved" from this repo's own
+status-board's point of view even though work already shipped — exactly the
+contract-vs-practice gap the issue names, and exactly the moment a
+non-canonical-form-handling policy (see proposal) needs to fire.
 
 ## The orchestrator playbook's actual gap
 
@@ -104,6 +137,28 @@ is "approve, but fix X" in the same breath — which is exactly the situation
 both real rsb comments came from. `docs/handbooks/operations.md:309-364`
 duplicates the same canon (issue comment is canonical location; PR review
 Approve is multi-account-only) without a combined-case recipe either.
+
+## Current state: no policy exists for a role session that sees a
+non-canonical near-miss
+
+Issue #227's own comment (2026-08-03) adds a second requirement: a decision
+for how a role session that encounters a non-canonical form (token +
+prose, mixed in one comment) should behave — the two rsb incidents show a
+role/orchestrator session treating such a comment as if it were a valid
+approval and proceeding into phase 2 regardless (the empirical run above
+confirms neither this repo's own gate function would have agreed). Searching
+this repo turns up **no existing code path that reacts to a near-miss
+comment at all** — `approve_scope()` and `_pr_approved()` both either match
+exactly or produce a plain rejection (`SystemExit` / `False`) with no
+distinct signal for "something approval-shaped just failed to match, tell
+someone." The role session that actually waits for phase-2 approval (the
+`SessionStart` hook surfacing "PR #NNN (OPEN); approvals: ..." into a role's
+context, as seen at this very session's start) lives in a separate,
+out-of-tree plugin (per the "Write set" section below) — this repo cannot
+patch that hook, but it *can* document what that hook (and the orchestrator
+relaying to GitHub) should do on a near-miss, the same way it already
+documents the two-comment recipe. This is the current-state gap the
+proposal's policy decision (warn vs. abort vs. log-only) fills.
 
 ## Prior, closed design decisions that bound this issue
 
