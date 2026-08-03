@@ -830,11 +830,20 @@ def _pr_for_branch(root: Path, branch: str) -> int | None:
 def _issue_comments(root: Path, number: int) -> list[dict]:
     """`number` 앞으로 달린 코멘트. GitHub 는 이슈든 PR 이든 같은
     `/issues/<n>/comments` 로 대화 코멘트를 낸다 — PR 리뷰 코멘트가 아니라
-    일반 코멘트가 필요하므로 이 엔드포인트로 충분하다."""
+    일반 코멘트가 필요하므로 이 엔드포인트로 충분하다.
+
+    `--paginate`만 쓰면 페이지마다 별도 JSON 배열을 순차 출력해 다중
+    페이지 응답이 유효한 단일 JSON이 아니게 된다(`json.loads`가
+    `ValueError`로 죽고 아래 except 가 "코멘트 없음"으로 삼킨다) — 30개
+    넘는 스레드에서 결함이 악화되는 걸 막으려고 `--slurp`(페이지들을
+    바깥 배열 하나로 감싼다)를 같이 쓰고, 파싱 직후 평탄화한다(이슈
+    #224).
+    """
     slug = _repo_slug(root)
     if not slug:
         return []
-    r = subprocess.run(["gh", "api", f"repos/{slug}/issues/{number}/comments"],
+    r = subprocess.run(["gh", "api", f"repos/{slug}/issues/{number}/comments",
+                        "--paginate", "--slurp"],
                        cwd=root, capture_output=True, text=True)
     if r.returncode != 0:
         return []
@@ -842,6 +851,7 @@ def _issue_comments(root: Path, number: int) -> list[dict]:
         data = json.loads(r.stdout)
     except ValueError:
         return []
+    data = [c for page in data for c in page]
     return [{"login": c.get("user", {}).get("login", ""), "body": c.get("body", "")}
             for c in data]
 
@@ -1770,16 +1780,24 @@ def _await_bounded(events_path: Path, offset_path: Path, stall_timeout_min: floa
         time.sleep(2)
 
 
+WATCH_CRASH_RC = 2  # `--follow`가 session-end 없이 pid 사망을 감지했을 때
+                    # 리턴하는 종료 코드 — 0(정상, session-end 도달)과도,
+                    # 1(사용법 오류/기록 없음)과도 구분한다(이슈 #224,
+                    # docs/issue-224/decisions/watch-crash-exit-code.md).
+
+
 def _watch(issue: int, role: str | None, stall_timeout_min: float,
            follow: bool = False) -> int:
     idx = _workspace_index_load()
     if role:
-        entry = idx.get(f"issue-{issue}/{role}")
+        key = f"issue-{issue}/{role}"
+        entry = idx.get(key)
     else:
         matches = [(k, v) for k, v in idx.items() if k.startswith(f"issue-{issue}/")]
         if len(matches) > 1:
             sys.exit(f"이슈 {issue} 에 역할이 여럿 기록돼 있다 — 역할을 지정하라: "
                      + ", ".join(k.split("/", 1)[1] for k, _ in matches))
+        key = matches[0][0] if matches else None
         entry = matches[0][1] if matches else None
     if entry is None:
         print(f"[watch] issue-{issue}{'/' + role if role else ''}: 기록 없음 — "
@@ -1805,6 +1823,29 @@ def _watch(issue: int, role: str | None, stall_timeout_min: float,
             ev = json.loads(lines[after - 1])
             if ev.get("type") == "session-end":
                 return rc
+        # 세션 프로세스 사망 판정보다 session-end 잔여 이벤트 소진을 먼저
+        # 본다 — session_end_verdict() (spawn.py:1191-1236) 와 같은 순서
+        # (PR #255 피드백 1). 정상 종료가 이미 session-end 를 남겼는데
+        # 아직 offset 이 그 줄까지 못 갔다는 이유만으로 pid 사망과
+        # 경합시켜 크래시로 오판하면 안 된다 — 다음 반복이 그 줄을
+        # 소비하게 둔다.
+        if events_path.exists():
+            lines = events_path.read_text(encoding="utf-8").splitlines()
+            if any(json.loads(line).get("type") == "session-end"
+                   for line in lines[after:]):
+                continue
+        # `pid`(claude 서브프로세스)가 아니라 `wrapper_pid`(호출자
+        # 프로세스, roster_register() 참고)로 생존을 잰다 — `pid`는
+        # push/리포트/ledger_write 를 거쳐 session-end 를 남기기 전에
+        # proc.wait() 로 이미 정상적으로 죽어 있어서, 그 시점의 `pid`
+        # 사망만으로 판정하면 아직 정상 진행 중인 후처리 구간을 크래시로
+        # 오판한다(이슈 #224 hunt 발견).
+        roster_entry = _roster_load().get(key) if key else None
+        pid = roster_entry.get("wrapper_pid") if roster_entry else None
+        if roster_entry is None or not pid or not _alive(pid):
+            print(f"[watch] 세션 프로세스가 사라졌다(pid {pid}) — session-end "
+                  f"없이 끝났다. 크래시로 보고 멈춘다", file=sys.stderr)
+            return WATCH_CRASH_RC
 
 
 def roster_kill(issue: int, role: str) -> int:
@@ -2727,6 +2768,17 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             "issue": issue, "ts": int(time.time()),
             "work": str(cwd), "log": str(log_path),
             "before_head": before_head,  # 이슈 #90 watchdog signal 4 재료
+            # `pid`(claude 서브프로세스)는 proc.wait() 리턴과 함께 정상
+            # 종료에서도 먼저 죽는다 — push/게이트·소유권 리포트/classify/
+            # ledger_write 를 거쳐야 session-end 가 남는 후처리 구간
+            # (spawn.py:proc.wait()~_append_event("session-end")) 동안은
+            # `pid` 만으로 생존을 재는 소비자가 이 구간을 크래시로 오판한다
+            # (이슈 #224 hunt 발견). 그 구간까지 살아있는 이 fork-child(또는
+            # non-bounded 경로에서는 현재 프로세스) 자신의 pid 를 별도
+            # 필드로 남겨 `_watch --follow` 의 크래시 판정이 여기 대신
+            # 참조하게 한다 — `pid`(roster_kill 의 SIGTERM 대상)의 기존
+            # 의미는 그대로 둔다.
+            "wrapper_pid": os.getpid(),
         })
         if issue is not None:
             # 크래시가 roster_remove/종료 이벤트 사이에서 나면 이 이전엔

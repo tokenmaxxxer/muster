@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parent / "gates"))
 sys.path.insert(0, str(Path(__file__).parent))
@@ -52,6 +53,19 @@ def t_stage_for_closed_wins_over_in_progress_loop_state():
     # closed는 loop_state가 아직 안 끝난 것처럼 보여도(예: in-progress)
     # GitHub 이슈 자체의 상태에서 나오는 종결 상태라 매핑 조회보다 이긴다.
     assert flows._stage_for("in-progress", "CLOSED") == ("closed", True)
+
+
+class PrListAllLimit(unittest.TestCase):
+    """이슈 #224: `gh pr list`가 기본 30건 초과 열린 PR을 조용히 빠뜨리지
+    않게 `--limit`을 준다 — 자매 함수 `_issue_list_all()`과 같은 관용구."""
+
+    def test_gh_pr_list_call_includes_limit_1000(self):
+        with mock.patch.object(flows.subprocess, "run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="[]")
+            flows._pr_list_all(Path("."))
+        cmd = run.call_args.args[0]
+        self.assertIn("--limit", cmd)
+        self.assertEqual(cmd[cmd.index("--limit") + 1], "1000")
 
 
 class FlowsStageMapping(unittest.TestCase):
