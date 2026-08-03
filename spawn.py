@@ -1482,6 +1482,64 @@ _PR_URL_RE = re.compile(r"https://github\.com/[^\s\"'\\]+/pull/\d+")
 _PROGRESS_BASH_PREFIXES = ("git commit", "git push", "gh pr create",
                            "python3 test_spawn.py", "python3 gates/ci.py")
 
+# 이슈 #232: 도구 거부를 낸 층 판별 — 세션 로그의 tool_result 스트림에 이미
+# 있는 텍스트로 분류한다(새 계측 없음). 층 1(게이트)은 Claude Code 가 감싸는
+# `PreToolUse:<tool> hook error: [<hook 경로>]` 뒤에 gate-lib.sh 의
+# `gate_deny`가 쓴 `<게이트>: refused — <사유>` 가 따라온다(gate-lib.sh:77-79).
+# 층 2(하네스 권한)·층 3(샌드박스) 패턴은 이슈 #232 본문이 실제 세션 로그에서
+# 그대로 뽑아온 문자열이다 — 임의 확장 금지, 새 샘플은 이슈로 먼저 확인.
+_GATE_HOOK_RE = re.compile(r"PreToolUse:\S+ hook error: \[([^\]]*)\]")
+_GATE_DENY_RE = re.compile(r"(\S+):\s*refused\s*—")
+_HARNESS_REFUSAL_PATTERNS = (
+    re.compile(r"Permission to use \S+ has been denied"),
+    re.compile(r"requires approval"),
+    re.compile(r"cannot be statically analyzed"),
+    re.compile(r"simple_expansion"),
+)
+_SANDBOX_REFUSAL_PATTERNS = (
+    re.compile(r"Operation not permitted"),
+    re.compile(r"haven't granted it yet"),
+)
+
+
+def _tool_result_text(content) -> str:
+    """tool_result 블록의 content 는 문자열이거나 텍스트 블록 리스트다."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts)
+    return ""
+
+
+def _classify_refusal_text(text: str):
+    """거부 tool_result 텍스트를 층으로 분류한다. 매치 없으면 None, 있으면
+    (이벤트 타입, 세션당 dedup 키, detail) — 층 1 은 게이트 이름을 hook 경로
+    (기본값)와 gate_deny 자신의 `<게이트>: refused —` 메시지(우선, 이슈
+    survey: "두 번 겹쳐 복구 가능") 양쪽에서 뽑는다."""
+    hook_m = _GATE_HOOK_RE.search(text)
+    if hook_m:
+        deny_m = _GATE_DENY_RE.search(text)
+        if deny_m:
+            gate = deny_m.group(1)
+            reason = text[deny_m.end():].strip()[:300]
+        else:
+            gate = Path(hook_m.group(1)).stem
+            reason = text.strip()[:300]
+        return ("gate-refusal", ("gate", gate), {"gate": gate, "reason": reason})
+    for pat in _HARNESS_REFUSAL_PATTERNS:
+        if pat.search(text):
+            return ("harness-refusal", ("harness",), text.strip()[:300])
+    for pat in _SANDBOX_REFUSAL_PATTERNS:
+        if pat.search(text):
+            return ("sandbox-refusal", ("sandbox",), text.strip()[:300])
+    return None
+
 
 def _events_path(work: str) -> Path:
     return Path(str(work) + EVENTS_SUFFIX)
@@ -2559,7 +2617,11 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         except (BrokenPipeError, OSError):
             pass
         pr_seen = _prior_event_details(events_path, "pr-opened") if issue is not None else set()
-        gate_refusal_seen = False
+        # 이슈 #232: 층(게이트/하네스/샌드박스) 단위 dedup — 예전엔 불리언
+        # 하나(gate_refusal_seen)가 세 층을 전부 한 라벨로 뭉갰다. 키는
+        # ("gate", <게이트명>) / ("harness",) / ("sandbox",) — 오늘처럼
+        # "보고 한 번, 거부마다 아님"을 유지하면서 층·게이트별로 구분한다.
+        refusals_seen: set = set()
         # A URL the session **read** is indistinguishable from a PR it
         # **opened** unless the owner/repo is checked: octocat/Hello-World/pull/1
         # is GitHub's own documentation example and appears in gh help output.
@@ -2602,9 +2664,30 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                 if obj.get("type") == "result":
                     result = obj
                     denials = result.get("permission_denials") or []
-                    if issue is not None and not gate_refusal_seen and denials:
-                        gate_refusal_seen = True
-                        _append_event(events_path, "gate-refusal", str(denials)[:200])
+                    if issue is not None and denials and not refusals_seen:
+                        # 상관관계 실패(예: 잘리거나 누락된 스트림 줄) — 층을
+                        # 확정 못 했으니 layer-1 로 위장하지 않고 별도
+                        # 라벨로, 그래도 거부 자체는 놓치지 않는다(제안서
+                        # 5번). 이미 한 층이라도 분류됐으면 결과 라인에서
+                        # 새로 세지 않는다 — 부분 상관관계는 제안서 범위 밖.
+                        refusals_seen.add(("unclassified",))
+                        _append_event(events_path, "unclassified-refusal",
+                                     str(denials)[:200])
+                elif issue is not None and obj.get("type") == "user":
+                    for block in (obj.get("message") or {}).get("content") or []:
+                        if not isinstance(block, dict) or block.get("type") != "tool_result":
+                            continue
+                        if not block.get("is_error"):
+                            continue
+                        text = _tool_result_text(block.get("content"))
+                        classified = _classify_refusal_text(text)
+                        if classified is None:
+                            continue
+                        ev_type, key, detail = classified
+                        if key in refusals_seen:
+                            continue
+                        refusals_seen.add(key)
+                        _append_event(events_path, ev_type, detail)
                 elif issue is not None and obj.get("type") == "assistant":
                     # gate-refusal/pr-opened 와 같은 파싱 결과(obj)를 재사용한다
                     # — 이 줄에 대해 json.loads 를 두 번 부르지 않는다.
