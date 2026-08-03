@@ -10,6 +10,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import spawn
 
@@ -75,6 +76,92 @@ class SpawnCmd(unittest.TestCase):
             for k, v in saved.items():
                 if v is not None:
                     os.environ[k] = v
+
+    def test_core_version_reports_sha_date_and_label_for_local_override(self):
+        # 이슈#218: core_root() 는 plugin.json 존재만 보고 sha·신선도는
+        # 보지도 보고도 않는다 — core_version() 은 checkout_version() 의
+        # core 쪽 대칭으로, 로컬 오버라이드(TOKENMAXXXER_CORE)가 실제로
+        # 무슨 sha 를 물었는지 읽기 전용으로 드러낸다.
+        with tempfile.TemporaryDirectory() as td:
+            core_dir = Path(td) / "tokenmaxxxer-core"
+            (core_dir / "core" / ".claude-plugin").mkdir(parents=True)
+            (core_dir / "core" / ".claude-plugin" / "plugin.json").write_text("{}")
+
+            def git(*a: str) -> str:
+                r = subprocess.run(["git", "-C", str(core_dir), *a],
+                                   capture_output=True, text=True)
+                return r.stdout.strip()
+
+            git("init", "-q")
+            git("config", "user.email", "t@t.t")
+            git("config", "user.name", "t")
+            git("add", "-A")
+            git("commit", "-q", "-m", "init")
+            expected_sha = git("rev-parse", "--short", "HEAD")
+            expected_date = git("log", "-1", "--format=%cs")
+
+            saved = os.environ.get("TOKENMAXXXER_CORE")
+            os.environ["TOKENMAXXXER_CORE"] = str(core_dir)
+            try:
+                v = spawn.core_version()
+            finally:
+                if saved is None:
+                    os.environ.pop("TOKENMAXXXER_CORE", None)
+                else:
+                    os.environ["TOKENMAXXXER_CORE"] = saved
+            self.assertIn(expected_sha, v)
+            self.assertIn(expected_date, v)
+            self.assertIn("TOKENMAXXXER_CORE", v)
+            self.assertNotIn("커밋 안 된 변경", v)
+
+    def test_core_version_reports_unknown_without_network_when_nothing_found(self):
+        # 로컬 후보 셋 + 관리 클론까지 전부 없을 때 core_version() 은
+        # core_root() 처럼 halt 하지 않고(로깅용이라 halt 는 core_root() 의
+        # 몫), 그렇다고 core_root() 처럼 새로 clone 을 시도하지도 않는다.
+        saved = {k: os.environ.pop(k, None)
+                 for k in ("TOKENMAXXXER_CORE", "TOKENMAXXXER_RULEBOOKS")}
+        saved_root = spawn.ROOT
+        try:
+            with tempfile.TemporaryDirectory() as broot:
+                spawn.ROOT = Path(broot)
+                with mock.patch("spawn.subprocess.run") as run:
+                    v = spawn.core_version()
+                self.assertIn("버전 불명", v)
+                # 후보 전부 미스면 describe() 자체가 안 불려 위 mock 이 한
+                # 번도 안 불린다 — "clone 이 없다" 는 이 경로에서 자명하다.
+                # 진짜 위험은 관리 클론이 **있는** 경로(core_root() 는
+                # 거기서 pull 을 돈다)인데, core_version() 은 거기서도
+                # pull/clone 을 걸지 않는지를 아래서 실제 subprocess 호출을
+                # 가로채 검사한다.
+                run.assert_not_called()
+
+                d = Path(broot) / "runs" / "rulebooks" / "tokenmaxxxer-core"
+                (d / "core" / ".claude-plugin").mkdir(parents=True)
+                (d / "core" / ".claude-plugin" / "plugin.json").write_text("{}")
+
+                def git(*a: str) -> str:
+                    r = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True)
+                    return r.stdout.strip()
+
+                git("init", "-q")
+                git("config", "user.email", "t@t.t")
+                git("config", "user.name", "t")
+                git("add", "-A")
+                git("commit", "-q", "-m", "init")
+                expected_sha = git("rev-parse", "--short", "HEAD")
+
+                with mock.patch("spawn.subprocess.run", wraps=subprocess.run) as spied:
+                    v2 = spawn.core_version()
+                self.assertIn(expected_sha, v2)
+                self.assertIn("on-the-record 클론", v2)
+                for cmd in spied.call_args_list:
+                    self.assertNotIn("pull", cmd.args[0], "core_version() 이 관리 클론을 pull 했다")
+                    self.assertNotIn("clone", cmd.args[0], "core_version() 이 네트워크 clone 을 시도했다")
+        finally:
+            spawn.ROOT = saved_root
+            for k, val in saved.items():
+                if val is not None:
+                    os.environ[k] = val
 
     def test_claude_plugin_root_core_matches_attached_core_dir(self):
         # 이슈#182: 룰북 게이트는 core 공유 라이브러리를

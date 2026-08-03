@@ -1778,6 +1778,19 @@ def ledger_write(entry: dict) -> Path:
     return p
 
 
+def _core_candidates() -> list[tuple[str, Path]]:
+    """core_root() 가 순서대로 보는 로컬 오버라이드 후보 (라벨, 경로).
+    관리 클론(runs/rulebooks/tokenmaxxxer-core)은 이 목록 밖 — 셋 다
+    없을 때만 core_root() 가 그리로 떨어지는 별도 단계라 후보가 아니다.
+    """
+    return [
+        ("TOKENMAXXXER_CORE", os.environ.get("TOKENMAXXXER_CORE")),
+        ("TOKENMAXXXER_RULEBOOKS/tokenmaxxxer-core",
+         "$TOKENMAXXXER_RULEBOOKS/tokenmaxxxer-core"),
+        ("형제 디렉터리", str(ROOT.parent / "tokenmaxxxer-core")),
+    ]
+
+
 def core_root() -> Path:
     """tokenmaxxxer-core 체크아웃 루트. 없으면 멈춘다.
 
@@ -1785,9 +1798,7 @@ def core_root() -> Path:
     들고 있다. 없이 띄우면 역할은 그대로 돌지만 아무도 이탈을 막지 않는다 —
     조용히 보호가 사라지는 쪽이라 경고가 아니라 정지다.
     """
-    for cand in (os.environ.get("TOKENMAXXXER_CORE"),
-                 "$TOKENMAXXXER_RULEBOOKS/tokenmaxxxer-core",
-                 str(ROOT.parent / "tokenmaxxxer-core")):
+    for _label, cand in _core_candidates():
         if not cand:
             continue
         p = Path(os.path.expanduser(os.path.expandvars(cand)))
@@ -1816,6 +1827,37 @@ def core_root() -> Path:
         "tokenmaxxxer-core 를 찾지 못했고 받지도 못했다. 역할 세션은 core 없이\n"
         "  뜨지 않는다 — 프로토콜 게이트와 정본 계약이 거기 있다.\n"
         "  네트워크를 확인하거나 체크아웃을 두고 $TOKENMAXXXER_CORE 로 가리켜라.")
+
+
+def core_version() -> str:
+    """core_root() 가 실제로 고를 체크아웃이 **무엇인지** — 읽기 전용, pull 도
+    clone 도 하지 않는다. checkout_version() 의 core 쪽 대칭 — 로컬 오버라이드를
+    건드리지 않으면서 무엇이 도는지만 매 spawn 로그·ledger 에 남긴다(이슈
+    #218: 같은 sha 가 며칠째 안 바뀌어도 로그에 안 남아 stale 게이트로 계속
+    돌았다).
+    """
+    def git(d: Path, *a: str) -> str:
+        p = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True)
+        return p.stdout.strip() if p.returncode == 0 else ""
+
+    def describe(d: Path, label: str) -> str:
+        sha = git(d, "rev-parse", "--short", "HEAD") or "?"
+        date = git(d, "log", "-1", "--format=%cs") or "?"
+        dirty = " (커밋 안 된 변경 있음)" if git(d, "status", "--porcelain") else ""
+        return f"{sha}{dirty} ({date}, {label})"
+
+    for label, cand in _core_candidates():
+        if not cand:
+            continue
+        p = Path(os.path.expanduser(os.path.expandvars(cand)))
+        if "$" in str(p):
+            continue
+        if (p / "core" / ".claude-plugin" / "plugin.json").is_file():
+            return describe(p, label)
+    d = ROOT / "runs" / "rulebooks" / "tokenmaxxxer-core"
+    if (d / "core" / ".claude-plugin" / "plugin.json").is_file():
+        return describe(d, "on-the-record 클론")
+    return "버전 불명 (core 체크아웃 없음)"
 
 
 def core_plugin_dirs() -> list[Path]:
@@ -2386,17 +2428,23 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                 f"죽는다(백그라운드 워커가 커밋·push 를 대신 끝내줄 것이라고 가정하지\n"
                 f"마라 — 실측된 실패 패턴이다). 모든 작업은 이 턴 안에서 직접 끝내라.\n\n") + task
     plugins = plugin_dirs(role, spec)
+    # core_plugin_dirs() 를 print 보다 먼저 불러 core_root() 의 관리 클론
+    # pull 이 먼저 일어나게 한다 — 순서가 뒤집히면(예전처럼 print 뒤에서
+    # 부르면) 로그에는 pull 전 sha, ledger 에는 pull 후 sha 가 찍혀 같은
+    # run 안에서 두 기록이 어긋난다(룰북 쪽은 plugin_dirs() 가 이미 이
+    # 순서로 pull 을 앞에 둔다 — core 도 같은 순서로 맞춘다).
+    core_plugins = core_plugin_dirs()
     s = role_settings(role)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(s, f)
         settings = f.name
     try:
         print(f"[{role}] 플러그인 {len(plugins)}개, 룰북 {checkout_version(role, spec)}, "
-              f"작업 디렉터리 {cwd}", file=sys.stderr)
+              f"core {core_version()}, 작업 디렉터리 {cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
         cmd, extra_env = spawn_cmd(settings, role, unattended,
-                                   core_plugin_dirs(), plugins)
+                                   core_plugins, plugins)
         if issue is not None:
             # 툴체인 캐시를 워크스페이스 안으로 — go 등이 홈(~/Library/...)에
             # 캐시·설정을 쓰려다 샌드박스에 막혀 빌드가 승인 프롬프트로
@@ -2626,6 +2674,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         "board_delta": delta, "denials": len(denials),
         "duration_s": round(time.monotonic() - t0, 1),
         "rulebook": checkout_version(role, spec),
+        "core": core_version(),
         "gates": gates,
         "log": str(log_path),
     })
