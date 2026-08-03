@@ -39,7 +39,9 @@ The user does not write to GitHub directly. Every decision is made in
 conversation with the orchestrator, which relays it to GitHub under the
 user's account: feedback as a comment, approval as an
 `APPROVE issue-<n>/<role>` comment, acceptance as a merge, rejection as
-a close.
+a close. The orchestrator also watches for each PR the role opens and
+reports its contents back to the user in conversation before the user
+decides.
 
 ```mermaid
 sequenceDiagram
@@ -55,11 +57,15 @@ sequenceDiagram
     O->>G: relays: confirms (issue = the requirement record)
     O->>R: musters the role (spawn)
     R->>G: phase 1 proposal PR
+    G-->>O: watch detects the PR
+    O->>U: reports and explains the PR in conversation
     U->>O: gives feedback, or approves, in conversation
     O->>G: relays: comment = feedback, or
     O->>G: relays: "APPROVE issue-<n>/<role>" comment = approval
     G-->>R: approval confirmed
     R->>G: phase 2 delivery (same PR, includes the record document)
+    G-->>O: watch detects the delivery
+    O->>U: reports and explains the delivery in conversation
     U->>O: accepts, or rejects, in conversation
     O->>G: relays: merge = acceptance, or close = rejection
 ```
