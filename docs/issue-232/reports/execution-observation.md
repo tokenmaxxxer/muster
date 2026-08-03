@@ -394,7 +394,12 @@ to the hook-path stem only when it is absent.
   refused — record is missing required section(s): …`. Against that text
   `_GATE_HOOK_RE` yields the stem `record-fields-gate` (the gate) while
   `_GATE_DENY_RE` yields `execution-observation` (the role), and the
-  delivered code prefers the latter.
+  delivered code prefers the latter. Both shapes are live in the same
+  plugin: a second refusal observed in this session, `PreToolUse:Bash hook
+  error: [${CLAUDE_PLUGIN_ROOT}/hooks/board-gate.sh]: board-gate: … belongs
+  to another role …`, does put the gate name in that token — so the
+  preferred source is right for some gates and wrong for others, while the
+  discarded source is right for both.
 - **Timeline.** The survey asserted the gate name is "recoverable **twice
   over** … and, redundantly, the `gate_deny` message's own leading `<gate>:`
   token" (`2dc6ba6:docs/issue-232/reports/implementation/survey.md`, §Layer
