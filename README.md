@@ -16,29 +16,30 @@ In your conversational session:
 /on-the-record:run
 ```
 
-That's it — no clone, no token, no secret. Full requirements and optional
-setup (agent account, model pinning, project init) live in
+No separate clone or secret setup is required. The only prerequisite is
+`gh` login. Full requirements and optional setup (agent account, model
+pinning, project init) are documented in
 [`docs/handbooks/setup.md`](docs/handbooks/setup.md).
 
 ## Interaction flow
 
-What actually happens after you install — grounding what the essay below
-argues in this repo's concrete objects: issues, PRs, branches, records,
-gates.
+This section describes the mechanics after install: issues, PRs,
+branches, records, gates.
 
 ### The user-facing loop
 
 The user states a need in conversation. The orchestrator drafts an issue
-and relays it to GitHub under the user's account, the user confirms in
-conversation, and from there the user's input and the AI's activity each
-land in one fixed place: a requirement is an issue, a decision is an
-approval comment, work is a PR on an `issue-<n>/<role>` branch, and the
-rationale is that PR's record document. A role ships phase 1 (proposal)
-first; phase 2 (delivery) opens only once the user approves. The user
-never writes to GitHub directly — every decision is made in conversation
-with the orchestrator, which relays it to GitHub under the user's
-account: feedback as a comment, approval as an `APPROVE issue-<n>/<role>`
-comment, acceptance as a merge, rejection as a close.
+and relays it to GitHub under the user's account. The user confirms in
+conversation. From that point, user input and AI activity are each
+recorded in one fixed location: a requirement is an issue, a decision is
+an approval comment, work is a PR on an `issue-<n>/<role>` branch, and
+the rationale is that PR's record document. A role ships phase 1
+(proposal) first; phase 2 (delivery) opens only after the user approves.
+The user does not write to GitHub directly. Every decision is made in
+conversation with the orchestrator, which relays it to GitHub under the
+user's account: feedback as a comment, approval as an
+`APPROVE issue-<n>/<role>` comment, acceptance as a merge, rejection as
+a close.
 
 ```mermaid
 sequenceDiagram
