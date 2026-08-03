@@ -60,7 +60,7 @@ class SpawnCmd(unittest.TestCase):
     def test_core_dir_resolves_or_halts(self):
         # A role session without core loses token forgery protection and the
         # contract-drift check silently. That is a halt, not a warning.
-        # core_dir 이 보는 자리 **셋 전부** 를 막아야 검사가 성립한다. 하나라도
+        # core_dir 이 보는 자리 **둘 다** 를 막아야 검사가 성립한다. 하나라도
         # 살려 두면 그 환경이 있는 머신에서만 통과하는 테스트가 된다 — 실제로
         # TOKENMAXXXER_RULEBOOKS 가 설정된 셸에서 이 케이스가 조용히 통과했다.
         saved = {k: os.environ.pop(k, None)
@@ -76,6 +76,85 @@ class SpawnCmd(unittest.TestCase):
             for k, v in saved.items():
                 if v is not None:
                     os.environ[k] = v
+
+    def test_core_root_prefers_managed_clone_over_sibling_directory(self):
+        # 이슈#220: 형제 디렉터리(마켓플레이스 설치 부산물, ROOT.parent /
+        # "tokenmaxxxer-core")가 관리 클론보다 먼저 매치되면 sha 비교 없이
+        # 그대로 반환돼, 관리 클론(원격과 항상 동기화되는 유일한 경로)이
+        # 영구히 도달 불가였다 — 후보 목록에서 형제 디렉터리를 제거한
+        # 뒤에도 둘이 공존할 때 관리 클론이 선택되는지 회귀 확인.
+        saved = {k: os.environ.pop(k, None)
+                 for k in ("TOKENMAXXXER_CORE", "TOKENMAXXXER_RULEBOOKS")}
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                fake_root = Path(td) / "workspace"
+                fake_root.mkdir()
+                saved_root, spawn.ROOT = spawn.ROOT, fake_root
+                try:
+                    sibling = fake_root.parent / "tokenmaxxxer-core"
+                    (sibling / "core" / ".claude-plugin").mkdir(parents=True)
+                    (sibling / "core" / ".claude-plugin" / "plugin.json").write_text("{}")
+
+                    managed = fake_root / "runs" / "rulebooks" / "tokenmaxxxer-core"
+                    (managed / "core" / ".claude-plugin").mkdir(parents=True)
+                    (managed / "core" / ".claude-plugin" / "plugin.json").write_text("{}")
+
+                    self.assertEqual(spawn.core_root(), managed)
+                finally:
+                    spawn.ROOT = saved_root
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+
+    def test_core_version_reports_managed_clone_sha_when_sibling_also_present(self):
+        # 같은 공존 셋업에서 core_version() 도 관리 클론 쪽 sha·라벨을
+        # 보고해야 core_root() 가 실제로 고르는 체크아웃과 로그가 일치한다
+        # — 형제 디렉터리 쪽 sha 가 섞여 나오면 안 된다.
+        saved = {k: os.environ.pop(k, None)
+                 for k in ("TOKENMAXXXER_CORE", "TOKENMAXXXER_RULEBOOKS")}
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                fake_root = Path(td) / "workspace"
+                fake_root.mkdir()
+                saved_root, spawn.ROOT = spawn.ROOT, fake_root
+                try:
+                    def make_repo(d: Path, marker: str) -> str:
+                        # marker 로 트리 내용을 다르게 해 두 저장소가 우연히
+                        # 같은 커밋 해시를 갖는 것(같은 초 안에 동일 내용으로
+                        # init 하면 발생)을 막는다.
+                        (d / "core" / ".claude-plugin").mkdir(parents=True)
+                        (d / "core" / ".claude-plugin" / "plugin.json").write_text(
+                            json.dumps({"marker": marker}))
+
+                        def git(*a: str) -> str:
+                            r = subprocess.run(["git", "-C", str(d), *a],
+                                               capture_output=True, text=True)
+                            return r.stdout.strip()
+
+                        git("init", "-q")
+                        git("config", "user.email", "t@t.t")
+                        git("config", "user.name", "t")
+                        git("add", "-A")
+                        git("commit", "-q", "-m", f"init-{marker}")
+                        return git("rev-parse", "--short", "HEAD")
+
+                    sibling = fake_root.parent / "tokenmaxxxer-core"
+                    sibling_sha = make_repo(sibling, "sibling")
+
+                    managed = fake_root / "runs" / "rulebooks" / "tokenmaxxxer-core"
+                    managed_sha = make_repo(managed, "managed")
+
+                    v = spawn.core_version()
+                    self.assertIn(managed_sha, v)
+                    self.assertIn("on-the-record 클론", v)
+                    self.assertNotIn(sibling_sha, v)
+                finally:
+                    spawn.ROOT = saved_root
+        finally:
+            for k, val in saved.items():
+                if val is not None:
+                    os.environ[k] = val
 
     def test_core_version_reports_sha_date_and_label_for_local_override(self):
         # 이슈#218: core_root() 는 plugin.json 존재만 보고 sha·신선도는
@@ -115,7 +194,7 @@ class SpawnCmd(unittest.TestCase):
             self.assertNotIn("커밋 안 된 변경", v)
 
     def test_core_version_reports_unknown_without_network_when_nothing_found(self):
-        # 로컬 후보 셋 + 관리 클론까지 전부 없을 때 core_version() 은
+        # 로컬 후보 둘 + 관리 클론까지 전부 없을 때 core_version() 은
         # core_root() 처럼 halt 하지 않고(로깅용이라 halt 는 core_root() 의
         # 몫), 그렇다고 core_root() 처럼 새로 clone 을 시도하지도 않는다.
         saved = {k: os.environ.pop(k, None)

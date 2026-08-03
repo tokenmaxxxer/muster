@@ -1780,14 +1780,13 @@ def ledger_write(entry: dict) -> Path:
 
 def _core_candidates() -> list[tuple[str, Path]]:
     """core_root() 가 순서대로 보는 로컬 오버라이드 후보 (라벨, 경로).
-    관리 클론(runs/rulebooks/tokenmaxxxer-core)은 이 목록 밖 — 셋 다
+    관리 클론(runs/rulebooks/tokenmaxxxer-core)은 이 목록 밖 — 둘 다
     없을 때만 core_root() 가 그리로 떨어지는 별도 단계라 후보가 아니다.
     """
     return [
         ("TOKENMAXXXER_CORE", os.environ.get("TOKENMAXXXER_CORE")),
         ("TOKENMAXXXER_RULEBOOKS/tokenmaxxxer-core",
          "$TOKENMAXXXER_RULEBOOKS/tokenmaxxxer-core"),
-        ("형제 디렉터리", str(ROOT.parent / "tokenmaxxxer-core")),
     ]
 
 
