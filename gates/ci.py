@@ -41,12 +41,16 @@ def _pr_head_ref(repo: Path, pr: int) -> str | None:
 
 
 def check(repo: Path, pr: int | None = None, issue: int | None = None,
-          phase: str = "phase1") -> list[str]:
+          phase: str | None = None) -> list[str]:
     """차단 사유 목록. 비어 있으면 통과."""
     bad = [f"보호 경로 변경: {f}" for f in gates.changed_files(repo)
            if gates.is_protected(f)]
     if pr is not None and issue is not None:
-        bad += pr_reference.check(repo, pr, issue, phase)
+        if phase is None:
+            bad.append("--phase가 필요하다(phase1|phase2) — 생략하면 phase-2 "
+                       "검사가 조용히 건너뛰어진다")
+        else:
+            bad += pr_reference.check(repo, pr, issue, phase)
     if pr is not None:
         branch = _pr_head_ref(repo, pr)
         if branch is None:
@@ -87,7 +91,7 @@ def main() -> int:
     repo = Path(positional[0] if positional else ".").resolve()
     pr = int(opts["pr"]) if "pr" in opts else None
     issue = int(opts["issue"]) if "issue" in opts else None
-    phase = opts.get("phase", "phase1")
+    phase = opts.get("phase")
     try:
         bad = check(repo, pr, issue, phase)
     except RuntimeError as e:

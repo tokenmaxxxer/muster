@@ -18,6 +18,7 @@ import spawn
 import pr_reference
 import closure_sweep
 import ci
+import flows
 
 
 def _board(td: str, subject: str, **roles: str) -> Path:
@@ -628,6 +629,98 @@ def t_pr_reference_phase2_requires_closes():
     assert bad2, bad2
 
 
+def t_pr_reference_phase2_plan_none_regression_unaffected():
+    # issue-228 요구 (a): plan 인자를 안 주거나 None 이면 기존 동작 그대로.
+    assert pr_reference.check_body(126, "Closes #126", "phase2", plan=None) == []
+    bad = pr_reference.check_body(126, "see #126", "phase2", plan=None)
+    assert bad, bad
+
+
+def t_pr_reference_phase2_incomplete_steps_with_closes_blocks():
+    # 실물 이슈-228 자기 자신의 실행 계획 형태(두 스텝 다 미완) — 변경 전
+    # check_body 는 plan 을 아예 몰라 Closes 만 있으면 무조건 통과시켰다.
+    # 이 이슈가 고치는 조기 종결 결함의 실물 재현 케이스(issue-228 실측).
+    issue_body = (
+        "## 실행 계획\n"
+        "- [ ] step 1  implementation\n"
+        "- [ ] step 2  execution-observation\n"
+    )
+    plan = flows._plan_from_body(issue_body)
+    bad = pr_reference.check_body(228, "Closes #228", "phase2", plan)
+    assert bad and "미완 스텝" in bad[0], bad
+
+
+def t_pr_reference_phase2_incomplete_steps_without_closes_passes():
+    issue_body = (
+        "## 실행 계획\n"
+        "- [ ] step 1  implementation\n"
+        "- [ ] step 2  execution-observation\n"
+    )
+    plan = flows._plan_from_body(issue_body)
+    assert pr_reference.check_body(228, "no closing keyword here", "phase2", plan) == []
+
+
+def t_pr_reference_phase2_only_last_step_incomplete_with_closes_passes():
+    # 실물 이슈-218/이슈-222/core 이슈-90 형태: step 1 완료, 마지막 step 2 만 미완.
+    issue_body = (
+        "## 실행 계획\n"
+        "- [x] step 1  implementation\n"
+        "- [ ] step 2  execution-observation\n"
+    )
+    plan = flows._plan_from_body(issue_body)
+    assert pr_reference.check_body(218, "Closes #218", "phase2", plan) == []
+
+
+def t_pr_reference_phase2_only_last_step_incomplete_without_closes_blocks():
+    issue_body = (
+        "## 실행 계획\n"
+        "- [x] step 1  implementation\n"
+        "- [ ] step 2  execution-observation\n"
+    )
+    plan = flows._plan_from_body(issue_body)
+    bad = pr_reference.check_body(218, "see #218", "phase2", plan)
+    assert bad, bad
+
+
+def t_pr_reference_phase2_fenced_closes_still_blocks_when_incomplete():
+    # 요구 3 회귀 가드: GitHub 은 코드펜스 안 인용도 파싱하므로, 계획에 미완
+    # 스텝이 남은 상태에서 펜스 안 Closes 인용도 여전히 차단해야 한다.
+    issue_body = (
+        "## 실행 계획\n"
+        "- [ ] step 1  implementation\n"
+        "- [ ] step 2  execution-observation\n"
+    )
+    plan = flows._plan_from_body(issue_body)
+    body = "설명 중 인용:\n```\nCloses #228\n```\n"
+    bad = pr_reference.check_body(228, body, "phase2", plan)
+    assert bad, bad
+
+
+def t_pr_reference_phase2_reverse_checkbox_order_blocks():
+    # 실물 이슈-197: 닫힌 이슈인데 먼저 나오는 step 1 이 여전히 [ ], 더 나중
+    # step 2 가 [x] 인 역순 상태로 남아 있다 — 유일한 미완 스텝(step 1)이
+    # 마지막 스텝이 아니므로, 체크박스 저작 누락 상황에서도 fail-closed 로
+    # 여전히 차단돼야 한다.
+    issue_body = (
+        "## 실행 계획\n"
+        "- [ ] step 1  implementation\n"
+        "- [x] step 2  execution-observation\n"
+    )
+    plan = flows._plan_from_body(issue_body)
+    bad = pr_reference.check_body(197, "Closes #197", "phase2", plan)
+    assert bad, bad
+
+
+def t_pr_reference_phase2_single_step_plan_done_requires_closes():
+    # 실물 core 이슈-88 형태: 단일 스텝 계획, 이미 완료 — incomplete 이 비어
+    # 있으므로 plan 없음과 같은 방향(Closes 요구)으로 그대로 떨어진다.
+    issue_body = "## 실행 계획\n- [x] step 1  implementation\n"
+    plan = flows._plan_from_body(issue_body)
+    assert pr_reference.check_body(88, "Closes #88", "phase2", plan) == []
+    bad = pr_reference.check_body(88, "see #88", "phase2", plan)
+    assert bad, bad
+
+
 def t_closure_sweep_closed_issue_open_pr_violates():
     kind = closure_sweep.classify("CLOSED", "OPEN", "see #135", 135)
     assert kind == closure_sweep.OPEN_PR_ON_CLOSED_ISSUE, kind
@@ -946,6 +1039,16 @@ def t_ci_check_wires_record_fulfils_diff():
                              ops=[])
         bad = ci.check(work)
         assert any("delete docs/foo.md" in b for b in bad), bad
+
+
+def t_ci_check_missing_phase_with_pr_and_issue_blocks():
+    # issue-228 인접 결함: --pr/--issue 는 주고 --phase 를 생략하면, 변경 전
+    # ci.check()는 조용히 phase1 로 떨어져 이 이슈가 고치는 phase-2 차단
+    # 로직 자체가 결코 발동하지 않았다 — 무음 스킵 회귀 가드.
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-1", "coding", "---\nkind: x\n---\n\n본문\n")
+        bad = ci.check(work, pr=999999, issue=1)
+        assert any("--phase" in b for b in bad), bad
 
 
 if __name__ == "__main__":
