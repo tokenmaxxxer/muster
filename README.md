@@ -510,6 +510,9 @@ The comparison base is the default branch `origin/HEAD` points at. `GATE_BASE` o
 python3 test_gates.py
 ```
 
+`python3 -m pytest`도 `pytest.ini`(`python_functions = test_* t_*`) 덕분에
+`test_gates.py`의 `t_*` 케이스를 포함해 전체 스위트를 수집·실행한다.
+
 ## Open
 
 - **Who runs next is orchestrator judgment, not a routing table.** (issue #120)
