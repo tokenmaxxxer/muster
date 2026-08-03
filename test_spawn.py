@@ -951,6 +951,203 @@ class IsNewCommit(unittest.TestCase):
             self.assertTrue(spawn._is_new_commit(td, before_head, after_head))
 
 
+class WorkspaceSyncFailClosed(unittest.TestCase):
+    """issue #221: fetch fail-closed + 재사용 브랜치 origin 트래킹 실 git 회귀.
+
+    mock.patch.object 로 issue_workspace/checkout_issue_branch 를 대체하는
+    기존 Ledger/IssueScopedPrompt/EventReporting 테스트들과 달리, 여기는 실
+    git 저장소 두 개(origin 역할 + 그걸 clone 한 work_dir)로 함수 자체의
+    동작을 검사한다.
+    """
+
+    def _git(self, cwd, *a):
+        return subprocess.run(["git", "-C", str(cwd), *a],
+                              capture_output=True, text=True)
+
+    def _init_repo(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        self._git(path, "init", "-q")
+        self._git(path, "config", "user.email", "t@t.t")
+        self._git(path, "config", "user.name", "t")
+
+    def test_fetch_halts_on_nonzero_returncode(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "work"
+            self._init_repo(work)
+            (work / "a.txt").write_text("x")
+            self._git(work, "add", "a.txt")
+            self._git(work, "commit", "-q", "-m", "init")
+            # 존재하지 않는 origin 경로 — 실제 fetch 가 non-zero 로 실패한다.
+            self._git(work, "remote", "add", "origin", "/no/such/path-xyz")
+            with self.assertRaises(SystemExit):
+                spawn._fetch_or_halt(str(work), "test-label")
+
+    def test_fetch_halts_on_exit_zero_with_failed_to_store_stderr(self):
+        # core issue-90 실측 재현: fetch 가 stderr 에 "failed to store"를
+        # 남기고도 exit 0 으로 끝나는 케이스는 실 git 으로 결정론적으로
+        # 재현할 수 없어(개별 ref 갱신 실패는 레이스/서버 상태 의존), fetch
+        # 를 가로채는 실행 가능한 wrapper 로 그 정확한 관측 결과(stdout
+        # 없음, stderr 에 그 문구, returncode 0)를 만든다 — 이 프로세스가
+        # 실제로 실행되고 실제로 반환하는 실 subprocess 호출이라는 점에서
+        # Python mock 과 다르다.
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "work"
+            self._init_repo(work)
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            git_wrapper = fake_bin / "git"
+            git_wrapper.write_text(
+                "#!/bin/sh\n"
+                "for a in \"$@\"; do\n"
+                "  if [ \"$a\" = fetch ]; then\n"
+                "    echo 'failed to store: 100001' 1>&2\n"
+                "    exit 0\n"
+                "  fi\n"
+                "done\n"
+                "exit 1\n"
+            )
+            git_wrapper.chmod(0o755)
+            old_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            try:
+                with self.assertRaises(SystemExit):
+                    spawn._fetch_or_halt(str(work), "test-label")
+            finally:
+                os.environ["PATH"] = old_path
+
+    def test_set_head_attempted_even_when_fresh_clone_fetch_fails(self):
+        # hunt 발견(composition-regression stance): _fetch_or_halt 가 halt
+        # 하기 전에 after=(remote set-head) 를 먼저 시도하지 않으면, 신규
+        # clone 의 첫 fetch 가 실패할 때마다 origin/HEAD 정정 기회를 영영
+        # 잃는다 — 재사용 분기는 set-head 를 다시 안 부른다. fetch 만
+        # 실패시키고 나머지(clone/remote/set-head)는 real git 에 위임하는
+        # wrapper 로, halt 되고도 set-head 는 실제로 실행됐는지 검사한다.
+        real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
+        with tempfile.TemporaryDirectory() as td:
+            github = Path(td) / "github"
+            src = Path(td) / "src"
+            self._init_repo(github)
+            (github / "a.txt").write_text("x")
+            self._git(github, "add", "a.txt")
+            self._git(github, "commit", "-q", "-m", "init")
+            self._git(github, "branch", "-m", "main")
+
+            r = subprocess.run(["git", "clone", "-q", str(github), str(src)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self._git(src, "config", "user.email", "t@t.t")
+            self._git(src, "config", "user.name", "t")
+            self._git(src, "checkout", "-q", "-b", "feature-wip")
+
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            git_wrapper = fake_bin / "git"
+            git_wrapper.write_text(
+                "#!/bin/sh\n"
+                "for a in \"$@\"; do\n"
+                "  if [ \"$a\" = fetch ]; then\n"
+                "    echo 'failed to store: 100001' 1>&2\n"
+                "    exit 0\n"
+                "  fi\n"
+                "done\n"
+                f"exec {real_git} \"$@\"\n"
+            )
+            git_wrapper.chmod(0o755)
+
+            work_base = Path(td) / "workbase"
+            old_path = os.environ.get("PATH", "")
+            old_base = os.environ.get("MUSTER_WORK_DIR")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            os.environ["MUSTER_WORK_DIR"] = str(work_base)
+            try:
+                with self.assertRaises(SystemExit):
+                    spawn.issue_workspace(str(src), 999904, "implementation")
+            finally:
+                os.environ["PATH"] = old_path
+                if old_base is None:
+                    os.environ.pop("MUSTER_WORK_DIR", None)
+                else:
+                    os.environ["MUSTER_WORK_DIR"] = old_base
+
+            work_dirs = list(work_base.glob("*-issue-999904-implementation"))
+            self.assertEqual(len(work_dirs), 1, work_dirs)
+            head = subprocess.run(
+                ["git", "-C", str(work_dirs[0]), "symbolic-ref", "--short",
+                 "refs/remotes/origin/HEAD"],
+                capture_output=True, text=True).stdout.strip()
+            self.assertEqual(head, "origin/main")
+
+    def test_checkout_tracks_origin_only_branch(self):
+        with tempfile.TemporaryDirectory() as td:
+            origin = Path(td) / "origin"
+            work = Path(td) / "work"
+            self._init_repo(origin)
+            (origin / "a.txt").write_text("base")
+            self._git(origin, "add", "a.txt")
+            self._git(origin, "commit", "-q", "-m", "base commit")
+            base_branch = subprocess.run(
+                ["git", "-C", str(origin), "symbolic-ref", "--short", "HEAD"],
+                capture_output=True, text=True).stdout.strip()
+
+            issue, role = 999901, "implementation"
+            br = f"issue-{issue}/{role}"
+            self._git(origin, "checkout", "-q", "-b", br)
+            (origin / "b.txt").write_text("origin-only work")
+            self._git(origin, "add", "b.txt")
+            self._git(origin, "commit", "-q", "-m", "origin-only commit")
+            self._git(origin, "checkout", "-q", base_branch)
+
+            r = subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self._git(work, "config", "user.email", "t@t.t")
+            self._git(work, "config", "user.name", "t")
+
+            # 사전 조건: 로컬엔 아직 br 브랜치가 없다.
+            self.assertNotEqual(
+                self._git(work, "rev-parse", "--verify", "-q", br).returncode, 0)
+
+            result = spawn.checkout_issue_branch(str(work), issue, role)
+            self.assertEqual(result, br)
+            log = self._git(work, "log", "--oneline", br).stdout
+            self.assertIn("origin-only commit", log)
+
+    def test_checkout_preserves_existing_local_branch_with_unpushed_commit(self):
+        with tempfile.TemporaryDirectory() as td:
+            origin = Path(td) / "origin"
+            work = Path(td) / "work"
+            self._init_repo(origin)
+            (origin / "a.txt").write_text("base")
+            self._git(origin, "add", "a.txt")
+            self._git(origin, "commit", "-q", "-m", "base commit")
+            base_branch = subprocess.run(
+                ["git", "-C", str(origin), "symbolic-ref", "--short", "HEAD"],
+                capture_output=True, text=True).stdout.strip()
+
+            r = subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self._git(work, "config", "user.email", "t@t.t")
+            self._git(work, "config", "user.name", "t")
+
+            issue, role = 999902, "implementation"
+            br = f"issue-{issue}/{role}"
+            self._git(work, "checkout", "-q", "-b", br)
+            (work / "c.txt").write_text("local wip")
+            self._git(work, "add", "c.txt")
+            self._git(work, "commit", "-q", "-m", "local unpushed commit")
+            self._git(work, "checkout", "-q", base_branch)
+            before = self._git(work, "rev-parse", br).stdout.strip()
+
+            result = spawn.checkout_issue_branch(str(work), issue, role)
+            self.assertEqual(result, br)
+            after = self._git(work, "rev-parse", br).stdout.strip()
+            self.assertEqual(before, after)
+            log = self._git(work, "log", "--oneline", br).stdout
+            self.assertIn("local unpushed commit", log)
+
+
 class Ledger(unittest.TestCase):
     def test_appends_jsonl(self):
         with tempfile.TemporaryDirectory() as td:
