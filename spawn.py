@@ -24,6 +24,7 @@ import fcntl
 import hashlib
 import json
 import os
+import stat
 import string
 import subprocess
 import sys
@@ -2143,7 +2144,19 @@ def main() -> int:
         for e in roster.values():
             if _alive(e.get("pid", 0)):
                 live[Path(e["work"]).resolve()] = e
-        removed = kept = 0
+        def _chmod_retry(func, path, exc_info):
+            # Go 모듈 캐시 등 읽기 전용 디렉터리/파일에서 rmtree 가
+            # PermissionError 로 죽는 문제(이슈 #229). POSIX 에서 파일
+            # 삭제는 그 파일 자체가 아니라 부모 디렉터리의 쓰기 권한이
+            # 좌우하므로, 실패한 경로와 그 부모 모두에 쓰기 권한을 주고
+            # 한 번 재시도한다.
+            os.chmod(path, stat.S_IWRITE)
+            parent = os.path.dirname(path)
+            if parent:
+                os.chmod(parent, stat.S_IWRITE | stat.S_IEXEC | stat.S_IREAD)
+            func(path)
+
+        removed = kept = failed = 0
         for w in sorted(wb.glob("*")) if wb.is_dir() else []:
             if not (w / ".git").is_dir():
                 continue
@@ -2166,17 +2179,30 @@ def main() -> int:
                 kept += 1
                 continue
             import shutil
-            shutil.rmtree(w)
-            # 세대별 로그(`.session.<ts>.<pid>.log`, 이슈 #192)와
-            # `.events.jsonl`/`.events.offset`/`.task.txt`/
-            # `.respawn-claim-*` 같은 형제 산출 파일을 전부 글롭으로 잡는다 —
-            # 접미사를 하나씩 나열하면 다음에 하나 더 생길 때 또 빠뜨린다.
-            for sibling in w.parent.glob(w.name + ".*"):
-                if sibling.is_file():
-                    sibling.unlink()
+            try:
+                if sys.version_info >= (3, 12):
+                    shutil.rmtree(w, onexc=_chmod_retry)
+                else:
+                    shutil.rmtree(
+                        w, onerror=lambda func, path, exc_info: _chmod_retry(
+                            func, path, exc_info))
+                # 세대별 로그(`.session.<ts>.<pid>.log`, 이슈 #192)와
+                # `.events.jsonl`/`.events.offset`/`.task.txt`/
+                # `.respawn-claim-*` 같은 형제 산출 파일을 전부 글롭으로 잡는다 —
+                # 접미사를 하나씩 나열하면 다음에 하나 더 생길 때 또 빠뜨린다.
+                for sibling in w.parent.glob(w.name + ".*"):
+                    if sibling.is_file():
+                        sibling.unlink()
+            except Exception as ex:
+                print(f"실패 (삭제 중 예외): {w.name}  [{ex}]")
+                failed += 1
+                continue
             print(f"지움: {w.name}")
             removed += 1
-        print(f"정리 끝 — 지움 {removed}, 남김 {kept}")
+        summary = f"정리 끝 — 지움 {removed}, 남김 {kept}"
+        if failed:
+            summary += f", 실패 {failed}"
+        print(summary)
         return 0
     if a.role == "update":
         # 룰북을 원격 최신으로. 인자를 비우면 전부.
