@@ -15,7 +15,20 @@ files:
 Issue #246 collects the three residual gaps left open by
 `docs/issue-235/reports/execution-observation.md` (Findings 1, 2, 3)
 after issue #235/PR #237 fixed the refusal classifier's corroboration
-against `permission_denials`:
+against `permission_denials`. This revision incorporates the
+scope-expansion comment the orchestrator relayed onto the issue after
+PR #253's original proposal: (1) the suppression Defect 3 exposed —
+a classified candidate in a session silently swallowing the
+`unclassified-refusal` fallback that an unrelated, genuinely
+uncorrelated denial in the same session should have gotten — is now
+in-scope to *fix*, not just to pin as an accepted, documented
+limitation; the fix must include a per-candidate correlation design;
+(2) the `unverified-refusal` event-type reading (new label on an
+already-observed signal, not new instrumentation — same precedent as
+#235's `unclassified-refusal`) is confirmed, unchanged; (3) the
+dedup key's text component gets an explicit normalization/truncation
+rule instead of an unspecified "detail or a normalized/truncated form
+of it."
 
 1. Three input shapes all currently produce "zero refusal events",
    indistinguishable from "no denial happened": **S1** the child
@@ -48,10 +61,16 @@ against `permission_denials`:
    claims: its spurious text never classifies at all (the anchored
    `_GATE_HOOK_RE` at `spawn.py:1491` doesn't match mid-text, and no
    harness/sandbox pattern matches either), so nothing is ever buffered
-   and the fallback is reached trivially. The issue asks to replace or
-   augment this fixture with a spurious candidate that bypasses the
-   anchor (matches an unanchored layer-2/3 pattern) and actually
-   exercises the suppression path at `spawn.py:2805`.
+   and the fallback is reached trivially. Worse, the suppression it
+   claims to guard against is real: `spawn.py:2805`'s
+   `if not refusals_seen:` gate is a single session-wide boolean — the
+   moment *any* candidate classifies (spurious or not, correlated or
+   not), the `unclassified-refusal` fallback is permanently skipped for
+   the rest of that session, silently losing any other, genuinely
+   uncorrelated denial. The scope-expansion comment asks to fix this
+   suppression itself (per-candidate correlation, not a session-wide
+   boolean), and to replace the fixture with one that pins the
+   corrected, non-suppressing behavior.
 
 ## Constraints
 
@@ -61,9 +80,16 @@ against `permission_denials`:
   terminal `result` line's `permission_denials`) — no new log line, CLI
   flag, or hook output. A new internal *event type* string written to
   the existing `events.jsonl` (as `unclassified-refusal` already was by
-  #235) is not new instrumentation under this reading — it labels a
-  signal already derivable from existing stream content, the same
-  precedent #235 itself relied on.
+  #235, and as `unverified-refusal` reuses the same precedent) is not
+  new instrumentation under this reading — it labels a signal already
+  derivable from existing stream content, the same precedent #235
+  itself relied on. Reading `tool_use_id` off `tool_result` blocks and
+  `id`/`name` off `tool_use` blocks for the per-candidate correlation
+  design (Rationale, Defect 3) is the same category: both fields are
+  already present on lines `_spawn_one` already parses with
+  `json.loads` for other purposes on the same line — no new stream, no
+  new field emitted anywhere, only two previously-unread fields of an
+  already-parsed object.
 - `watch` cadence/interval unchanged — `_await_bounded` is untouched.
 - No arbitrary pattern-set expansion — `_GATE_HOOK_RE`, `_GATE_DENY_RE`,
   `_HARNESS_REFUSAL_PATTERNS`, `_SANDBOX_REFUSAL_PATTERNS` are not
@@ -112,8 +138,8 @@ known failure mode with a known fix — narrow the key to the content that
 actually varies. This repo's own first-write-wins buffer already makes
 that failure concrete and unfixture-tested (survey.md's Defect 2
 section), so "document as intended" would mean codifying a bug as a
-feature. The fix folds the classified text (or a normalized/truncated
-form of it) into the dedup key for all three layers, and keys layer 1 on
+feature. The fix folds the classified text (normalized and truncated per the
+rule below) into the dedup key for all three layers, and keys layer 1 on
 the full hook path rather than `Path(...).stem` alone (stem is kept only
 for the human-facing `detail["gate"]` field) — so two different hook
 scripts sharing a filename stem, and two different same-layer refusal
@@ -123,27 +149,74 @@ existing "same detail → one event" intent
 `docs/issue-235/reports/execution-observation.md:394-420`) is preserved
 because identical detail still produces the identical key.
 
-**Defect 3 — replace the fixture, and pin the actual (accepted)
-suppression behavior rather than a behavior the code doesn't have.**
-The alternative considered — leave the existing fixture in place, since
-its assertions currently pass — is rejected because a passing assertion
-that never reaches the code path it claims to test is worse than no
-test: it reads as coverage that is not there
-(`docs/issue-235/reports/execution-observation.md`'s Finding 1, and this
-proposal's own survey, both independently confirm the fixture's
-spurious text classifies to `None`). The replacement fixture uses
-spurious text that matches an unanchored `_HARNESS_REFUSAL_PATTERNS`/
-`_SANDBOX_REFUSAL_PATTERNS` entry (so it *does* populate
-`pending_refusals`/`refusals_seen`) while being textually unrelated to a
-second, genuinely-unclassifiable denial in the same session. Per
-Finding 1's own root-cause analysis, the correct assertion for that
-input is that the fallback **is** suppressed — fixing the suppression
-itself would need per-candidate correlation, which Finding 1's own
-action item already places outside this issue's boundary (and outside
-#246's `## 제약`). The fixture therefore becomes a pin of a documented,
-accepted limitation (cross-referenced to Finding 1 in a comment), not a
-regression test for behavior this issue is not fixing — and is renamed
-so its assertion direction matches its name.
+**Dedup key text — normalization/truncation rule (scope item 3),
+rejecting a second, independent truncation length.** The alternative
+considered — add a new max-length constant for the key, separate from
+the `[:300]` already applied to `detail` — is rejected: it would create
+two independently-tunable truncation points for what is conceptually
+the same text, the kind of new parameter issue #246's own `## 제약`
+(no arbitrary expansion) argues against. The rule instead reuses the
+*same* string already computed for `detail` (survey.md's Defect 2
+addendum): `_classify_refusal_text`'s existing
+`text[deny_m.end():].strip()[:300]` (gate `reason`) and
+`text.strip()[:300]` (harness/sandbox `detail`) become
+`" ".join(text[...].strip().split())[:300]` — collapse all internal
+whitespace runs (including the `\n` `_tool_result_text`'s
+`"\n".join(parts)` introduces when a `tool_result`'s content arrives as
+multiple text blocks) to single ASCII spaces, *then* truncate to the
+existing 300-char limit, so the budget is spent on content rather than
+whitespace. Case is deliberately left untouched (no `.lower()`): folding
+case risks collapsing two genuinely distinct reason strings that differ
+only in case, a correctness cost normalization should not buy. This one
+change updates the display `detail`/`reason` string and the key's text
+component identically — they were already meant to be the same string;
+the key had simply never inherited detail's existing normalization.
+
+**Defect 3 — fix the suppression with per-candidate correlation by
+`tool_use_id`/`tool_name`, rejecting both "pin it as an accepted
+limitation" and "keep the session-wide `refusals_seen` boolean."**
+PR #253's original proposal treated Finding 1's suppression as outside
+this issue's boundary and proposed only pinning it via a renamed
+fixture; the orchestrator's scope-expansion comment explicitly rejects
+that alternative — it is not an accepted limitation, it is a fixable
+bug within #246's own constraint set (no new instrumentation, buffer-
+then-flush preserved), because the fields needed to fix it are already
+in the stream (survey.md's mechanism check; Correlation Identifier
+idiom, `docs/issue-246/reports/implementation/scout-brief.md` Angle 3).
+The second alternative considered — keep `refusals_seen`/
+`pending_refusals` exactly as-is and only special-case "exactly one
+spurious candidate + one real denial" in the new fixture — is also
+rejected: it would fix the one shape the fixture exercises while leaving
+the root cause (a single session-wide boolean standing in for N
+independent per-candidate confirmations) in place for every other
+N-candidates-vs-M-denials combination, which is precisely the failure
+mode Angle 3's "multiple in-flight conversations" premise names. The
+chosen fix: tag every `pending_refusals` entry with the `tool_name` of
+the `tool_use` block it correlates to (via `tool_use_id`, already on
+each `tool_result` block and already matched against each `tool_use`
+block's `id` — both fields the stream already carries, per the
+Constraints section); at flush time, build a `Counter` of `tool_name`
+over `permission_denials` and, for each pending candidate, only emit its
+real layer type and decrement the counter if its `tool_name` has a
+remaining count — otherwise the candidate does not consume a denial
+slot. Any `permission_denials` count left over after all pending
+candidates are checked (including the zero-candidates case) flushes as
+`unclassified-refusal`/`unverified-refusal`, replacing the single
+`if not refusals_seen:` gate. This is what stops the suppression: a
+spurious candidate whose `tool_name` doesn't match any denial no longer
+"uses up" the session's one reportable-event slot, because there no
+longer is one shared slot — each candidate and each denial is checked
+independently. A candidate with no resolvable `tool_use_id` (e.g. lost
+to a partial stream, composing with Defect 1) is treated the same as a
+non-matching `tool_name` — conservatively never confirmed, per Defect
+1's own "don't fabricate confidence" stance — so it likewise cannot mask
+a real, uncorrelated denial. The replacement fixture (scope item 1's own
+instruction) now asserts the corrected, **non-suppressing** property:
+a spurious candidate that matches an unanchored layer-2/3 pattern but
+whose `tool_name` doesn't match the session's `permission_denials`
+coexists with a second, genuinely uncorrelated denial, and the
+fallback for that second denial still fires — restoring the original
+issue text's non-suppression assertion that PR #253 had walked back.
 
 ## What will be done
 
@@ -160,12 +233,35 @@ so its assertion direction matches its name.
    without one and `pending_refusals` is non-empty, flush those entries
    as `unverified-refusal` — covering S1 (crash/kill/truncation) and S3
    (malformed terminal JSON) with the same mechanism.
-3. **`spawn.py`, dedup keys (`:1529-1539`, `:2825-2826`):** fold the
-   classified detail/reason text (or a normalized/truncated form) into
-   the dedup key for all three layers; key layer 1 on the hook's full
-   path rather than `Path(...).stem` alone, keeping `stem` only for the
-   `detail["gate"]` display field.
-4. **`test_spawn.py`:** add fixtures for (a) EOF/crash with a pending
+3. **`spawn.py`, `_classify_refusal_text` (`:1520-1540`):** change the
+   gate `reason` and harness/sandbox `detail` extraction from
+   `....strip()[:300]` to `" ".join(...strip().split())[:300]` (collapse
+   internal whitespace/newlines, then truncate) — this string already
+   feeds both the display detail and (after step 5) the dedup key, so
+   one change covers both.
+4. **`spawn.py`, dedup keys (`:1529-1539`, `:2825-2826`):** fold the
+   now-normalized classified detail/reason text into the dedup key for
+   all three layers; key layer 1 on the hook's full path rather than
+   `Path(...).stem` alone, keeping `stem` only for the `detail["gate"]`
+   display field.
+5. **`spawn.py`, per-candidate correlation (`:2794-2826` region):** (a)
+   in the `type=="assistant"` branch, record every `tool_use` block's
+   `id`→`name` (not just `Write`/`Edit`/`Bash`) into a session-local
+   dict; (b) in the `type=="user"` branch, read each `tool_result`
+   block's `tool_use_id`, resolve it through that dict, and store the
+   resolved `tool_name` (or `None` if unresolved) alongside
+   `(ev_type, detail)` in `pending_refusals`; (c) replace the flush
+   loop's `if key in refusals_seen: continue` / `if not refusals_seen:`
+   pair with: build `Counter(d.get("tool_name") for d in denials if
+   isinstance(d, dict) and d.get("tool_name"))`; for each pending
+   candidate, emit its real `ev_type` and decrement the counter only if
+   its stored `tool_name` is set and the counter has a remaining count
+   for it; leave non-matching/unresolved candidates unflushed as their
+   classified layer type; after all candidates are checked, flush one
+   `unclassified-refusal`/`unverified-refusal` (per the branch, step 1/2)
+   if the counter still has any positive remainder. This replaces the
+   single session-wide `if not refusals_seen:` gate.
+6. **`test_spawn.py`:** add fixtures for (a) EOF/crash with a pending
    classified candidate and no terminal result line →
    `unverified-refusal`; (b) a terminal result line with
    `permission_denials` as `None`/absent and as a truthy non-list (e.g.
@@ -175,31 +271,40 @@ so its assertion direction matches its name.
    same-layer texts → still collapse to one (regression guard for the
    existing "same detail once" intent); (e) two hook paths with the
    same filename stem in different directories → distinct events, not
-   collapsed.
-5. **`test_spawn.py`:** replace
+   collapsed; (f) two same-layer texts differing only in whitespace/an
+   embedded newline (multi-block `tool_result` content) → still collapse
+   to one (regression guard for the new normalization rule).
+7. **`test_spawn.py`:** replace
    `test_spurious_marker_match_does_not_suppress_real_denial_fallback`
-   with a fixture whose spurious text matches an unanchored layer-2/3
-   pattern and is uncorrelated with a second, unclassifiable genuine
-   denial in the same session; assert the fallback is suppressed
-   (matching the real, accepted behavior), with a comment citing
-   `docs/issue-235/reports/execution-observation.md` Finding 1 for why
-   this is a documented limitation and not a bug this issue fixes.
-6. Run `python3 -m pytest test_spawn.py` (or the project's existing test
+   with a fixture asserting the corrected **non-suppression** property:
+   a spurious candidate matching an unanchored layer-2/3 pattern (whose
+   `tool_name` does not match the session's `permission_denials`) plus a
+   second, genuinely uncorrelated denial in the same session — assert
+   the fallback for the second denial **fires** (not suppressed), and
+   the spurious candidate's own layer event does **not** fire. Add a
+   companion fixture where the spurious candidate's `tool_name` *does*
+   match a `permission_denials` entry — assert it correlates and fires
+   as its real layer type, confirming the Counter-based match isn't
+   vacuously permissive.
+8. Run `python3 -m pytest test_spawn.py` (or the project's existing test
    entry point) once, full suite, before considering phase 2 complete.
 
 ## Out of scope
 
-- Fixing the suppression compounding itself (a spurious classified
-  candidate suppressing the generic fallback for an unrelated, unclassifiable
-  genuine denial) — Finding 1's own action item ties this to
-  per-candidate correlation or an anchored layer-2/3 form, both outside
-  #246's constraint set. Defect 3's fixture documents this limitation;
-  it does not remove it.
-- Session-level (vs. per-candidate) corroboration — a real denial and an
-  unrelated classified candidate can still both flush once `denials` is
-  non-empty; this is `docs/issue-235/reports/execution-observation.md`
-  Finding 2 / `docs/issue-235/reports/implementation.md`'s finding 2, and
-  #246 does not name it.
+- Correlating beyond `tool_name` + count — if a session has two denied
+  calls to the *same* tool (e.g. two denied `Write`s) alongside two
+  distinct classified candidates for that tool, the Counter-based match
+  can confirm both by count but cannot tell *which* candidate maps to
+  *which* specific denial entry (`permission_denials` carries no
+  per-entry identifier beyond `tool_name`). This is a real residual gap
+  in the correlation, not silently swept under "session-level" language
+  — it is bounded by what `permission_denials`' existing shape can
+  support without adding a new field to it (which would be new
+  instrumentation).
+- Anchoring `_HARNESS_REFUSAL_PATTERNS`/`_SANDBOX_REFUSAL_PATTERNS`
+  themselves, or otherwise changing which text classifies at all — the
+  fix changes what happens *after* classification (correlation against
+  `permission_denials`), not the classification patterns.
 - Any change to `_GATE_HOOK_RE`, `_GATE_DENY_RE`,
   `_HARNESS_REFUSAL_PATTERNS`, `_SANDBOX_REFUSAL_PATTERNS`, or
   `_await_bounded`'s cadence.
@@ -209,18 +314,26 @@ so its assertion direction matches its name.
 
 ## How you'll know it worked
 
-- The five new/updated fixture groups in `test_spawn.py` (EOF/crash
+- The seven new/updated fixture groups in `test_spawn.py` (EOF/crash
   unverified flush, malformed-`permission_denials` shapes, same-layer
-  dedup masking, hook-stem-collision, and the corrected suppression-path
-  fixture) each fail against the current, unmodified `spawn.py` and pass
-  after the fix — mirroring how issue #235's four regression cases were
-  verified pre/post-fix
+  dedup masking, hook-stem-collision, whitespace-normalization dedup,
+  the corrected non-suppression fixture, and the correlated-spurious
+  companion fixture) each fail against the current, unmodified
+  `spawn.py` and pass after the fix — mirroring how issue #235's four
+  regression cases were verified pre/post-fix
   (`docs/issue-235/reports/implementation.md:151-161`).
+- Specifically for the suppression fix: the replacement for
+  `test_spurious_marker_match_does_not_suppress_real_denial_fallback`
+  asserts `unclassified-refusal`/`unverified-refusal` **does** fire for
+  the second, uncorrelated denial (the property the issue's original
+  text asserted and PR #253's version had walked back to asserting
+  suppression) — this is the pre/post-fix pin for the suppression bug
+  itself, not just a renamed no-op fixture.
 - All previously-passing fixtures in `test_spawn.py` — in particular
   `test_denials_with_no_correlating_tool_result_are_unclassified`,
   `test_zero_denials_session_with_gate_marker_in_error_output_fires_nothing`,
   and the five layer-labeling tests at `test_spawn.py:1461-1612` — still
-  pass unchanged, confirming the three-way `permission_denials` read and
-  the widened dedup key don't regress existing corroboration/labeling
-  behavior.
+  pass unchanged, confirming the three-way `permission_denials` read,
+  the widened/normalized dedup key, and the Counter-based correlation
+  don't regress existing corroboration/labeling behavior.
 - `python3 -m pytest test_spawn.py` run once, full suite, 0 failures.

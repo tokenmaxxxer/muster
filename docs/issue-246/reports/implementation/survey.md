@@ -6,6 +6,18 @@ phase: 1
 
 # Current-state survey — issue-246
 
+## Scope update (발주자 확장, phase-1 재작업)
+
+PR #253의 최초 제안 이후 이슈에 발주자 코멘트로 범위가 확장됐다: (1)
+Defect 3이 노출한 억제(같은 세션의 한 후보가 분류되면, 상관관계 안 되는
+다른 진짜 거부의 `unclassified-refusal` 폴백이 억제되는 현상)를 "수용된
+한계"로 문서화하는 대신 이 이슈 범위에서 고친다 — 건별(per-candidate)
+상관관계 설계 포함; (2) `unverified-refusal` 이벤트 타입 해석(새 계측
+아님, #235의 `unclassified-refusal` 선례와 동일)은 추인 — 변경 없음; (3)
+dedup 키에 포함되는 텍스트의 정규화·절삭 규칙을 명시적으로 기록한다. 이
+문서와 제안서는 이 세 항목 기준으로 갱신됐다. Defect 1의 설계(EOF/형태
+불량 시 `unverified-refusal` flush)는 영향받지 않는다.
+
 ## Where the classifier lives
 
 Single file, unchanged in shape since issue #235/PR #237 (`d187559`):
@@ -82,7 +94,25 @@ session (`test_consecutive_writes_to_same_file_are_deduped` at
 `test_spawn.py:1714` is unrelated — it dedupes `progress` events by
 `file_path`, not refusal-classification keys).
 
-## Defect 3 — regression case (iii) doesn't pin the non-suppression property (issue's 결함 3)
+**Dedup key text — normalization/truncation rule (issue's scope item 3).**
+`_classify_refusal_text` (`spawn.py:1520-1540`) already computes the exact
+string that would become the key's text component: the gate layer's
+`reason = text[deny_m.end():].strip()[:300]` (or `text.strip()[:300]` if
+no `_GATE_DENY_RE` match), and the harness/sandbox layers'
+`text.strip()[:300]`. Two properties of this existing string are
+undocumented and both cause spurious dedup misses today: (1)
+`_tool_result_text` (`spawn.py:1504-1513`) joins multi-block `tool_result`
+content with `"\n".join(parts)` — a denial reason that happens to arrive
+split across two content blocks carries an internal `\n` that a
+logically-identical reason arriving as one block would not, so
+`.strip()[:300]` alone leaves two otherwise-identical reasons keyed
+differently; (2) `.strip()` only removes leading/trailing whitespace, not
+internal whitespace-run variance (e.g. a reason logged with a
+double-space vs. single-space after a colon). Neither is hypothetical —
+both are properties of the *existing* `.strip()[:300]` call, not a new
+input class. No fixture currently exercises either.
+
+## Defect 3 — the suppression itself (issue's 결함 3, now in scope)
 
 `test_spurious_marker_match_does_not_suppress_real_denial_fallback`
 (`test_spawn.py:1576-1593`) uses spurious text that opens with
@@ -93,15 +123,44 @@ live code: `_GATE_HOOK_RE` is anchored (`^`, no `re.MULTILINE`,
 none of `_HARNESS_REFUSAL_PATTERNS`/`_SANDBOX_REFUSAL_PATTERNS`
 (`:1493-1502`) match this text either (no "requires approval", no
 "Operation not permitted", etc.). `_classify_refusal_text` therefore
-returns `None` (`:1540`) and **nothing is ever buffered** — the test
-passes because the fallback path is reached trivially, not because a
-spurious *classified* candidate failed to suppress it. This matches
-`docs/issue-235/reports/execution-observation.md`'s Finding 1 exactly
-(same fixture, same root cause, carried forward unfixed): a companion
-input that classifies to a real layer (e.g. matches an unanchored
-layer-2/3 pattern) while remaining uncorrelated with the genuine denial
-is needed to actually exercise the suppression path at `:2805`
-(`if not refusals_seen:`).
+returns `None` (`:1540`) and the current fixture never even reaches the
+suppression path — the test passes trivially, not because a spurious
+*classified* candidate failed to suppress the fallback.
+
+**The actual suppression mechanism** lives at `spawn.py:2798-2804`: the
+`type=="result"` branch flushes every key in `pending_refusals` that
+isn't yet in `refusals_seen`, then at `:2805` gates the
+`unclassified-refusal` fallback on `if not refusals_seen:` — a single
+session-wide boolean. If a session buffers even one classified candidate
+(any layer, any correlation status), that boolean flips true and the
+fallback never fires — including for a *second*, genuinely uncorrelated
+denial in the same session that no candidate ever classified. This is
+the "같은 층의 거부 후보가 앞선 이벤트에 가려져 유실되는 억제" the
+scope-expansion comment names: the flush loop treats "at least one
+classified candidate exists" as "the session's one reportable event is
+accounted for," which is only true when there is exactly one denial per
+session — false the moment two distinct denials (one classifiable, one
+not, or two same-layer ones after Defect 2's key-widening) land in the
+same session.
+
+**Per-candidate correlation, mechanism check.** `permission_denials`
+entries are dicts carrying `tool_name`
+(`test_spawn.py:731,1456,1472,...` — every existing fixture uses
+`{"tool_name": "Write"}`/`{"tool_name": "Bash"}` shape; grep confirms no
+other key is ever populated in a fixture). Confirmed via
+`grep -n "tool_use_id" spawn.py test_spawn.py`: zero hits — the stream's
+`tool_result` blocks carry a `tool_use_id` field in the underlying
+Claude Code stream-json protocol (linking each `tool_result` back to the
+`assistant` message's `tool_use` block that has the same `id` and a
+`name`), but `_spawn_one`'s `type=="assistant"` branch
+(`spawn.py:2831-2846`) currently reads `block.get("name")` only for
+`Write`/`Edit`/`Bash` progress reporting and discards the block's `id`;
+the `type=="user"` branch (`:2814-2826`) never reads
+`block.get("tool_use_id")` at all. Both fields are already present on
+every line already being parsed — reading them is not a new stream, log
+line, or hook output (no new instrumentation), only reading two fields
+of an object already fully parsed by `json.loads(line)` for other
+purposes on the same line.
 
 ## Constraints carried forward (issue's own `## 제약`)
 
@@ -121,11 +180,30 @@ is needed to actually exercise the suppression path at `:2805`
 
 Unlike issue #235's phase-1 (`docs/issue-235/reports/implementation/survey.md:9-27`,
 skipped as pure bugfix because its own `## 요구사항` fixed the exact
-fix shape), issue #246's body names two decisions explicitly rather than
-a single fix shape: (1) 결함 1 offers "구분해 다루거나 ... 명시적으로
-버리는 결정을 문서화" — handle-and-distinguish vs. explicitly-document-
-and-discard; (2) 결함 2 asks to "결정(층당 → detail 당 또는 전체 유지)" —
-move dedup granularity to per-detail, or document keeping the current
-per-layer granularity. Both are genuine open design choices this proposal
-must resolve before phase 2 can build against a frozen contract — this is
-the gap the scout sweep below aims at.
+fix shape), issue #246's body (as expanded by the orchestrator's scope
+comment) names three decisions rather than a single fix shape: (1) 결함
+1 offers "구분해 다루거나 ... 명시적으로 버리는 결정을 문서화" — handle-
+and-distinguish vs. explicitly-document-and-discard; (2) 결함 2 asks to
+"결정(층당 → detail 당 또는 전체 유지)" — move dedup granularity to
+per-detail, or document keeping the current per-layer granularity, plus
+(scope item 3) the normalization/truncation rule for the text folded
+into that key; (3) the scope-expansion comment adds a third: how to
+correlate each buffered candidate against `permission_denials` entries
+so a spurious classified candidate can no longer suppress a genuinely
+uncorrelated denial's fallback (Defect 3). All three are genuine open
+design choices this proposal must resolve before phase 2 can build
+against a frozen contract — decisions (1) and (2) are the gap the
+original scout sweep (Angles 1-2 below) aimed at; decision (3) is new
+and is covered by the re-scout micro-round below.
+
+## Re-scout micro-round — per-candidate correlation (issue's scope item 1)
+
+The scope-expansion comment surfaced a new build decision the original
+scout brief did not cover: *how* to correlate a buffered candidate
+against `permission_denials` so the Defect 3 suppression is fixed rather
+than pinned as accepted. Per the scout directive's re-scout trigger, one
+micro-round ran (single `WebSearch` call, judged, no further deepening —
+saturates immediately since the matching engineering idiom is
+well-established and this repo is not a product-shaped surface, per the
+original scout brief's segment judgment). Finding folded into
+`docs/issue-246/reports/implementation/scout-brief.md` as Angle 3.

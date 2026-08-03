@@ -11,6 +11,12 @@ phase: 1
 딥닝 없이 종료. 소요: 검색 2콜 + 판단 1회, 5스테이지·3분 예산 안에서
 종료.
 
+**Re-scout (phase-1 재작업, 발주자 범위 확장):** 억제 자체를 고치라는
+새 결정("건별 상관관계 설계 포함")이 원래 브리프가 안 덮은 범위라 1
+스테이지 마이크로 라운드 추가(`WebSearch` 1콜) — Angle 3. Judge point
+1회로 즉시 포화(공학 관용구가 이미 표준적으로 확립돼 있고, 세그먼트가
+여전히 non-product라 추가 딥닝이 빌드 결정을 바꾸지 않음).
+
 **세그먼트 판단:** product-shaped 아님 — `spawn.py`의 refusal 분류기는
 사용자가 보는 제품이 아니라 내부 오케스트레이션 스크립트다. 비교할 외부
 "카테고리 best-in-class 제품"이 없어, survey.md가 찾은 두 개의 열린
@@ -52,6 +58,24 @@ Sentry의 이슈 그룹핑 관용구: 기본값은 굵은 단위(스택트레이
 `("sandbox",)`)를 detail(또는 그 정규화된 형태)까지 포함하도록 세분화하는
 쪽이 Sentry 관용구와 같은 방향 — "층당 1회"에서 "동일 detail 당 1회"로.
 
+## Angle 3 — correlation identifier: 비동기 요청·응답을 무엇으로 짝짓는가 (억제 대상, 발주자 확장 결함 3)
+
+Enterprise Integration Patterns 의 Correlation Identifier: 비동기
+메시징에서 응답이 요청과 다른 순서로 돌아올 수 있으므로, 요청 쪽이 심은
+ID를 응답이 그대로 복사해 돌려줘 짝짓는다 — "여러 개의 진행 중 대화가
+동시에 있을 수 있다"는 전제 자체가 핵심이다.
+**Must-be:** 세션 하나에 후보(candidate)가 여럿(분류된 것 N개 +
+`permission_denials` M개)일 수 있다는 전제 위에서, "세션에 뭔가 하나
+분류됐다/거부가 하나라도 있다"는 불리언이 아니라 **각 후보와 각
+denial 을 개별적으로 짝짓는** ID 기반 상관관계가 표준.
+**적용:** 이 저장소는 이미 그 ID를 갖고 있다 — `tool_use_id`(응답 쪽
+`tool_result` 블록)와 그것이 가리키는 `assistant` 메시지 `tool_use`
+블록의 `id`/`name`이 스트림에 이미 있다(survey.md 확인, 새 계측 아님).
+분류된 각 후보를 그 후보가 속한 `tool_use`의 `name`으로 태깅하고,
+`permission_denials`의 `tool_name`과 개수 기준으로 맞춰(각 층 판정을
+독립적으로 확정/미확정 처리) 세션 전체를 하나의 불리언으로 뭉개지 않는
+쪽이 이 관용구와 같은 방향.
+
 ## Adopt / Skip
 
 - **Adopt:** 결함 1 — EOF/크래시로 상관관계가 끝내 안 된 버퍼는 별도
@@ -67,17 +91,28 @@ Sentry의 이슈 그룹핑 관용구: 기본값은 굵은 단위(스택트레이
   사례가 보여주는 "굵은 키가 실제로 갈리는 사건을 뭉갠다"는 신호가 이미
   이 저장소 자체 구조(첫-기록-승리 + 레이어 단위 키)에 그대로 있다 — 근거는
   proposal의 Rationale에 기록.
+- **Adopt (re-scout):** 결함 3/억제 — `tool_use_id`/`tool_name` 기반
+  건별 상관관계로 세션 전체 불리언(`refusals_seen` 비어있는지)을
+  대체. Correlation Identifier 관용구와 같은 방향이고, 이미 스트림에
+  있는 필드만 쓴다(새 계측 아님).
+- **Skip (re-scout):** 결함 3 — 억제를 "수용된 한계"로 문서화만 하고
+  코드는 그대로 두는 대안(PR #253의 최초 제안). 발주자가 이 대안을
+  명시적으로 기각(범위 확장 코멘트) — 근거는 proposal의 Rationale에
+  기록.
 
-**GAP 라인:** 두 must-be(사전 기록 내구성, 세분화된 fingerprint) 모두
-현재 코드가 미충족 — 결함 1은 EOF 플러시 부재로, 결함 2는 레이어 단위
-키로. 이슈가 이미 두 선택지를 이름 붙여 제시했으므로 스윕의 역할은 새
-옵션을 발명하는 게 아니라 어느 쪽이 이 저장소의 실제 리스크(감사용
-이벤트 손실, 잘못된 detail 로 뭉개짐)와 더 맞는지 공학 관용구로 뒷받침하는
+**GAP 라인:** 세 must-be(사전 기록 내구성, 세분화된 fingerprint, 건별
+상관관계) 모두 현재 코드가 미충족 — 결함 1은 EOF 플러시 부재로, 결함
+2는 레이어 단위 키로, 결함 3(억제)은 세션 전체를 하나의 불리언
+(`refusals_seen`)으로 판정하기 때문에. 이슈가 이미 선택지를 이름 붙여
+제시했으므로 스윕의 역할은 새 옵션을 발명하는 게 아니라 어느 쪽이 이
+저장소의 실제 리스크(감사용 이벤트 손실, 잘못된 detail 로 뭉개짐, 진짜
+거부의 억제)와 더 맞는지 공학 관용구로 뒷받침하는
 것이었다.
 
 **Sources:**
 - [How Write-Ahead Logging Makes Databases Crash-Safe](https://medium.com/@vinodbokare0588/how-write-ahead-logging-makes-databases-crash-safe-7d420a03fca5)
 - [Write-ahead logging and the ARIES crash recovery algorithm](https://sookocheff.com/post/databases/write-ahead-logging/)
+- [Correlation Identifier — Enterprise Integration Patterns](https://www.enterpriseintegrationpatterns.com/patterns/messaging/CorrelationIdentifier.html)
 - [Sentry — Event Fingerprinting](https://docs.sentry.io/platforms/javascript/enriching-events/fingerprinting/)
 - [Sentry — Why Are My Events Grouped or Separated Incorrectly](https://sentry.zendesk.com/hc/en-us/articles/26184711712155-Why-Are-My-Events-Grouped-or-Separated-Incorrectly-in-Sentry)
 - 내부: `docs/issue-235/reports/implementation.md:94-129`,
