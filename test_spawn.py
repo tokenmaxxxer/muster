@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 from unittest import mock
 
@@ -1586,6 +1587,116 @@ class Clean(unittest.TestCase):
             self.assertFalse(dead_ws_b.exists())
             self.assertFalse(file_sibling.exists())
             self.assertTrue(dir_sibling.is_dir())
+
+    def test_readonly_file_is_removed_via_chmod_retry(self):
+        # issue #229: a read-only file (e.g. Go module cache laid down by
+        # `go mod download`) used to make bare shutil.rmtree() raise
+        # PermissionError. clean must chmod it writable and retry.
+        with tempfile.TemporaryDirectory() as td:
+            wb = Path(td) / "work"
+            wb.mkdir()
+            dead_ws = wb / "issue-51-review"
+            self._make_clean_repo(dead_ws, Path(td) / "remote-dead.git")
+
+            # Go's module cache marks the *directory*, not just the file,
+            # read-only (0o555) — unlinking a file needs write permission
+            # on its parent directory, not the file itself, so this is
+            # what actually reproduces the PermissionError on POSIX.
+            # Commit it first so `clean`'s git-status safety check still
+            # judges the workspace safe to remove (matches the real Go
+            # module cache case: it's untracked but .gitignore'd, so it
+            # never shows up in `git status --porcelain`).
+            ro_dir = dead_ws / "gomod_cache_pkg"
+            ro_dir.mkdir()
+            ro_file = ro_dir / "readonly.go"
+            ro_file.write_text("package x")
+            run = lambda *args: __import__("subprocess").run(
+                args, cwd=str(dead_ws), capture_output=True, text=True,
+                check=True)
+            (dead_ws / ".gitignore").write_text("gomod_cache_pkg/\n")
+            run("git", "add", ".gitignore")
+            run("git", "commit", "-q", "-m", "ignore cache dir")
+            run("git", "push", "-q", "origin", "HEAD:main")
+            ro_dir.chmod(0o555)
+            self.addCleanup(lambda: ro_dir.chmod(0o755) if ro_dir.exists() else None)
+
+            roster_path = Path(td) / "runs" / "active.json"
+            roster_path.parent.mkdir(parents=True)
+            roster_path.write_text(json.dumps({}))
+
+            old_roster = spawn.ROSTER
+            old_argv = sys.argv
+            old_environ = dict(os.environ)
+            spawn.ROSTER = roster_path
+            os.environ["MUSTER_WORK_DIR"] = str(wb)
+            sys.argv = ["spawn.py", "clean"]
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                spawn.main()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                sys.argv = old_argv
+                os.environ.clear()
+                os.environ.update(old_environ)
+
+            out = buf.getvalue()
+            self.assertFalse(dead_ws.exists())
+            self.assertIn("지움", out)
+            self.assertNotIn("PermissionError", out)
+
+    def test_failed_workspace_removal_does_not_abort_the_clean_loop(self):
+        # issue #229: a workspace whose removal still fails after the
+        # chmod retry (e.g. an unremovable parent dir) must not stop
+        # clean from processing subsequent workspaces.
+        with tempfile.TemporaryDirectory() as td:
+            wb = Path(td) / "work"
+            wb.mkdir()
+            broken_ws = wb / "issue-51-review"
+            healthy_ws = wb / "issue-52-review"
+            self._make_clean_repo(broken_ws, Path(td) / "remote-a.git")
+            self._make_clean_repo(healthy_ws, Path(td) / "remote-b.git")
+
+            roster_path = Path(td) / "runs" / "active.json"
+            roster_path.parent.mkdir(parents=True)
+            roster_path.write_text(json.dumps({}))
+
+            old_roster = spawn.ROSTER
+            old_argv = sys.argv
+            old_environ = dict(os.environ)
+            spawn.ROSTER = roster_path
+            os.environ["MUSTER_WORK_DIR"] = str(wb)
+            sys.argv = ["spawn.py", "clean"]
+
+            import shutil as _shutil
+            real_rmtree = _shutil.rmtree
+
+            def _rmtree_fails_for_broken(path, *args, **kwargs):
+                if Path(path) == broken_ws:
+                    raise PermissionError(f"simulated unremovable: {path}")
+                return real_rmtree(path, *args, **kwargs)
+
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                with unittest.mock.patch.object(
+                        _shutil, "rmtree", side_effect=_rmtree_fails_for_broken):
+                    spawn.main()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                sys.argv = old_argv
+                os.environ.clear()
+                os.environ.update(old_environ)
+
+            out = buf.getvalue()
+            self.assertTrue(broken_ws.exists())
+            self.assertFalse(healthy_ws.exists())
+            self.assertIn("실패", out)
+            self.assertIn("지움", out)
 
 
 class Watchdog(unittest.TestCase):
