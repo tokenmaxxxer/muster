@@ -17,6 +17,7 @@ import gates
 import spawn
 import pr_reference
 import closure_sweep
+import ci
 
 
 def _board(td: str, subject: str, **roles: str) -> Path:
@@ -170,31 +171,43 @@ def t_rulebook_falls_back_to_github():
     spec = _json.loads((spawn.ROOT / "roles" / "execution-observation.json").read_text())
     assert spec.get("repo"), "역할 파일에 repo 가 없으면 github 로 떨어질 수 없다"
 
-    with tempfile.TemporaryDirectory() as td:
-        checkout = Path(td) / "execution-observation-rulebook"
-        (checkout / ".claude-plugin").mkdir(parents=True)
-        (checkout / ".claude-plugin" / "marketplace.json").write_text('{"plugins": []}')
-        os.environ["TOKENMAXXXER_RULEBOOKS"] = td
-        try:
-            local = spawn.rulebook_source(spec)
-        finally:
-            del os.environ["TOKENMAXXXER_RULEBOOKS"]
-    assert local == {"source": "directory", "path": str(checkout)}, local   # 로컬이 이긴다
-
-    # 변수가 안 잡히면 github 로 떨어진다 — 이게 남의 기계의 기본 상태다
-    assert spawn.rulebook_source(spec) == {"source": "github", "repo": spec["repo"]}
-
-    spec["path"] = "/nonexistent-checkout"
-    remote = spawn.rulebook_source(spec)
-    assert remote == {"source": "github", "repo": spec["repo"]}, remote
-
-    spec.pop("repo")
+    # conftest.py가 세션 전체에 setdefault 해 둔 값(issue #204)을 이 테스트가
+    # 끝난 뒤에도 그대로 남겨야 한다 — pytest 로 test_spawn.py 와 같은
+    # 세션에서 돌 때 지워진 채로 남으면 이후 테스트들이 진짜 github clone 을
+    # 시도하게 된다(issue #222 에서 pytest.ini 로 이 파일이 처음 pytest에
+    # 수집되며 실측된 회귀).
+    saved_rulebooks = os.environ.pop("TOKENMAXXXER_RULEBOOKS", None)
     try:
-        spawn.rulebook_source(spec)
-    except SystemExit:
-        pass
-    else:
-        raise AssertionError("소스가 없는데 통과시켰다")
+        with tempfile.TemporaryDirectory() as td:
+            checkout = Path(td) / "execution-observation-rulebook"
+            (checkout / ".claude-plugin").mkdir(parents=True)
+            (checkout / ".claude-plugin" / "marketplace.json").write_text('{"plugins": []}')
+            os.environ["TOKENMAXXXER_RULEBOOKS"] = td
+            try:
+                local = spawn.rulebook_source(spec)
+            finally:
+                del os.environ["TOKENMAXXXER_RULEBOOKS"]
+        assert local == {"source": "directory", "path": str(checkout)}, local   # 로컬이 이긴다
+
+        # 변수가 안 잡히면 github 로 떨어진다 — 이게 남의 기계의 기본 상태다
+        assert spawn.rulebook_source(spec) == {"source": "github", "repo": spec["repo"]}
+
+        spec["path"] = "/nonexistent-checkout"
+        remote = spawn.rulebook_source(spec)
+        assert remote == {"source": "github", "repo": spec["repo"]}, remote
+
+        spec.pop("repo")
+        try:
+            spawn.rulebook_source(spec)
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("소스가 없는데 통과시켰다")
+    finally:
+        if saved_rulebooks is not None:
+            os.environ["TOKENMAXXXER_RULEBOOKS"] = saved_rulebooks
+        else:
+            os.environ.pop("TOKENMAXXXER_RULEBOOKS", None)
 
 
 # v3 abolished the per-repo contract copy (commit 613a5fbced1b08b48c4c8215a
@@ -921,6 +934,18 @@ def t_fulfils_record_with_no_claims_untouched():
                              "---\nkind: x\n---\n\n평범한 본문, claim 없음\n",
                              ops=[])
         assert gates.record_fulfils_diff(Path(td), {}) == []
+
+
+def t_ci_check_wires_record_fulfils_diff():
+    # issue #222: record_fulfils_diff 가 ci.check() 에 실제로 배선돼 있는지
+    # 검사한다 — "게이트가 등록만 되고 안 불린다"는 결함의 재발 방지 가드.
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\nfulfils: delete docs/foo.md\n",
+                             pre_files={"docs/foo.md": "x"},
+                             ops=[])
+        bad = ci.check(work)
+        assert any("delete docs/foo.md" in b for b in bad), bad
 
 
 if __name__ == "__main__":

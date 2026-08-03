@@ -20,16 +20,23 @@ FLOWS_SCHEMA_VERSION = 1
 _STAGE_MAP = {
     "scope-proposed": "proposal",
     "scope-approved": "approved",
+    "in-progress": "implementing",
+    "landed": "delivered",
 }
-# implementing/delivered/closed are role/rulebook-specific downstream states with
-# no central enum today (issue #172 survey) — anything not in this map reports
-# raw with stage_derived=False rather than being forced into the wrong bucket.
+# 6개 빌드형 role(roles/*.json)이 이미 이 4값 loop_state enum으로 수렴해
+# 있다(issue #222 survey) — 나머지 29개 단일-상태 role은 이 맵과 무관하게
+# 그대로 raw로 남는다. `closed`는 이 맵에 없다: loop_state가 아니라 GitHub
+# 이슈 자체의 상태(`_stage_for`의 issue_state 인자)에서 나오는 종결 상태라
+# 매핑 조회보다 우선한다(issue #222 rationale).
 
 _BRANCH_RE = re.compile(r"^(issue-[0-9]+)/([a-z0-9-]+)$")
 _BOARD_DELTA_ISSUE_RE = re.compile(r"docs/issue-([0-9]+)/")
 
 
-def _stage_for(loop_state: str | None) -> tuple[str, bool]:
+def _stage_for(loop_state: str | None,
+               issue_state: str | None = None) -> tuple[str, bool]:
+    if issue_state == "CLOSED":
+        return "closed", True
     if loop_state in _STAGE_MAP:
         return _STAGE_MAP[loop_state], True
     return (loop_state or "(none)"), False
@@ -325,7 +332,7 @@ def flows_payload(root: Path) -> dict:
                     "opened_at": pr.get("createdAt"),
                 })
 
-        stage, derived = _stage_for(stage_source)
+        stage, derived = _stage_for(stage_source, issue_state_by_n.get(issue_n))
         flows_out.append({
             "issue": issue_n, "stage": stage, "stage_derived": derived,
             "roles": role_entries,
