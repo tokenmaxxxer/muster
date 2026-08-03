@@ -2390,6 +2390,166 @@ class AutoRespawnClaim(unittest.TestCase):
             self.assertEqual(called[0][0], "comment")
 
 
+class SpawnOneIssueRoleClaim(unittest.TestCase):
+    """이슈 #223: 재스폰 경로(`AutoRespawnClaim`)에만 있던 (issue,role) 클레임을
+    주 스폰 경로(`_spawn_one()` 자체)에도 넣는다."""
+
+    def _prep_repo(self, td, name="work"):
+        work = Path(td) / name
+        work.mkdir()
+        run = lambda *a: subprocess.run(a, cwd=str(work), capture_output=True,
+                                        text=True, check=True)
+        run("git", "init", "-q")
+        run("git", "config", "user.email", "t@example.com")
+        run("git", "config", "user.name", "t")
+        (work / "f.txt").write_text("x")
+        run("git", "add", "f.txt")
+        run("git", "commit", "-q", "-m", "init")
+        return work
+
+    def test_concurrent_spawn_one_calls_let_exactly_one_through(self):
+        # 이슈 #223 증상 재현: 같은 (issue, role)로 main() 이 부르는 몸통
+        # (_spawn_one) 을 두 번(스레드 두 개로) 겹쳐 부르면, 클레임이 없던
+        # 시절엔 둘 다 checkout_issue_branch 까지 통과해 같은 워크스페이스에
+        # 두 세션을 띄운다 — 클레임이 있으면 정확히 하나만 통과해야 한다.
+        import threading
+        with tempfile.TemporaryDirectory() as td:
+            work = self._prep_repo(td)
+            roster = Path(td) / "active.json"
+            old_roster = spawn.ROSTER
+            spawn.ROSTER = roster
+            checkout_calls = []
+            checkout_lock = threading.Lock()
+
+            def fake_checkout(cwd, issue, role):
+                with checkout_lock:
+                    checkout_calls.append(1)
+                return "b"
+
+            results = []
+            results_lock = threading.Lock()
+
+            def run_spawn():
+                rc = spawn._spawn_one(str(work), "implementation", "task\n",
+                                      unattended=True, issue=223)
+                with results_lock:
+                    results.append(rc)
+
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+            sys.stdout = io.StringIO()
+            sys.stderr = io.StringIO()
+            try:
+                # plugin_dirs/checkout_version/core_plugin_dirs/core_version
+                # 는 실제 룰북/코어 클론을 건드린다 — 이 테스트가 검증하려는
+                # 건 클레임 하나뿐이므로, 그 뒤(클레임 통과 후) 경로는 나머지
+                # 기존 테스트들과 같은 수준으로 모킹해 무관한 네트워크/환경
+                # 의존을 없앤다.
+                with mock.patch.object(spawn, "issue_workspace",
+                                       lambda cwd, issue, role: str(work)), \
+                     mock.patch.object(spawn, "checkout_issue_branch", fake_checkout), \
+                     mock.patch.object(spawn, "plugin_dirs", lambda *a, **k: []), \
+                     mock.patch.object(spawn, "checkout_version", lambda *a, **k: "v0"), \
+                     mock.patch.object(spawn, "core_plugin_dirs", lambda: []), \
+                     mock.patch.object(spawn, "core_version", lambda: "v0"), \
+                     mock.patch.object(spawn, "spawn_cmd",
+                                       lambda *a, **k: (["cat"], {})), \
+                     mock.patch.object(spawn, "ensure_pushed",
+                                       lambda *a, **k: None), \
+                     mock.patch.object(spawn, "roster_register",
+                                       lambda *a, **k: None), \
+                     mock.patch.object(spawn, "ledger_write",
+                                       lambda *a, **k: None):
+                    threads = [threading.Thread(target=run_spawn) for _ in range(2)]
+                    for t in threads:
+                        t.start()
+                    for t in threads:
+                        t.join()
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+                spawn.ROSTER = old_roster
+
+            self.assertEqual(len(checkout_calls), 1, checkout_calls)
+            self.assertEqual(len(results), 2)
+
+    def test_stale_claim_from_dead_pid_is_cleaned_and_retried(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            dead = subprocess.Popen(["true"])
+            dead.wait()
+            claim_path = Path(str(work) + ".spawn-claim")
+            claim_path.write_text(json.dumps({"pid": dead.pid, "ts": 1}))
+            rejection = spawn._acquire_spawn_claim(str(work), 223, "implementation")
+            self.assertIsNone(rejection)
+            self.assertEqual(json.loads(claim_path.read_text())["pid"], os.getpid())
+
+    def test_rejection_names_the_live_claimant_pid_and_ts(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            claim_path = Path(str(work) + ".spawn-claim")
+            claim_path.write_text(json.dumps({"pid": os.getpid(), "ts": 555}))
+            rejection = spawn._acquire_spawn_claim(str(work), 223, "implementation")
+            self.assertIsNotNone(rejection)
+            self.assertIn(str(os.getpid()), rejection)
+            self.assertIn("555", rejection)
+
+    def test_fork_child_rewrites_claim_pid_before_setsid(self):
+        # 이슈 #223 착수 프롬프트가 지목한 함정: bounded 분기는 fork 후 부모가
+        # 곧 리턴/종료하므로, 클레임에 fork-전 pid 를 남겨 두면 생존검사가
+        # stale 로 오판한다. 자식 분기(child_pid == 0)에서 pid 재기록 헬퍼가
+        # os.setsid() 보다 먼저 불려야 한다 — os.fork/os.setsid/os._exit 를
+        # 모킹해 실제 fork 없이 자식 분기만 강제하고, dup2 로 바뀌는 표준
+        # 입출력 fd 는 테스트 프로세스 자신의 것이므로 호출 전후로 저장·복원한다.
+        import threading
+        with tempfile.TemporaryDirectory() as td:
+            work = self._prep_repo(td)
+            roster = Path(td) / "active.json"
+            old_roster = spawn.ROSTER
+            spawn.ROSTER = roster
+
+            order = []
+            orig_rewrite = spawn._rewrite_spawn_claim_pid
+
+            def spy_rewrite(w):
+                order.append("rewrite")
+                return orig_rewrite(w)
+
+            saved_fds = [os.dup(0), os.dup(1), os.dup(2)]
+            try:
+                with mock.patch.object(spawn, "issue_workspace",
+                                       lambda cwd, issue, role: str(work)), \
+                     mock.patch.object(spawn, "checkout_issue_branch",
+                                       lambda cwd, issue, role: "b"), \
+                     mock.patch.object(spawn, "plugin_dirs", lambda *a, **k: []), \
+                     mock.patch.object(spawn, "checkout_version", lambda *a, **k: "v0"), \
+                     mock.patch.object(spawn, "core_plugin_dirs", lambda: []), \
+                     mock.patch.object(spawn, "core_version", lambda: "v0"), \
+                     mock.patch.object(spawn, "spawn_cmd",
+                                       lambda *a, **k: (["cat"], {})), \
+                     mock.patch.object(spawn, "ensure_pushed", lambda *a, **k: None), \
+                     mock.patch.object(spawn, "roster_register", lambda *a, **k: None), \
+                     mock.patch.object(spawn, "roster_remove", lambda *a, **k: None), \
+                     mock.patch.object(spawn, "ledger_write", lambda *a, **k: None), \
+                     mock.patch.object(spawn, "_release_spawn_claim", lambda *a, **k: None), \
+                     mock.patch.object(spawn, "_rewrite_spawn_claim_pid", spy_rewrite), \
+                     mock.patch.object(os, "fork", return_value=0), \
+                     mock.patch.object(os, "setsid",
+                                       lambda: order.append("setsid")), \
+                     mock.patch.object(os, "_exit", lambda *a: None):
+                    spawn._spawn_one(str(work), "implementation", "task\n",
+                                     unattended=True, issue=224, bounded=True)
+            finally:
+                for fd, real in zip((0, 1, 2), saved_fds):
+                    os.dup2(real, fd)
+                    os.close(real)
+                spawn.ROSTER = old_roster
+
+            self.assertEqual(order, ["rewrite", "setsid"])
+            claim = json.loads(Path(str(work) + ".spawn-claim").read_text())
+            self.assertEqual(claim["pid"], os.getpid())
+
+
 class PostCrashComment(unittest.TestCase):
     """이슈 #132: 상한-코멘트 멱등성 — 마커 문자열이 이미 있으면 재포스팅 안 함."""
 

@@ -2508,6 +2508,96 @@ def _session_log_path(cwd: str) -> Path:
     return Path(str(cwd) + f".session.{ts}.{os.getpid()}.log")
 
 
+def _spawn_claim_path(work: str) -> Path:
+    return Path(str(work) + ".spawn-claim")
+
+
+def _acquire_spawn_claim(work: str, issue: int, role: str) -> str | None:
+    """(issue, role) 하나의 동시 스폰을 막는 O_CREAT|O_EXCL 클레임을 취득한다
+    — 재스폰 경로의 `.respawn-claim-{ts}`(이슈 #132)와 같은 계열이지만,
+    재시도-단위가 아니라 이 (issue,role) 자체가 생존해 있는 동안 유지되는
+    클레임이라 pid 로 생존검사를 한다. 성공하면 None, 이미 살아있는 세션이
+    쥐고 있으면 그 세션의 pid/시작시각을 담은 거부 사유 문자열을 리턴한다
+    (이슈 #223 요구사항 3). 죽은 세션이 남긴 stale 클레임이면 정리하고 1회
+    재시도한다(요구사항 2)."""
+    claim_path = _spawn_claim_path(work)
+    payload = json.dumps({"pid": os.getpid(), "ts": int(time.time())}).encode()
+    for _ in range(2):
+        # O_CREAT|O_EXCL 로 만들고 나서 내용을 쓰면, 만든 직후·쓰기 전 사이에
+        # 다른 스레드/프로세스가 FileExistsError 를 잡고 내용을 읽어 빈
+        # 파일을 "손상"으로 오판해 stale 정리로 방금 만든 클레임을 지워버릴
+        # 수 있다(TOCTOU, 로컬에서 실측: 스레드 두 개 재현 시 간헐적으로 둘
+        # 다 통과). 임시 파일에 내용을 먼저 다 쓴 뒤 `os.link()`로 옮기면
+        # link 자체가 원자적 존재-검사+생성이라 이 창이 없다.
+        tmp_fd, tmp_name = tempfile.mkstemp(dir=str(claim_path.parent),
+                                            prefix=claim_path.name + ".tmp")
+        try:
+            with os.fdopen(tmp_fd, "wb") as f:
+                f.write(payload)
+            try:
+                os.link(tmp_name, str(claim_path))
+                return None
+            except FileExistsError:
+                pass
+        finally:
+            try:
+                os.unlink(tmp_name)
+            except FileNotFoundError:
+                pass
+        try:
+            existing = json.loads(claim_path.read_text())
+        except (OSError, ValueError):
+            existing = {}
+        pid = existing.get("pid")
+        if isinstance(pid, int) and _alive(pid):
+            return (f"issue-{issue}/{role}: 이미 세션(pid {pid}, 시작 ts "
+                    f"{existing.get('ts')})이 이 (issue,role) 스폰 클레임을 "
+                    f"쥐고 있다 — 거부")
+        try:
+            claim_path.unlink()
+        except FileNotFoundError:
+            pass
+    return f"issue-{issue}/{role}: 스폰 클레임 취득 실패(재시도 소진)"
+
+
+def _rewrite_spawn_claim_pid(work: str) -> None:
+    """fork 직후 자식 분기에서 클레임의 pid 를 자기 자신(자식)으로 재기록한다.
+    클레임을 fork 전 pid(곧 죽는 부모)로 남겨 두면, 부모가 죽는 순간 생존검사
+    (`_alive`)가 stale 로 오판한다 — 실제로는 자식이 세션을 계속 몰고 있는데도
+    (이슈 #223 착수 프롬프트가 지목한 함정, 로컬 독립 검증에서 실측).
+    `Path.write_text()`(truncate 후 쓰기)는 다른 프로세스가 그 사이 빈 파일을
+    읽어 손상으로 오판하는 창을 새로 연다 — `_acquire_spawn_claim`이 이미
+    피한 바로 그 TOCTOU(hunt 발견). 임시 파일에 다 쓴 뒤 `os.replace()`로
+    교체해 그 창을 없앤다."""
+    claim_path = _spawn_claim_path(work)
+    try:
+        existing = json.loads(claim_path.read_text())
+    except (OSError, ValueError):
+        return
+    existing["pid"] = os.getpid()
+    tmp_fd, tmp_name = tempfile.mkstemp(dir=str(claim_path.parent),
+                                        prefix=claim_path.name + ".tmp")
+    with os.fdopen(tmp_fd, "w") as f:
+        json.dump(existing, f)
+    os.replace(tmp_name, str(claim_path))
+
+
+def _release_spawn_claim(work: str, pid: int) -> None:
+    """스폰 클레임을 해제한다 — 취득 이후 다른 프로세스가 stale-정리로 같은
+    경로를 재취득했을 수 있으므로, 지금 쥔 pid 가 여전히 우리 자신일 때만
+    지운다."""
+    claim_path = _spawn_claim_path(work)
+    try:
+        existing = json.loads(claim_path.read_text())
+    except (OSError, ValueError):
+        return
+    if existing.get("pid") == pid:
+        try:
+            claim_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                issue: int | None = None, bounded: bool = False,
                stall_timeout_min: float = 5.0) -> int:
@@ -2521,6 +2611,10 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         # 격리 작업 클론에서 돈다 — 사용자의 체크아웃은 건드리지 않고,
         # 동시 스폰들이 서로의 index/브랜치를 밟지 않는다.
         cwd = issue_workspace(cwd, issue, role)
+        claim_rejection = _acquire_spawn_claim(cwd, issue, role)
+        if claim_rejection is not None:
+            print(f"[{role}] {claim_rejection}", file=sys.stderr)
+            return 1
         br = checkout_issue_branch(cwd, issue, role)
         print(f"[{role}] 격리 작업 디렉토리: {cwd}  (브랜치 {br})", file=sys.stderr)
         # 원본(프리픽스 붙기 전) 맡길 일을 한 번만 저장 — 재스폰(다른 spawn.py
@@ -2611,6 +2705,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                 is_parent_return = True
                 return _await_bounded(events_path, offset_path,
                                        stall_timeout_min, log_path)
+            _rewrite_spawn_claim_pid(cwd)
             os.setsid()
             # 부모(호출자)가 물려준 stdout/stderr 를 그대로 두면, 곧 띄울
             # claude 서브프로세스가 Popen() 에서 stdout/stderr 를 안 지정해도
@@ -2752,6 +2847,8 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                                               "detail": f"{command[:60]} 실행"})
         rc = proc.wait()
         roster_remove(roster_key)
+        if issue is not None:
+            _release_spawn_claim(cwd, os.getpid())
     finally:
         if not is_parent_return:
             os.unlink(settings)
