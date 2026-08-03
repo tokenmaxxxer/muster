@@ -3000,6 +3000,48 @@ class FlowsPayload(unittest.TestCase):
         self.assertEqual(by_issue[52]["plan"],
                          [{"step": 1, "roles": ["product-discovery"], "done": False}])
 
+    def test_flows_prs_includes_open_prs_for_roles_with_no_board_record(self):
+        """issue #248 재현 회귀 (issue-27 실물 사례): board 레코드가 있는
+        role은 하나뿐이고(해당 role의 PR은 이미 머지돼 `pr_by_branch`에
+        없음), 레코드 없는 두 role의 open PR이 있을 때 `flows[].prs`에
+        그 두 PR 번호가 모두 채워져야 한다 — 이전에는 `roles`(레코드가
+        있는 role만) 필터 때문에 빈 배열이었다."""
+        self._write_record("issue-27", "implementation", "scope-approved")
+        self._patch(self.flows, "_pr_list_all", lambda root: [
+            {"number": 31, "headRefName": "issue-27/execution-observation",
+             "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
+            {"number": 32, "headRefName": "issue-27/conformance-review",
+             "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
+        ])
+        payload = self.flows.flows_payload(self.root)
+        by_issue = {f["issue"]: f for f in payload["flows"]}
+        self.assertEqual(by_issue[27]["prs"], [31, 32])
+
+    def test_flows_prs_and_decision_queue_share_the_same_pr_set(self):
+        """issue #248 일관성 회귀: `decision_queue`에 등장하는 PR 번호는
+        모두 같은 subject의 `flows[].prs`에도 포함된다 — 승인된 PR과
+        미승인 PR을 섞어 `decision_queue`가 부분집합만 가질 때도
+        `flows[].prs`는 열려 있는 PR 전체를 갖는지 확인한다."""
+        (self.root / "docs" / "specs").mkdir(parents=True, exist_ok=True)
+        (self.root / "docs" / "specs" / "approvers.md").write_text(
+            "- reviewer1\n", encoding="utf-8")
+        self._write_record("issue-45", "conformance-review", "scope-approved")
+        self._write_record("issue-45", "execution-observation", "scope-approved")
+        self._patch(self.flows, "_pr_list_all", lambda root: [
+            {"number": 101, "headRefName": "issue-45/conformance-review",
+             "createdAt": "2026-07-30T00:00:00Z", "body": "",
+             "reviews": [{"state": "APPROVED",
+                         "author": {"login": "reviewer1"}}]},
+            {"number": 102, "headRefName": "issue-45/execution-observation",
+             "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
+        ])
+        payload = self.flows.flows_payload(self.root)
+        dq_prs = {d["pr"] for d in payload["decision_queue"] if d["issue"] == 45}
+        by_issue = {f["issue"]: f for f in payload["flows"]}
+        self.assertEqual(dq_prs, {102})
+        self.assertEqual(by_issue[45]["prs"], [101, 102])
+        self.assertTrue(dq_prs.issubset(set(by_issue[45]["prs"])))
+
 
 class SessionLastActivity(unittest.TestCase):
     """issue #172 FEEDBACK: `_session_last_activity` — tail-based session.log

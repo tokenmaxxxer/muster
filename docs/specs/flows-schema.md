@@ -82,7 +82,7 @@ One entry per subject.
 | `stage` | string | one of `"proposal"`, `"approved"`, `"implementing"`, `"delivered"`, `"closed"`, OR the raw `loop_state` string when unmapped (see below) |
 | `stage_derived` | boolean | `true` when `stage` was mapped from a rulebook-defined `loop_state`→stage rule; `false` when no mapping exists and `stage` holds the raw `loop_state` string verbatim |
 | `roles` | array of `{role, loop_state, verdict}` | per-role status within the subject |
-| `prs` | array of integers | PR numbers associated with the subject |
+| `prs` | array of integers | numbers of currently-open PRs whose branch name matches `issue-<subject>/<role>`, for any role — independent of whether that role has a board record (`docs/issue-<n>/reports/<role>.md`) merged to main yet |
 | `plan` | `array<{step, roles, done}>` \| `null` | parsed from the subject's issue body `## 실행 계획` block (issue #189); `null` when the issue body has no such block; otherwise a list — possibly empty if the header is present with no valid step lines — of `{"step": <int>, "roles": [<string>, ...], "done": <bool>}`, one entry per `- [ ]`/`- [x]` step line |
 
 When a subject's `loop_state` has no rulebook-defined mapping to one of
@@ -92,6 +92,19 @@ nearest bucket — it is set to the raw `loop_state` string and
 as "this value is not one of the five enum members" and handle it
 distinctly (e.g. render as unknown/raw rather than mapping to a fixed
 color/label).
+
+`flows[].prs` and `decision_queue` (§2.1) are both derived from the same
+open-PR-by-branch-name source, so for any subject that has a `flows[]`
+entry, the two never disagree about which PRs are open for it: a PR
+number appearing in `decision_queue` for that subject also appears in
+its `flows[].prs` (issue #248 — `prs` previously re-filtered by `roles`,
+board records, and dropped PRs for roles with no merged record yet).
+This does not extend to a subject with **no** `flows[]` entry at all —
+`flows[]` is scoped to subjects with at least one merged board record or
+an open issue carrying a `## 실행 계획` block (§2.2 `all_subjects`
+construction, unchanged by this fix), while `decision_queue` has no such
+gate (issue #216) and can list a PR for a subject that never appears in
+`flows[]` — there is nothing there for that PR to "appear in".
 
 ### 2.3 `sessions[]`
 

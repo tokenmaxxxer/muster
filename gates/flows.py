@@ -276,6 +276,15 @@ def flows_payload(root: Path) -> dict:
         m = _BRANCH_RE.match(pr.get("headRefName") or "")
         if m:
             pr_by_branch[(m.group(1), m.group(2))] = pr
+
+    # `prs_by_subject`는 `pr_by_branch`를 subject로 그룹핑한 것 — board
+    # 레코드가 있는 role로 한 번 더 걸러지는 `roles` 필터와 무관하게, 브랜치명
+    # 매칭만으로 열린 PR을 전부 잡는다(issue #248 — `decision_queue`와 같은
+    # 소스를 `flows[].prs`도 공유해 두 필드가 구조적으로 불일치하지 않게 한다).
+    prs_by_subject: dict[str, set[int]] = {}
+    for (subject_key, _role), pr in pr_by_branch.items():
+        prs_by_subject.setdefault(subject_key, set()).add(pr["number"])
+
     comments_cache: dict[int, list[dict]] = {}
 
     def comments_for(subject: str, pr_number: int) -> list[dict]:
@@ -336,8 +345,7 @@ def flows_payload(root: Path) -> dict:
         flows_out.append({
             "issue": issue_n, "stage": stage, "stage_derived": derived,
             "roles": role_entries,
-            "prs": sorted({pr_by_branch[(subject, r)]["number"]
-                          for r in roles if (subject, r) in pr_by_branch}),
+            "prs": sorted(prs_by_subject.get(subject, set())),
             "plan": plan_by_issue.get(issue_n),
         })
 
