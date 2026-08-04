@@ -3466,13 +3466,23 @@ class WatchFollow(unittest.TestCase):
 
     def test_follow_detects_dead_session_and_returns_crash_rc(self):
         # 이슈 #224 결함 3: 세션이 크래시해 session-end 가 영영 안 오면
-        # --follow 가 무한정 stall 을 반복하면 안 된다 — 로스터 엔트리가
-        # 없으면(=pid 사망과 동치, PR #255 피드백 1: session-end 가 이미
-        # 잔여로 남아있지 않은 경우에만) 유한 반복 안에 WATCH_CRASH_RC 로
-        # 리턴한다. 이 events.jsonl 에는 session-end 가 전혀 없다(크래시
-        # 세션이라 못 남겼다).
+        # --follow 가 무한정 stall 을 반복하면 안 된다 — 로스터 엔트리는
+        # 있지만 그 wrapper_pid 가 죽어 있으면(PR #255 피드백 1: session-end
+        # 가 이미 잔여로 남아있지 않은 경우에만) 유한 반복 안에
+        # WATCH_CRASH_RC 로 리턴한다. 이 events.jsonl 에는 session-end 가
+        # 전혀 없다(크래시 세션이라 못 남겼다).
+        # 이슈 #266으로 갱신: 이전에는 로스터 엔트리 부재 자체를 pid 사망과
+        # 동치로 다뤄 이 시나리오를 재현했으나, #266이 그 동치를 깼다(엔트리
+        # 부재는 더 이상 사망 신호가 아니다) — 실제로 남아 있어야 하는
+        # 트리거(엔트리는 존재, wrapper_pid 는 죽음)를 여기서 직접
+        # 구성한다.
         from unittest import mock
-        spawn.roster_remove("issue-180/implementation")
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        spawn.roster_register("issue-180/implementation", {
+            "pid": 999999, "wrapper_pid": dead.pid, "role": "implementation",
+            "issue": 180, "ts": int(time.time()), "work": str(self.work),
+            "log": str(self.log)})
         calls = []
 
         def fake_await_bounded(events_path, offset_path, stall_timeout_min, log_path):
@@ -3587,6 +3597,32 @@ class WatchFollow(unittest.TestCase):
             sys.argv = old_argv
         self.assertEqual(rc, 0)
         self.assertFalse(captured["follow"])
+
+    def test_follow_tolerates_roster_entry_fully_absent_before_session_end(self):
+        # 이슈 #266: `_spawn_one()`의 후처리 꼬리 동안 `roster_remove(roster_key)`
+        # (spawn.py:2995)가 `session-end` 기록(spawn.py:3097)보다 먼저 실행돼,
+        # 그 구간 전체에서 명부 엔트리가 아예 없다(setUp 이 심어 둔 엔트리를
+        # 여기서 지워 그 상태를 실제로 구성한다 — 이전 회귀
+        # test_follow_tolerates_post_processing_tail_before_session_end 는
+        # wrapper_pid 가 살아있는 엔트리를 다시 심어서 이 창을 구성하지 않았다).
+        # 엔트리 부재는 사망이 아니라 불명으로 다뤄 stall 안전망을 거쳐 계속
+        # 대기해야 한다 — 수정 전에는 이 테스트가 WATCH_CRASH_RC 로 fail 한다.
+        from unittest import mock
+        spawn.roster_remove("issue-180/implementation")
+        calls = []
+
+        def fake_await_bounded(events_path, offset_path, stall_timeout_min, log_path):
+            calls.append(1)
+            if len(calls) < 3:
+                return 0  # 엔트리 부재 꼬리 구간 흉내: session-end 가 아직 없다
+            spawn._append_event(events_path, "session-end", "progressed")
+            spawn._write_offset(offset_path, spawn._read_offset(offset_path) + 1)
+            return 0
+
+        with mock.patch.object(spawn, "_await_bounded", fake_await_bounded):
+            rc = spawn._watch(180, "implementation", 5.0, follow=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 3, calls)
 
 
 if __name__ == "__main__":

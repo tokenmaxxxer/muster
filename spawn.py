@@ -1900,7 +1900,12 @@ def _watch(issue: int, role: str | None, stall_timeout_min: float,
         # 오판한다(이슈 #224 hunt 발견).
         roster_entry = _roster_load().get(key) if key else None
         pid = roster_entry.get("wrapper_pid") if roster_entry else None
-        if roster_entry is None or not pid or not _alive(pid):
+        # 명부 엔트리 부재는 사망 신호로 안 쓴다(이슈 #266) — `_spawn_one()`의
+        # 후처리 꼬리 동안 `roster_remove`(spawn.py:2995)가 `session-end`
+        # 기록(spawn.py:3097)보다 먼저 실행돼 그 구간 전체에서 엔트리가
+        # 없다. 엔트리가 있고 그 안의 wrapper_pid 가 죽어 있을 때만 크래시로
+        # 본다 — 엔트리 부재는 불명으로 취급해 stall 안전망까지 계속 대기한다.
+        if pid is not None and not _alive(pid):
             print(f"[watch] 세션 프로세스가 사라졌다(pid {pid}) — session-end "
                   f"없이 끝났다. 크래시로 보고 멈춘다", file=sys.stderr)
             return WATCH_CRASH_RC
