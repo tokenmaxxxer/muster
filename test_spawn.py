@@ -2592,6 +2592,53 @@ class PostCrashComment(unittest.TestCase):
         self.assertIn("gh", calls[0])
 
 
+class IssueComments(unittest.TestCase):
+    """이슈 #224: `--paginate --slurp`로 30개 코멘트 상한을 넘긴다 —
+    페이지 리스트를 평탄화해 기존과 같은 dict 리스트를 돌려줘야 한다."""
+
+    def test_flattens_multi_page_slurp_response(self):
+        orig_slug = spawn._repo_slug
+        orig_run = subprocess.run
+        spawn._repo_slug = lambda root: "acme/repo"
+        page1 = [{"user": {"login": "a"}, "body": "one"}]
+        page2 = [{"user": {"login": "b"}, "body": "two"}]
+        calls = []
+
+        def fake_run(cmd, *a, **k):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps([page1, page2]), stderr="")
+
+        spawn.subprocess.run = fake_run
+        try:
+            out = spawn._issue_comments(Path("."), 999)
+        finally:
+            spawn._repo_slug = orig_slug
+            spawn.subprocess.run = orig_run
+        self.assertEqual(out, [{"login": "a", "body": "one"},
+                               {"login": "b", "body": "two"}])
+        self.assertIn("--paginate", calls[0])
+        self.assertIn("--slurp", calls[0])
+
+    def test_empty_slurp_response_yields_empty_list(self):
+        # 실측: 코멘트 0건이면 gh api --paginate --slurp 는 [[]] (빈 페이지
+        # 하나)를 낸다 — 평탄화하면 빈 리스트.
+        orig_slug = spawn._repo_slug
+        orig_run = subprocess.run
+        spawn._repo_slug = lambda root: "acme/repo"
+
+        def fake_run(cmd, *a, **k):
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps([[]]), stderr="")
+
+        spawn.subprocess.run = fake_run
+        try:
+            out = spawn._issue_comments(Path("."), 999)
+        finally:
+            spawn._repo_slug = orig_slug
+            spawn.subprocess.run = orig_run
+        self.assertEqual(out, [])
+
+
 class RosterConcurrency(unittest.TestCase):
     """issue #139: 잠금 없는 read-modify-write 가 동시 등록을 잃어버렸던 문제."""
 
@@ -3120,6 +3167,18 @@ class WatchFollow(unittest.TestCase):
         spawn.WORKSPACE_INDEX = Path(self.td) / "workspaces.json"
         self.addCleanup(setattr, spawn, "WORKSPACE_INDEX", old_idx)
         spawn._workspace_index_put(180, "implementation", str(self.work), str(self.log))
+        # 로스터에 살아있는 wrapper_pid(자기 자신)를 심어 둔다 — 이슈 #224의
+        # pid 사망 감지가 기존 stall 회귀 테스트를 오탐으로 깨지 않는지
+        # 명시적으로 지킨다. `pid`(claude 서브프로세스 자리)는 아무 값이나
+        # 넣어도 무방하다 — `_watch` 의 크래시 판정은 `wrapper_pid` 만
+        # 본다.
+        old_roster = spawn.ROSTER
+        spawn.ROSTER = Path(self.td) / "active.json"
+        self.addCleanup(setattr, spawn, "ROSTER", old_roster)
+        spawn.roster_register("issue-180/implementation", {
+            "pid": 999999, "wrapper_pid": os.getpid(), "role": "implementation",
+            "issue": 180, "ts": int(time.time()), "work": str(self.work),
+            "log": str(self.log)})
 
     def test_follow_stops_only_at_session_end(self):
         from unittest import mock
@@ -3157,6 +3216,79 @@ class WatchFollow(unittest.TestCase):
             rc = spawn._watch(180, "implementation", 5.0, follow=True)
         self.assertEqual(rc, 0)
         self.assertEqual(len(calls), 3, calls)  # stall 2번을 지나 session-end 에서만 멈춘다
+
+    def test_follow_detects_dead_session_and_returns_crash_rc(self):
+        # 이슈 #224 결함 3: 세션이 크래시해 session-end 가 영영 안 오면
+        # --follow 가 무한정 stall 을 반복하면 안 된다 — 로스터 엔트리가
+        # 없으면(=pid 사망과 동치, PR #255 피드백 1: session-end 가 이미
+        # 잔여로 남아있지 않은 경우에만) 유한 반복 안에 WATCH_CRASH_RC 로
+        # 리턴한다. 이 events.jsonl 에는 session-end 가 전혀 없다(크래시
+        # 세션이라 못 남겼다).
+        from unittest import mock
+        spawn.roster_remove("issue-180/implementation")
+        calls = []
+
+        def fake_await_bounded(events_path, offset_path, stall_timeout_min, log_path):
+            calls.append(1)
+            return 0  # 매번 stall 흉내 — offset 진행 없음
+
+        with mock.patch.object(spawn, "_await_bounded", fake_await_bounded):
+            rc = spawn._watch(180, "implementation", 5.0, follow=True)
+        self.assertEqual(rc, spawn.WATCH_CRASH_RC)
+        self.assertLess(len(calls), 5, calls)  # 유한 반복 — 무한 루프 없음
+
+    def test_follow_prioritizes_pending_session_end_over_pid_check(self):
+        # PR #255 피드백 1의 벤인 레이스: 세션이 정상 종료해 session-end 를
+        # 이미 events.jsonl 에 남겼는데(progress 다음 줄), 그 줄이 아직
+        # 소비되지 않은 첫 반복에서 pid 가 죽어 있어도(로스터 엔트리
+        # 제거) 잔여 session-end 를 먼저 소진해야지, 그 반복에서 곧장
+        # 크래시로 오판하면 안 된다.
+        from unittest import mock
+        spawn.roster_remove("issue-180/implementation")
+        spawn._append_event(self.events, "progress", {"kind": "tool_use", "detail": "x"})
+        spawn._append_event(self.events, "session-end", "progressed")
+        calls = []
+
+        def fake_await_bounded(events_path, offset_path, stall_timeout_min, log_path):
+            calls.append(1)
+            seen = spawn._read_offset(offset_path)
+            lines = events_path.read_text(encoding="utf-8").splitlines()
+            if seen < len(lines):
+                spawn._write_offset(offset_path, seen + 1)
+            return 0
+
+        with mock.patch.object(spawn, "_await_bounded", fake_await_bounded):
+            rc = spawn._watch(180, "implementation", 5.0, follow=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 2, calls)
+
+    def test_follow_tolerates_post_processing_tail_before_session_end(self):
+        # 헌트로 확인된 결함: `_spawn_one()`의 claude 서브프로세스
+        # (roster `pid`)는 proc.wait() 리턴과 함께 정상 종료에서도 먼저
+        # 죽는다 — push/게이트·소유권 리포트/classify/ledger_write 를
+        # 거쳐야 session-end 가 남는다. 이 후처리 구간 동안은 `pid`가
+        # 이미 죽어 있어도(여기서는 아예 안 심는다) `wrapper_pid`(호출자
+        # 자신)가 살아있는 한 크래시로 오판하면 안 된다 — session-end 가
+        # 나중에 나타나면 정상 리턴.
+        from unittest import mock
+        spawn.roster_register("issue-180/implementation", {
+            "pid": 999999, "wrapper_pid": os.getpid(), "role": "implementation",
+            "issue": 180, "ts": int(time.time()), "work": str(self.work),
+            "log": str(self.log)})
+        calls = []
+
+        def fake_await_bounded(events_path, offset_path, stall_timeout_min, log_path):
+            calls.append(1)
+            if len(calls) < 3:
+                return 0  # 후처리 구간 흉내: session-end 가 아직 없다
+            spawn._append_event(events_path, "session-end", "progressed")
+            spawn._write_offset(offset_path, spawn._read_offset(offset_path) + 1)
+            return 0
+
+        with mock.patch.object(spawn, "_await_bounded", fake_await_bounded):
+            rc = spawn._watch(180, "implementation", 5.0, follow=True)
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 3, calls)
 
     def test_non_follow_mode_calls_await_bounded_exactly_once(self):
         from unittest import mock

@@ -44,9 +44,14 @@ def _stage_for(loop_state: str | None,
 
 def _pr_list_all(root: Path) -> list[dict]:
     """Repo-wide open-PR list, one call — replaces an O(subjects x roles)
-    `_pr_for_branch` loop for `flows` (issue #172 §3: rate-limit design)."""
+    `_pr_for_branch` loop for `flows` (issue #172 §3: rate-limit design).
+
+    `--limit 1000` matches the sibling `_issue_list_all()` idiom below —
+    without it `gh pr list` defaults to 30 and silently drops PRs past
+    that on the status board (issue #224)."""
     r = subprocess.run(["gh", "pr", "list", "--state", "open", "--json",
-                        "number,headRefName,createdAt,body,reviews"],
+                        "number,headRefName,createdAt,body,reviews",
+                        "--limit", "1000"],
                        cwd=root, capture_output=True, text=True)
     if r.returncode != 0:
         return []
