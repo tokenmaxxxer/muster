@@ -30,6 +30,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -1533,21 +1534,78 @@ def _classify_refusal_text(text: str):
     stem 에서만 뽑는다. `gate_deny <role-or-gate-name> <message>` 의 첫
     토큰(`_GATE_DENY_RE`)은 게이트 이름을 보장하지 않는다(gate-lib.sh:75,
     이슈 #235 Finding 2 실측: 역할 이름이 실렸다) — 사유 텍스트를 자르는
-    위치로만 쓴다."""
+    위치로만 쓴다.
+
+    이슈 #246 결함 2: dedup 키는 이제 분류된 텍스트(정규화·절삭 후)를
+    포함한다 — 같은 층의 서로 다른 두 거부가 첫 번째 것에 가려지지 않는다.
+    내부 공백/줄바꿈(`_tool_result_text`의 여러 텍스트 블록 join 이 넣는
+    `\n` 포함)은 단일 스페이스로 뭉친 뒤 기존 300자 한도로 자른다 — 대소문자는
+    그대로 둔다(서로 다른 사유 문자열을 대소문자만으로 뭉개지 않기 위해).
+    층 1 의 키는 stem 이 아니라 hook 의 전체 경로로 건다 — 같은 파일명
+    stem 을 공유하는 서로 다른 hook 스크립트가 충돌하지 않도록; `stem` 은
+    사람이 보는 `detail["gate"]` 필드로만 남는다."""
     hook_m = _GATE_HOOK_RE.search(text)
     if hook_m:
-        gate = Path(hook_m.group(1)).stem
+        hook_path = hook_m.group(1)
+        gate = Path(hook_path).stem
         deny_m = _GATE_DENY_RE.search(text)
-        reason = (text[deny_m.end():].strip()[:300] if deny_m
-                  else text.strip()[:300])
-        return ("gate-refusal", ("gate", gate), {"gate": gate, "reason": reason})
+        reason = (" ".join(text[deny_m.end():].strip().split())[:300] if deny_m
+                  else " ".join(text.strip().split())[:300])
+        return ("gate-refusal", ("gate", hook_path, reason),
+                {"gate": gate, "reason": reason})
     for pat in _HARNESS_REFUSAL_PATTERNS:
         if pat.search(text):
-            return ("harness-refusal", ("harness",), text.strip()[:300])
+            detail = " ".join(text.strip().split())[:300]
+            return ("harness-refusal", ("harness", detail), detail)
     for pat in _SANDBOX_REFUSAL_PATTERNS:
         if pat.search(text):
-            return ("sandbox-refusal", ("sandbox",), text.strip()[:300])
+            detail = " ".join(text.strip().split())[:300]
+            return ("sandbox-refusal", ("sandbox", detail), detail)
     return None
+
+
+def _flush_correlated_refusals(events_path: Path, pending_refusals: dict,
+                                denials: list) -> None:
+    """이슈 #246 결함 3: 확정된 `permission_denials`(리스트, 비었을 수도 있음)와
+    버퍼링된 후보를 `tool_name` 별 건별(per-candidate)로 상관시킨다 — 세션
+    전체를 가리는 불리언 하나(`refusals_seen`) 대신, 후보마다 독립적으로
+    denials 의 남은 수량을 소비한다. 상관 안 되는(스푸리어스이거나
+    `tool_use_id` 를 못 찾은) 후보는 실제 층 라벨로 내보내지 않고 그냥
+    버린다 — denials 가 남아 있다는 확정 근거가 없는 한 확정 라벨을
+    참칭하지 않는다.
+
+    `tool_name` 이 없거나 dict 가 아닌 denial 항목은 `remaining`(Counter)에서
+    자연히 빠지므로 애초에 어느 후보와도 매치되지 않는다 — 그런데 그 항목을
+    그냥 버리면, 매치될 수 없는 그 denial 자체가 세든 흔적 없이 사라진다
+    (실측된 회귀: 실측 근거인 `docs/decisions/2026-07-29-headless-cli-measured-facts.md`
+    가 확인한 `{"tool_name": ...}` 형태를 벗어나는 항목이 오면 이벤트가 0건이
+    된다 — 이슈 #246 결함 1 이 없애려던 바로 그 "0건 = 무해" 결과를 다른
+    문으로 재도입한다). `unattributable` 로 그 개수를 별도로 세어 leftover
+    판정에 더한다 — tool_name 이 있는 denial 은 남은 매치 실패분만, 없는
+    denial 은 통째로 leftover 로 잡혀 폴백을 놓치지 않는다. 모든 후보를
+    확인한 뒤에도 denials 에 남은/귀속 못한 수량이 있으면(후보가 하나도
+    없던 경우 포함) `unclassified-refusal` 폴백을 한 번 낸다."""
+    remaining = Counter(d.get("tool_name") for d in denials
+                        if isinstance(d, dict) and d.get("tool_name"))
+    unattributable = sum(1 for d in denials
+                         if not (isinstance(d, dict) and d.get("tool_name")))
+    for ev_type, detail, tool_name in pending_refusals.values():
+        if tool_name and remaining.get(tool_name):
+            remaining[tool_name] -= 1
+            _append_event(events_path, ev_type, detail)
+    if sum(remaining.values()) + unattributable > 0:
+        _append_event(events_path, "unclassified-refusal", str(denials)[:200])
+
+
+def _flush_unverified(events_path: Path, pending_refusals: dict) -> None:
+    """이슈 #246 결함 1: 터미널 `result` 줄이 아예 없거나(EOF/크래시 — S1/S3)
+    `permission_denials` 형태를 신뢰할 수 없을 때(S2, 리스트가 아닌 값)
+    호출된다. `permission_denials` 와 상관시킬 확정 근거가 없으므로 이미
+    층 분류는 된 후보를 그 확정 라벨(gate-refusal 등)로 참칭하지 않고,
+    `unverified-refusal` 로 정직하게 남긴다 — 버리는 대신, 그러나 확정도
+    아닌 채로."""
+    for ev_type, detail, _tool_name in pending_refusals.values():
+        _append_event(events_path, "unverified-refusal", detail)
 
 
 def _events_path(work: str) -> Path:
@@ -2795,15 +2853,29 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         pr_seen = _prior_event_details(events_path, "pr-opened") if issue is not None else set()
         # 이슈 #232: 층(게이트/하네스/샌드박스) 단위 dedup — 예전엔 불리언
         # 하나(gate_refusal_seen)가 세 층을 전부 한 라벨로 뭉갰다. 키는
-        # ("gate", <게이트명>) / ("harness",) / ("sandbox",) — 오늘처럼
-        # "보고 한 번, 거부마다 아님"을 유지하면서 층·게이트별로 구분한다.
-        refusals_seen: set = set()
+        # ("gate", <게이트명>, <사유>) / ("harness", <detail>) /
+        # ("sandbox", <detail>) — 층·게이트·정규화된 텍스트별로 구분한다
+        # (이슈 #246 결함 2: 텍스트를 안 실으면 같은 층의 서로 다른 두 거부가
+        # 첫 번째 것에 가려진다).
         # 이슈 #235: per-line 분류는 세션의 마지막 result 줄에만 실리는
         # permission_denials 로 상관돼야 한다(Claude Code 스트림에서 result
         # 는 항상 맨 끝 줄) — 그 전까지는 emit 하지 않고 여기 모아 둔다.
         # is_error 는 "이 도구 호출이 실패했다"지 "거부됐다"가 아니라는
-        # 구분이 결함의 뿌리였다(제안서 요구사항 1).
+        # 구분이 결함의 뿌리였다(제안서 요구사항 1). 값은 이제
+        # (이벤트 타입, detail, tool_name) — tool_name 은 이슈 #246 결함 3의
+        # 건별 상관관계에 쓰인다(아래 tool_use_names).
         pending_refusals: dict = {}
+        # 이슈 #246 결함 3: 각 tool_use 블록의 id -> name — 뒤이어 오는
+        # tool_result 블록의 tool_use_id 를 통해 어느 도구 호출이 거부됐는지
+        # 건별로 되짚는다. 두 필드 모두 이미 파싱 중인 스트림에 있던 것이라
+        # 새 계측이 아니다(제안서 제약).
+        tool_use_names: dict[str, str] = {}
+        # 이슈 #246 결함 1: 터미널 result 줄을 실제로 파싱했는지 — 스트림이
+        # 그 줄 전에 끝나면(크래시/kill/truncation, S1) 또는 그 줄이 malformed
+        # JSON 이면(S3, 위의 `except ValueError: continue`) 이 플래그는 False 로
+        # 남고, 루프가 끝난 뒤 남은 pending_refusals 를 unverified-refusal 로
+        # 대신 flush 한다.
+        result_seen = False
         # A URL the session **read** is indistinguishable from a PR it
         # **opened** unless the owner/repo is checked: octocat/Hello-World/pull/1
         # is GitHub's own documentation example and appears in gh help output.
@@ -2845,24 +2917,29 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                     continue
                 if obj.get("type") == "result":
                     result = obj
-                    denials = result.get("permission_denials") or []
-                    if issue is not None and denials:
-                        # 상관관계 성립(denials 가 실제로 있다) — 그제서야
-                        # 스트림 중 모아 둔 층 분류를 내보낸다.
-                        for key, (ev_type, detail) in pending_refusals.items():
-                            if key in refusals_seen:
-                                continue
-                            refusals_seen.add(key)
-                            _append_event(events_path, ev_type, detail)
-                        if not refusals_seen:
-                            # 상관관계는 성립했는데(denials 있음) 어느 층도
-                            # 확정 못 했다(예: 잘리거나 누락된 스트림 줄, 또는
-                            # 텍스트가 아무 패턴에도 안 걸림) — layer-1 로
-                            # 위장하지 않고 별도 라벨로, 그래도 거부 자체는
-                            # 놓치지 않는다(제안서 5번).
-                            refusals_seen.add(("unclassified",))
-                            _append_event(events_path, "unclassified-refusal",
-                                         str(denials)[:200])
+                    # `result` 줄은 "언제나 스트림의 마지막 줄"이라고 문서화만
+                    # 돼 있을 뿐 강제되지 않는다(이슈 #235 실행-관찰 연구,
+                    # research-evidence.md:160-164) — 두 번째 `result` 줄이
+                    # 오면 result_seen 이 이미 True 라 이 블록을 건너뛰어
+                    # pending_refusals 를 다시 flush 하지 않는다. 옛
+                    # refusals_seen 집합이 세션 전체에 걸쳐 지녔던 "한 번만
+                    # flush" 성질을 대신한다(이슈 #246 헌트 finding 5).
+                    if not result_seen:
+                        result_seen = True
+                        if issue is not None:
+                            raw_denials = result.get("permission_denials")
+                            if isinstance(raw_denials, list):
+                                # 확정된 리스트(비었을 수도 있음) — 이슈 #246
+                                # 결함 3: 후보마다 tool_name 으로 건별 상관시킨다.
+                                _flush_correlated_refusals(events_path, pending_refusals,
+                                                           raw_denials)
+                            else:
+                                # 이슈 #246 결함 1 (S2): permission_denials 가
+                                # absent/None/truthy-non-list — 형태를 신뢰할
+                                # 수 없다. 상관은 시도하지 않고 이미 분류된
+                                # 후보를 unverified-refusal 로 정직하게
+                                # 남긴다.
+                                _flush_unverified(events_path, pending_refusals)
                 elif issue is not None and obj.get("type") == "user":
                     for block in (obj.get("message") or {}).get("content") or []:
                         if not isinstance(block, dict) or block.get("type") != "tool_result":
@@ -2875,7 +2952,10 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                             continue
                         ev_type, key, detail = classified
                         if key not in pending_refusals:
-                            pending_refusals[key] = (ev_type, detail)
+                            tool_use_id = block.get("tool_use_id")
+                            tool_name = (tool_use_names.get(tool_use_id)
+                                        if isinstance(tool_use_id, str) else None)
+                            pending_refusals[key] = (ev_type, detail, tool_name)
                 elif issue is not None and obj.get("type") == "assistant":
                     # gate-refusal/pr-opened 와 같은 파싱 결과(obj)를 재사용한다
                     # — 이 줄에 대해 json.loads 를 두 번 부르지 않는다.
@@ -2883,6 +2963,14 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                         if not isinstance(block, dict) or block.get("type") != "tool_use":
                             continue
                         name = block.get("name")
+                        # 이슈 #246 결함 3: 이 tool_use 의 id -> name 을 기록해
+                        # 둔다 — 뒤이어 올 tool_result 의 tool_use_id 가 이걸
+                        # 통해 어느 도구 호출이 거부됐는지 되짚는다. Write/Edit/
+                        # Bash 로 좁히지 않고 전부 기록한다(진행 리포팅과 달리
+                        # 상관관계는 모든 도구가 대상).
+                        block_id = block.get("id")
+                        if isinstance(block_id, str) and isinstance(name, str):
+                            tool_use_names[block_id] = name
                         inp = block.get("input") or {}
                         if name in ("Write", "Edit"):
                             fp = inp.get("file_path")
@@ -2897,6 +2985,12 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                                 _append_event(events_path, "progress",
                                              {"kind": "tool_use",
                                               "detail": f"{command[:60]} 실행"})
+        if issue is not None and not result_seen and pending_refusals:
+            # 이슈 #246 결함 1 (S1/S3): 스트림이 result 줄 없이 EOF 에
+            # 닿았다(크래시/kill/truncation, 또는 터미널 줄 자체가 malformed
+            # JSON) — 이미 층 분류된 후보를 잃지 않고 unverified-refusal 로
+            # 남긴다.
+            _flush_unverified(events_path, pending_refusals)
         rc = proc.wait()
         roster_remove(roster_key)
         if issue is not None:

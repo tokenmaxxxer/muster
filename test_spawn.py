@@ -1427,6 +1427,14 @@ class EventReporting(unittest.TestCase):
             return []
         return [json.loads(l) for l in events_path.read_text().splitlines()]
 
+    @staticmethod
+    def _tool_use_line(tool_use_id, name):
+        # 이슈 #246 결함 3: 실제 스트림에서 tool_result 는 언제나 그 도구를
+        # 요청한 assistant 의 tool_use 블록(같은 id) 뒤에 온다 — 건별
+        # 상관관계 픽스처가 그 순서를 재현한다.
+        return json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": tool_use_id, "name": name, "input": {}}]}})
+
     def test_end_turn_result_is_not_a_gate_refusal(self):
         # issue-46/49 survey fixture: a normal end_turn result JSON line
         # contains the literal key name "permission_denials" — the old
@@ -1466,12 +1474,14 @@ class EventReporting(unittest.TestCase):
         text = ("PreToolUse:Bash hook error: "
                 "[/Users/jk/.claude/plugins/marketplaces/tokenmaxxxer-core/core/hooks/board-gate.sh] "
                 "board-gate: refused — 보드에 없는 파일을 쓰려 했다")
+        tool_use = self._tool_use_line("t1", "Write")
         tool_result = json.dumps({"type": "user", "message": {"content": [
-            {"type": "tool_result", "is_error": True, "content": text}]}})
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text}]}})
         result_line = json.dumps({"type": "result", "is_error": False,
                                   "permission_denials": [{"tool_name": "Write"}]})
         events = self._run(tempfile.mkdtemp(),
-                           tool_result + "\n" + result_line + "\n")
+                           tool_use + "\n" + tool_result + "\n" + result_line + "\n")
         refusals = [e for e in events if e["type"] == "gate-refusal"]
         self.assertEqual(len(refusals), 1, events)
         self.assertEqual(refusals[0]["detail"]["gate"], "board-gate", events)
@@ -1492,12 +1502,14 @@ class EventReporting(unittest.TestCase):
         )
         for text in samples:
             with self.subTest(text=text):
+                tool_use = self._tool_use_line("t1", "Bash")
                 tool_result = json.dumps({"type": "user", "message": {"content": [
-                    {"type": "tool_result", "is_error": True, "content": text}]}})
+                    {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+                     "content": text}]}})
                 result_line = json.dumps({"type": "result", "is_error": False,
                                           "permission_denials": [{"tool_name": "Bash"}]})
                 events = self._run(tempfile.mkdtemp(),
-                                   tool_result + "\n" + result_line + "\n")
+                                   tool_use + "\n" + tool_result + "\n" + result_line + "\n")
                 self.assertTrue([e for e in events if e["type"] == "harness-refusal"], events)
                 self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
 
@@ -1510,12 +1522,14 @@ class EventReporting(unittest.TestCase):
         )
         for text in samples:
             with self.subTest(text=text):
+                tool_use = self._tool_use_line("t1", "Write")
                 tool_result = json.dumps({"type": "user", "message": {"content": [
-                    {"type": "tool_result", "is_error": True, "content": text}]}})
+                    {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+                     "content": text}]}})
                 result_line = json.dumps({"type": "result", "is_error": False,
                                           "permission_denials": [{"tool_name": "Write"}]})
                 events = self._run(tempfile.mkdtemp(),
-                                   tool_result + "\n" + result_line + "\n")
+                                   tool_use + "\n" + tool_result + "\n" + result_line + "\n")
                 self.assertTrue([e for e in events if e["type"] == "sandbox-refusal"], events)
                 self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
 
@@ -1546,12 +1560,14 @@ class EventReporting(unittest.TestCase):
                 "following part requires approval: PreToolUse:Bash hook "
                 "error: [/plugins/tokenmaxxxer-core/core/hooks/some-gate.sh] "
                 "some-gate: refused — 원문 인용된 명령")
+        tool_use = self._tool_use_line("t1", "Bash")
         tool_result = json.dumps({"type": "user", "message": {"content": [
-            {"type": "tool_result", "is_error": True, "content": text}]}})
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text}]}})
         result_line = json.dumps({"type": "result", "is_error": False,
                                   "permission_denials": [{"tool_name": "Bash"}]})
         events = self._run(tempfile.mkdtemp(),
-                           tool_result + "\n" + result_line + "\n")
+                           tool_use + "\n" + tool_result + "\n" + result_line + "\n")
         self.assertTrue([e for e in events if e["type"] == "harness-refusal"], events)
         self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
 
@@ -1573,24 +1589,52 @@ class EventReporting(unittest.TestCase):
              ("gate-refusal", "harness-refusal", "sandbox-refusal",
               "unclassified-refusal")], events)
 
-    def test_spurious_marker_match_does_not_suppress_real_denial_fallback(self):
-        # 이슈 #235 요구사항 4(iii) / execution-observation Finding 1(c): 가짜
-        # 매치(무관한 출력에 우연히 인용된 게이트 마커)가 refusals_seen 을
-        # 채워, 같은 세션의 상관 안 되는 진짜 거부가 받아야 할
-        # unclassified-refusal 폴백을 억제하면 안 된다 — 두 실패 모드가
-        # 합성되지 않아야 한다.
-        spurious = ("Some unrelated tool output happened to mention "
-                    "PreToolUse:Bash hook error: [/plugins/tokenmaxxxer-core/"
-                    "core/hooks/some-other-gate.sh] some-other-gate: "
-                    "refused — 무관한 내용")
+    def test_spurious_candidate_tool_name_mismatch_does_not_suppress_real_denial_fallback(self):
+        # 이슈 #246 결함 3 (범위 확장, 발주자 코멘트): 이슈 #235 요구사항
+        # 4(iii)/execution-observation Finding 1(c)가 원래 이름으로 주장했던
+        # 비억제 속성의 교체 픽스처 — 옛 픽스처는 앵커된 `_GATE_HOOK_RE` 때문에
+        # 아예 분류조차 안 되는 텍스트를 썼다(제안서 결함 3 실측). 이 픽스처는
+        # 비-앵커 층 3 패턴("Operation not permitted")에 걸려 실제로 분류되는
+        # 스푸리어스 후보를 쓴다 — 그 후보의 tool_use_id 로 상관되는 tool_name
+        # ("Read")이 세션의 permission_denials 항목("Write")과 다르므로, 옛
+        # 세션 전역 `refusals_seen` 불리언이었다면 이 후보 하나만으로 그
+        # unclassified-refusal 폴백이 영구히 억제됐을 것이다. 이슈 #246 결함
+        # 3의 건별(tool_name 단위) 상관관계는 그 억제를 없앤다: 스푸리어스
+        # 후보 자신은 fire 하지 않지만(진짜 층 라벨을 참칭하지 않음), 상관 안
+        # 되는 진짜 거부("Write")의 폴백은 여전히 fire 한다.
+        spurious = ("Some unrelated tool output happened to mention: mkdir: "
+                    "/tmp/foo: Operation not permitted")
+        tool_use = self._tool_use_line("t1", "Read")
         tool_result = json.dumps({"type": "user", "message": {"content": [
-            {"type": "tool_result", "is_error": True, "content": spurious}]}})
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": spurious}]}})
         result_line = json.dumps({"type": "result", "is_error": False,
                                   "permission_denials": [{"tool_name": "Write"}]})
         events = self._run(tempfile.mkdtemp(),
-                           tool_result + "\n" + result_line + "\n")
+                           tool_use + "\n" + tool_result + "\n" + result_line + "\n")
         self.assertTrue([e for e in events if e["type"] == "unclassified-refusal"], events)
+        self.assertFalse([e for e in events if e["type"] == "sandbox-refusal"], events)
         self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_spurious_candidate_tool_name_match_correlates_and_fires_as_real_layer(self):
+        # 위 픽스처의 컴패니언(제안서 결함 3): 같은 스푸리어스-패턴 텍스트라도
+        # 후보의 tool_name 이 실제로 permission_denials 항목과 일치하면 Counter
+        # 상관은 그걸 확정하고 진짜 층 이벤트(sandbox-refusal)로 fire 해야
+        # 한다 — tool_name 매치가 무조건 통과가 아니라 실제로 판별함을
+        # 확인한다.
+        text = ("Some unrelated tool output happened to mention: mkdir: "
+                "/tmp/foo: Operation not permitted")
+        tool_use = self._tool_use_line("t1", "Write")
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Write"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_use + "\n" + tool_result + "\n" + result_line + "\n")
+        refusals = [e for e in events if e["type"] == "sandbox-refusal"]
+        self.assertEqual(len(refusals), 1, events)
+        self.assertFalse([e for e in events if e["type"] == "unclassified-refusal"], events)
 
     def test_record_fields_gate_denial_reports_hook_stem_not_role_name(self):
         # 이슈 #235 요구사항 4(iv) / execution-observation Finding 2 실물 샘플:
@@ -1601,15 +1645,218 @@ class EventReporting(unittest.TestCase):
                 "[/plugins/tokenmaxxxer-core/core/hooks/record-fields-gate.sh]: "
                 "execution-observation: refused — record is missing required "
                 "section(s): 코드 리뷰")
+        tool_use = self._tool_use_line("t1", "Write")
         tool_result = json.dumps({"type": "user", "message": {"content": [
-            {"type": "tool_result", "is_error": True, "content": text}]}})
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text}]}})
         result_line = json.dumps({"type": "result", "is_error": False,
                                   "permission_denials": [{"tool_name": "Write"}]})
         events = self._run(tempfile.mkdtemp(),
-                           tool_result + "\n" + result_line + "\n")
+                           tool_use + "\n" + tool_result + "\n" + result_line + "\n")
         refusals = [e for e in events if e["type"] == "gate-refusal"]
         self.assertEqual(len(refusals), 1, events)
         self.assertEqual(refusals[0]["detail"]["gate"], "record-fields-gate", events)
+
+    def test_eof_with_pending_candidate_and_no_result_line_flushes_unverified(self):
+        # 이슈 #246 결함 1 (S1/S3): 세션이 터미널 result 줄 없이 끝난다 —
+        # 크래시/kill/truncation(S1)과 그 줄 자체가 malformed JSON(S3)은
+        # `_spawn_one` 관점에서 같은 관찰(루프가 result 줄 없이 EOF)로
+        # 수렴한다. 이미 층 분류된 후보를 메모리에서 잃지 않고
+        # unverified-refusal 로 flush 한다 — 확정 라벨(gate-refusal)을
+        # 참칭하지 않는다.
+        text = ("PreToolUse:Write hook error: [/plugins/tokenmaxxxer-core/"
+                "core/hooks/some-gate.sh] some-gate: refused — 잘린 세션")
+        tool_use = self._tool_use_line("t1", "Write")
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text}]}})
+        events = self._run(tempfile.mkdtemp(), tool_use + "\n" + tool_result + "\n")
+        self.assertEqual(len([e for e in events if e["type"] == "unverified-refusal"]), 1,
+                         events)
+        self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_result_line_with_untrustworthy_permission_denials_shape_flushes_unverified(self):
+        # 이슈 #246 결함 1 (S2): permission_denials 가 absent/None/truthy
+        # non-list 면 형태를 신뢰할 수 없다 — `or []`가 이 셋을 "확정 0건"과
+        # 구분 없이 뭉갰던 게 원래 결함이었다. 셋 다 같은 unverified-refusal
+        # 경로로 간다; 확정된 빈 리스트([])는 별도로
+        # test_zero_denials_session_with_gate_marker_in_error_output_fires_nothing
+        # 가 이미 "아무 것도 안 남" 을 고정한다.
+        text = ("PreToolUse:Write hook error: [/plugins/tokenmaxxxer-core/"
+                "core/hooks/some-gate.sh] some-gate: refused — 형태 불량")
+        cases = {
+            "absent": {"type": "result", "is_error": False},
+            "none": {"type": "result", "is_error": False, "permission_denials": None},
+            "string": {"type": "result", "is_error": False,
+                      "permission_denials": "oops"},
+        }
+        for label, result_obj in cases.items():
+            with self.subTest(shape=label):
+                tool_use = self._tool_use_line("t1", "Write")
+                tool_result = json.dumps({"type": "user", "message": {"content": [
+                    {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+                     "content": text}]}})
+                result_line = json.dumps(result_obj)
+                events = self._run(tempfile.mkdtemp(),
+                                   tool_use + "\n" + tool_result + "\n" + result_line + "\n")
+                self.assertEqual(
+                    len([e for e in events if e["type"] == "unverified-refusal"]), 1, events)
+                self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_two_distinct_same_layer_denials_produce_two_distinct_events(self):
+        # 이슈 #246 결함 2: 층 전체를 가리는 옛 dedup 키(예: ("harness",))는
+        # 첫 번째 텍스트만 남기고 두 번째(진짜 거부일 수 있는) detail 을
+        # 잃었다 — 정규화된 텍스트를 키에 포함해 서로 다른 두 사유가 둘 다
+        # 살아남는다.
+        text1 = "Permission to use Bash has been denied"
+        text2 = "This command requires approval"
+        tool_use1 = self._tool_use_line("t1", "Bash")
+        tool_result1 = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text1}]}})
+        tool_use2 = self._tool_use_line("t2", "Bash")
+        tool_result2 = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t2",
+             "content": text2}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Bash"},
+                                                          {"tool_name": "Bash"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_use1 + "\n" + tool_result1 + "\n" +
+                           tool_use2 + "\n" + tool_result2 + "\n" + result_line + "\n")
+        harness = [e for e in events if e["type"] == "harness-refusal"]
+        self.assertEqual(len(harness), 2, events)
+        self.assertEqual({h["detail"] for h in harness}, {text1, text2}, events)
+        self.assertFalse([e for e in events if e["type"] == "unclassified-refusal"], events)
+
+    def test_two_identical_same_layer_denials_still_collapse_to_one(self):
+        # 회귀 방지: 정확히 같은 detail 은 여전히 한 번만 — 이슈
+        # #235/spawn.py:2619-2622 의 "같은 detail 은 한 번" 의도가 텍스트를
+        # 키에 포함시킨 뒤에도 유지된다.
+        text = "Permission to use Bash has been denied"
+        tool_use1 = self._tool_use_line("t1", "Bash")
+        tool_result1 = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text}]}})
+        tool_use2 = self._tool_use_line("t2", "Bash")
+        tool_result2 = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t2",
+             "content": text}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Bash"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_use1 + "\n" + tool_result1 + "\n" +
+                           tool_use2 + "\n" + tool_result2 + "\n" + result_line + "\n")
+        self.assertEqual(len([e for e in events if e["type"] == "harness-refusal"]), 1, events)
+
+    def test_two_hook_paths_sharing_filename_stem_are_not_collapsed(self):
+        # 이슈 #246 결함 2: `Path(...).stem` 만으로 걸면 서로 다른 디렉터리의
+        # 동일 파일명 hook(둘 다 "some-gate")이 충돌했다 — 키는 이제 hook 의
+        # 전체 경로를 쓴다. `detail["gate"]` 표시 필드는 여전히 stem.
+        text1 = ("PreToolUse:Write hook error: [/plugins/a/some-gate.sh] "
+                "some-gate: refused — 사유 A")
+        text2 = ("PreToolUse:Write hook error: [/plugins/b/some-gate.sh] "
+                "some-gate: refused — 사유 B")
+        tool_use1 = self._tool_use_line("t1", "Write")
+        tool_result1 = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text1}]}})
+        tool_use2 = self._tool_use_line("t2", "Write")
+        tool_result2 = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t2",
+             "content": text2}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Write"},
+                                                          {"tool_name": "Write"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_use1 + "\n" + tool_result1 + "\n" +
+                           tool_use2 + "\n" + tool_result2 + "\n" + result_line + "\n")
+        refusals = [e for e in events if e["type"] == "gate-refusal"]
+        self.assertEqual(len(refusals), 2, events)
+        self.assertEqual({r["detail"]["gate"] for r in refusals}, {"some-gate"}, events)
+        self.assertEqual({r["detail"]["reason"] for r in refusals}, {"사유 A", "사유 B"}, events)
+
+    def test_whitespace_variant_same_layer_denials_still_collapse_to_one(self):
+        # 이슈 #246 dedup 키 텍스트 정규화: multi-block tool_result 가 넣는
+        # 내부 개행(`_tool_result_text`의 "\n".join)과 우연한 공백 차이는
+        # 사유가 실질적으로 같으면 같은 키로 뭉쳐야 한다. denials 를 일부러
+        # 2건 실어 둔다 — 정규화가 안 됐다면 두 후보가 서로 다른 키로 갈려
+        # 둘 다(2건) fire 하고 남는 denial 이 없다; 정규화가 됐다면 후보가
+        # 1개뿐이라 1건만 fire 하고 나머지 denial 1건이 unclassified-refusal
+        # 로 남는다 — 그 잔여가 정규화가 실제로 일어났다는 증거다.
+        text1 = "mkdir: /tmp/foo: Operation not permitted"
+        tool_use1 = self._tool_use_line("t1", "Write")
+        tool_result1 = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text1}]}})
+        tool_use2 = self._tool_use_line("t2", "Write")
+        tool_result2 = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t2", "content": [
+                {"type": "text", "text": "mkdir: /tmp/foo:"},
+                {"type": "text", "text": "Operation not permitted"}]}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Write"},
+                                                          {"tool_name": "Write"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_use1 + "\n" + tool_result1 + "\n" +
+                           tool_use2 + "\n" + tool_result2 + "\n" + result_line + "\n")
+        self.assertEqual(len([e for e in events if e["type"] == "sandbox-refusal"]), 1, events)
+        self.assertTrue([e for e in events if e["type"] == "unclassified-refusal"], events)
+
+    def test_denial_entry_missing_tool_name_still_fires_unclassified_fallback(self):
+        # 헌트 finding 2: permission_denials 항목이 dict 가 아니거나
+        # tool_name 이 없으면 Counter 에서 그냥 빠진다 — 그 항목을 leftover
+        # 판정에도 안 넣으면, 매치될 수 없는 denial 자체가 흔적 없이
+        # 사라진다(이슈 #246 결함 1 이 없애려던 "0건 = 무해"를 다른 문으로
+        # 재도입). 후보의 tool_name 이 그 이상한 모양과 매치되지 않아 real
+        # layer 로는 안 뜨더라도, unclassified-refusal 폴백은 반드시 떠야
+        # 한다.
+        text = "Permission to use Bash has been denied"
+        tool_use = self._tool_use_line("t1", "Bash")
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"other_field": "Bash"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_use + "\n" + tool_result + "\n" + result_line + "\n")
+        self.assertTrue([e for e in events if e["type"] == "unclassified-refusal"], events)
+        self.assertFalse([e for e in events if e["type"] == "harness-refusal"], events)
+
+    def test_unresolved_tool_use_id_with_well_shaped_denials_degrades_to_unclassified(self):
+        # 헌트 finding 3 (커버리지 공백 메움): 후보의 tool_use_id 가 못
+        # 풀렸어도(예: assistant 의 tool_use 줄 자체가 유실됐다면) denials 가
+        # 정상 모양이면 폴백으로 정확히 떨어져야 한다 — 확정 라벨을
+        # 참칭하지 않되, 조용히 사라지지도 않는다. assistant tool_use 줄을
+        # 아예 안 보내 tool_use_id 를 의도적으로 못 풀리게 한다.
+        text = "Permission to use Bash has been denied"
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "unknown-id",
+             "content": text}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Bash"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_result + "\n" + result_line + "\n")
+        self.assertTrue([e for e in events if e["type"] == "unclassified-refusal"], events)
+        self.assertFalse([e for e in events if e["type"] == "harness-refusal"], events)
+
+    def test_repeated_result_line_does_not_double_flush(self):
+        # 헌트 finding 5: 옛 코드는 refusals_seen 이 세션 전체에 걸쳐 남아
+        # 두 번째 result 줄에 대해 flush 가 no-op 이었다 — result 가 "언제나
+        # 스트림의 마지막 줄"이라는 가정은 문서화만 됐을 뿐 강제되지 않는다
+        # (docs/issue-235/reports/execution-observation/research-evidence.md:160-164).
+        # result_seen 가드가 두 번째 result 줄에서 재-flush 를 막는다.
+        text = "Permission to use Bash has been denied"
+        tool_use = self._tool_use_line("t1", "Bash")
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Bash"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_use + "\n" + tool_result + "\n" +
+                           result_line + "\n" + result_line + "\n")
+        self.assertEqual(len([e for e in events if e["type"] == "harness-refusal"]), 1, events)
 
     def test_pr_opened_does_not_refire_across_respawns(self):
         # issue-123 survey fixture: PR #124's URL, echoed again on a later
