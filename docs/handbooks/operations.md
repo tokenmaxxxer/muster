@@ -668,9 +668,13 @@ The comparison base is the default branch `origin/HEAD` points at. `GATE_BASE` o
 끌어낸다 — 추출 실패는 fail-closed(차단). 근거는
 `docs/issue-245/decisions/2026-08-04-closes-gate-wiring-tradeoffs.md`.
 
-**아직 아무것도 실제로 막지 않는다** — main 브랜치 보호 규칙에 이 체크가
-필수로 등록돼야 머지 버튼이 실제로 잠긴다. 등록 절차는
-`docs/issue-245/reports/implementation.md`("What was NOT done").
+**2026-08-04 부로 실제로 막는다** — main 브랜치 보호 규칙에 `closes-gate`가
+필수 상태 체크로 등록돼 있고(`required_status_checks.contexts:
+["closes-gate"]`) `enforce_admins`도 켜져 있다 — `gh api
+repos/tokenmaxxxer/on-the-record/branches/main/protection`으로 직접
+확인된다. 검증용 일회용 PR #263(머지 안 됨)이 closing 키워드가 있는
+상태에서의 차단과 제거 후 통과를 양방향으로 실측했다. 활성화 경과는
+`docs/issue-245/reports/implementation.md`("Activation completed").
 
 ## Merge gate (CI)
 
@@ -684,10 +688,15 @@ branch name (`issue-<n>/<role>`), not the PR body; phase from whether the
 body has a closing keyword. Extraction failure is fail-closed. Rationale:
 `docs/issue-245/decisions/2026-08-04-closes-gate-wiring-tradeoffs.md`.
 
-**Nothing is actually blocked yet** — the check has to be registered as
-required on main's branch protection rule before the merge button is
-really locked. Activation procedure:
-`docs/issue-245/reports/implementation.md` ("What was NOT done").
+**Blocking for real as of 2026-08-04** — `closes-gate` is registered as a
+required status check on main's branch protection rule
+(`required_status_checks.contexts: ["closes-gate"]`) and `enforce_admins`
+is on too — verify directly with `gh api
+repos/tokenmaxxxer/on-the-record/branches/main/protection`. A throwaway
+verification PR (#263, never merged) measured both directions: blocked
+with the closing keyword present, passing once it was removed.
+Activation history: `docs/issue-245/reports/implementation.md`
+("Activation completed").
 
 ## 자체 점검
 

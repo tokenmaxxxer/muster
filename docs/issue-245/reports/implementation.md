@@ -3,7 +3,7 @@ code_under_review:
   - gates/ci.py
   - gates/test_closes_gate_ci.py
   - .github/workflows/plan-aware-closes-gate.yml
-loop_state: in-progress
+loop_state: landed
 ---
 
 # Implementation record — issue #245
@@ -262,33 +262,69 @@ phase1-mismatch addition — not `gates/gates.py`, not
    plumbing for a race that needs an adversary to time an edit within a
    single CI run.
 
+## Activation completed (2026-08-04)
+
+Both items this record's "Next steps" 1-2 deferred to the human are now
+done, confirmed by direct measurement, not by report:
+
+- **Branch protection is live.** `gh api
+  repos/tokenmaxxxer/on-the-record/branches/main/protection` (previously
+  404, per the survey this issue built on) now returns
+  `required_status_checks.contexts: ["closes-gate"]` and
+  `enforce_admins.enabled: true` — measured directly this session,
+  2026-08-04.
+- **Post-activation regression check ran, bidirectionally, against a
+  real PR.** PR #263 (`issue-224/closes-gate-verify`, throwaway,
+  "머지 금지", never merged — opened 2026-08-04T02:06:44Z, closed
+  2026-08-04T02:51:33Z) drove the required check through both states on
+  a live branch-protected `main`: with a closing keyword against an
+  issue whose plan still had incomplete steps, `closes-gate` reported
+  FAILURE and the merge button was blocked; with the closing keyword
+  removed, `closes-gate` reported SUCCESS and the PR showed clean. Both
+  states are recorded in the PR's own closing comment
+  (2026-08-04T02:51:32Z): "검증 완료: closing 키워드 + 미완 계획 이슈 →
+  closes-gate FAILURE + merge BLOCKED 실측, 키워드 제거 → SUCCESS +
+  CLEAN 실측. 브랜치 보호(필수 체크 closes-gate, enforce_admins) 정상
+  작동 확인." This is issue #245 requirement 3's "실물 확인" — the live
+  required-status-check UI block this record's "Verification run"
+  section above noted as not yet done — now closed out.
+
+This completes both deferred items; `loop_state` moves to `landed`
+below.
+
 ## Next steps
 
-1. Human runs the branch-protection activation procedure in "What was
+Both items below are now done — kept as the historical record of what
+was asked of the human; see "Activation completed" above for the
+confirmation.
+
+1. ~~Human runs the branch-protection activation procedure in "What was
    NOT done" above (`gh api -X PUT .../branches/main/protection`,
    `enforce_admins=true`), after confirming the exact required-check
    context string once this PR has merged and the workflow has reported
-   at least once against `main`.
-2. Human runs the recommended post-activation regression check (a
+   at least once against `main`.~~ Done — branch protection is live
+   (see "Activation completed").
+2. ~~Human runs the recommended post-activation regression check (a
    throwaway closing-keyword PR against a plan-incomplete issue actually
    gets blocked by a live required check; a clean PR passes) — this is
    what closes out issue #245 requirement 3's "실물 확인" completely;
    this session verified the logic end-to-end against real GitHub data
    but did not drive a live required-status-check UI state (see
-   "Verification run").
+   "Verification run").~~ Done — PR #263 (see "Activation completed").
 3. File a follow-up issue against `gates/gates.py`'s
    `_always_writable()` for the proposal-file pattern mismatch (Open
    findings item 1) — needed before the *full* `ci.check()` bundle
    (role_scope/deps/record checks) could ever safely become a required
    check; not needed for this issue's own delivery, which stays scoped
-   to `closes_only=True`.
+   to `closes_only=True`. Still open.
 4. Open findings item 2 (multi-fetch race) has no assigned follow-up —
    accepted residual risk, revisit only if `pr_reference.check` is ever
-   restructured for other reasons.
+   restructured for other reasons. Still open.
 
-Once steps 1-2 land, `loop_state` moves to `landed` and
+Steps 1-2 have landed; `loop_state` moves to `landed` and
 `docs/handbooks/operations.md` picks up the standing CI/gates
-description per "Doc-placement ladder" below.
+description per "Doc-placement ladder" below (this record's own PR
+carries that handbook update).
 
 ## Doc-placement ladder
 
