@@ -766,9 +766,9 @@ repos/tokenmaxxxer/on-the-record/branches/main/protection`으로 직접
 enforce the plan-aware Closes gate (`gates/pr_reference.py`, issue #228)
 — unlike the "Gates" section above, this one **does** block:
 `--closes-only` skips the write_scope/protected-path/deps/record checks
-and runs only the Closes gate. The issue number is derived from the head
-branch name (`issue-<n>/<role>`), not the PR body; phase from whether the
-body has a closing keyword. Extraction failure is fail-closed. Rationale:
+and runs only the Closes gate. The issue number and role are derived
+from the head branch name (`issue-<n>/<role>`), not the PR body.
+Extraction failure is fail-closed. Rationale:
 `docs/issue-245/decisions/2026-08-04-closes-gate-wiring-tradeoffs.md`.
 
 **Blocking for real as of 2026-08-04** — `closes-gate` is registered as a
@@ -780,6 +780,28 @@ verification PR (#263, never merged) measured both directions: blocked
 with the closing keyword present, passing once it was removed.
 Activation history: `docs/issue-245/reports/implementation.md`
 ("Activation completed").
+
+Phase is derived from a human approval event, not from closing-keyword
+presence (issue #271): a qualifying `APPROVE issue-<n>/<role>` issue/PR
+comment from a `docs/specs/approvers.md` login (single-account mode), or
+a PR review Approve from a *different* approvers.md login (two-account
+mode) — `gates/flows.py`'s `_pr_approved()`, the same function the status
+board already uses to flag unapproved PRs. No qualifying approval yet
+means phase1, regardless of what the PR body says. This closes a
+predicate-coupling defect (issue #245's own execution-observation,
+Finding F1): when phase used to come from the closing keyword itself,
+the phase-1 "no closing keyword" check could never observe the one state
+it exists to catch, because any keyword already forced the PR to
+classify as phase2 first.
+
+The phase-1 mismatch check itself now reads three surfaces, not just the
+PR body: the PR title and every commit message on the branch are also
+scanned for a closing-effect keyword aimed at the issue
+(`gates/ci.py`'s `_phase1_surface_mismatch`) — added after two real
+incidents where a branch commit's own message, invisible to the old
+body-only check, auto-closed an issue on merge the moment it landed.
+Rationale for both changes:
+`docs/issue-271/decisions/2026-08-04-phase-signal-and-surface-coverage-mechanism.md`.
 
 ## 자체 점검
 

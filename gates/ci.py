@@ -35,14 +35,19 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
+import flows
 import gates
 import pr_reference
+import spawn
 
 # `issue-<n>/<role>` 브랜치 명명 규칙(role-handoff contract v3, gates.BRANCH_ROLE
-# 과 같은 관례)에서 이슈 번호만 뽑는다 — CI 트리거 시점엔 사람이 --issue 를
-# 못 주므로(issue #245 survey §10 미해결 질문), 이미 강제되는 이 명명 규칙을
-# 재사용한다.
-_ISSUE_BRANCH = re.compile(r"^issue-(\d+)/")
+# 과 같은 관례)에서 이슈 번호와 role 세그먼트를 함께 뽑는다 — CI 트리거
+# 시점엔 사람이 --issue 를 못 주므로(issue #245 survey §10 미해결 질문),
+# 이미 강제되는 이 명명 규칙을 재사용한다. role 은 issue #271 요구사항 2의
+# 승인-이벤트 phase 신호(`APPROVE issue-<n>/<role>`)에 필요해 이 이슈에서
+# 추가한다.
+_ISSUE_ROLE_BRANCH = re.compile(r"^issue-(\d+)/([^/]+)$")
 
 
 def _pr_head_ref(repo: Path, pr: int) -> str | None:
@@ -57,10 +62,67 @@ def _pr_head_ref(repo: Path, pr: int) -> str | None:
     return json.loads(r.stdout).get("headRefName")
 
 
-def _issue_from_branch(branch: str) -> int | None:
+def _issue_and_role_from_branch(branch: str) -> tuple[int, str] | None:
     """순수 함수(네트워크 없음) — `_autodetect_issue_phase`/테스트가 공유."""
-    m = _ISSUE_BRANCH.match(branch)
-    return int(m.group(1)) if m else None
+    m = _ISSUE_ROLE_BRANCH.match(branch)
+    return (int(m.group(1)), m.group(2)) if m else None
+
+
+def _pr_title(repo: Path, pr: int) -> str | None:
+    """PR 제목 — issue #271 요구사항 1 row B(GitHub 이 closing 키워드를
+    공식 문서화한 표면이지만, `pr_reference._pr_view`는 지금까지 fetch 만
+    하고 버렸다). `pr_reference.py`의 body-only 시그니처는 #228 소유라
+    무변경 — 이 오케스트레이션 계층에서 별도로 읽는다."""
+    import json
+    import subprocess
+    r = subprocess.run(["gh", "pr", "view", str(pr), "--json", "title"],
+                       cwd=repo, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return json.loads(r.stdout).get("title")
+
+
+def _pr_commit_messages(repo: Path, pr: int) -> list[str] | None:
+    """PR 브랜치 각 커밋의 전체 메시지 — issue #271 요구사항 1 row C(실물
+    2건 사고의 벡터). `gh api repos/<slug>/pulls/<n>/commits`, 이슈가 직접
+    제안한 메커니즘.
+
+    이 엔드포인트는 페이지당 30개로 잘린다(GitHub 기본값) — `--paginate`
+    만 쓰면 페이지마다 별도 JSON 배열이 순차 출력돼 다중 페이지 응답이
+    유효한 단일 JSON이 아니게 되므로(`json.loads`가 `ValueError`로 죽어
+    아래 except 가 통째로 삼킨다), `spawn._issue_comments`(spawn.py:836,
+    같은 문제를 이미 고친 전례)와 같이 `--slurp`(페이지들을 바깥 배열
+    하나로 감싼다)를 같이 쓰고 평탄화한다 — warrant-hunter(silent-failure
+    stance, 2026-08-04)가 실측: 30개 넘는 커밋의 PR에서 뒤쪽 커밋의
+    closing 키워드가 이 함수 하나만 예외적으로 안 걸리고 있었다."""
+    import json
+    import subprocess
+    slug = spawn._repo_slug(repo)
+    if not slug:
+        return None
+    r = subprocess.run(["gh", "api", f"repos/{slug}/pulls/{pr}/commits",
+                        "--paginate", "--slurp"],
+                       cwd=repo, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    try:
+        data = json.loads(r.stdout)
+    except ValueError:
+        return None
+    data = [c for page in data for c in page]
+    return [c.get("commit", {}).get("message", "") for c in data]
+
+
+def _pr_reviews(repo: Path, pr: int) -> list[dict] | None:
+    """PR 리뷰 목록(state, author.login) — two-account 승인 신호
+    (`flows._pr_approved`)에 필요하다."""
+    import json
+    import subprocess
+    r = subprocess.run(["gh", "pr", "view", str(pr), "--json", "reviews"],
+                       cwd=repo, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return json.loads(r.stdout).get("reviews")
 
 
 def _closes_ref_for_issue(body: str, issue: int):
@@ -79,26 +141,50 @@ def _closes_ref_for_issue(body: str, issue: int):
     return None
 
 
-def _phase_from_body(body: str, issue: int) -> str:
-    """PR 본문에 이 이슈를 향한 closing 키워드가 있으면 phase2, 없으면
-    phase1 — 순수 함수(네트워크 없음). `pr_reference.check_body` 가 이미
-    같은 `_CLOSES_REF` 로 판정 분기하는 것과 동일한 신호를 CI 트리거
-    시점의 phase 추정에도 재사용한다."""
-    return "phase2" if _closes_ref_for_issue(body, issue) else "phase1"
+def _phase_from_approval(repo: Path, pr: int, issue: int, role: str) -> str:
+    """phase2 를 closing 키워드가 아니라 승인 이벤트로 판정한다 — 없으면
+    phase1(issue #271 요구사항 2, #245 관찰 F1 술어 결합 해소). contract
+    v3 s19 의 두 경로 그대로: 정확한 `APPROVE issue-<n>/<role>` 이슈/PR
+    코멘트(single-account, 승인자 allowlist) 또는 differing-account PR
+    리뷰 Approve(two-account) — closing 키워드 유무는 이 판정에 전혀
+    관여하지 않는다. `flows._pr_approved`(issue #172, 상황판이 이미 같은
+    두 경로를 검증하는 코드, `flows.py:130`)를 그대로 재사용한다 —
+    새로 손으로 짜지 않는다. `spawn._approvers`/`spawn._issue_comments`
+    를 `gates/` 에서 쓰는 것은 `closure_sweep.py:21`의 기존 전례를
+    따른다."""
+    subject = f"issue-{issue}"
+    approvers = spawn._approvers(repo)
+    comments = spawn._issue_comments(repo, issue)
+    comments += spawn._issue_comments(repo, pr)
+    reviews = _pr_reviews(repo, pr)
+    pr_dict = {"reviews": reviews or []}
+    approved = flows._pr_approved(pr_dict, comments, approvers, subject, role)
+    return "phase2" if approved else "phase1"
 
 
 def _phase1_mismatch(body: str, issue: int) -> list[str]:
-    """phase1 문서 규칙("Closes/Fixes/Resolves 금지")의 기계 검사 — 순수 함수.
+    """phase1 문서 규칙("Closes/Fixes/Resolves 금지")의 기계 검사 — 순수 함수,
+    본문 한 표면만 본다. `_phase1_surface_mismatch`의 단일-표면 특수형 —
+    기존 단위테스트가 이 시그니처를 직접 부르므로 그대로 유지한다."""
+    return _phase1_surface_mismatch(issue, [("본문", body)])
+
+
+def _phase1_surface_mismatch(issue: int, surfaces: list[tuple[str, str]]) -> list[str]:
+    """`_phase1_mismatch`를 본문(row A) 외에 제목(row B)·커밋 메시지(row C)
+    까지 넓힌 버전 — issue #271 요구사항 1. `surfaces`는 (표면 라벨, 텍스트)
+    쌍의 목록이고, 앞쪽 표면부터 순서대로 검사해 처음 걸리는 곳에서 멈춘다
+    (표면마다 중복 사유를 쌓지 않는다).
 
     `pr_reference.check_body`의 phase1 분기(28-62행)는 평문 `#N` 참조만
     보고 closing 키워드 부재는 안 본다: 에러 메시지는 금지를 주장하지만
     실제 판정은 안 한다(issue #245 survey §1, 문서-검사 불일치). `check_body`
     자체는 #228 소유라 무변경 — 이 오케스트레이션 계층에서 같은
     `_CLOSES_REF`(이미 `closure_sweep.py`가 재사용 중인 정규식)로 보완한다."""
-    m = _closes_ref_for_issue(body, issue)
-    if m:
-        return [f"phase-1 제안 PR 본문에 closing 키워드({m.group(1)})가 있다 — "
-                f"phase-1 머지가 이슈 #{issue}를 자동으로 닫으면 안 된다."]
+    for label, text in surfaces:
+        m = _closes_ref_for_issue(text or "", issue)
+        if m:
+            return [f"phase-1 제안 PR {label}에 closing 키워드({m.group(1)})가 "
+                    f"있다 — phase-1 머지가 이슈 #{issue}를 자동으로 닫으면 안 된다."]
     return []
 
 
@@ -112,23 +198,27 @@ def _autodetect_issue_phase(repo: Path, pr: int, issue: int | None,
     아니면(이슈에 안 연결된 사람 PR 등) 이슈 번호를 알 방법이 없다 —
     통과가 아니라 차단한다(fail closed): 조용히 건너뛰면 #245 가 고치려는
     "강제 지점 없음" 구멍이 이 경로로 그대로 되살아난다. 트레이드오프는
-    `docs/issue-245/decisions/2026-08-04-closes-gate-wiring-tradeoffs.md`."""
-    if issue is None:
+    `docs/issue-245/decisions/2026-08-04-closes-gate-wiring-tradeoffs.md`.
+
+    phase 는 이제 PR 본문의 closing 키워드가 아니라 승인 이벤트에서
+    끌어낸다(issue #271 요구사항 2) — role 세그먼트가 그 판정에 필요해
+    브랜치에서 이슈 번호와 함께 뽑는다."""
+    role = None
+    if issue is None or phase is None:
         branch = _pr_head_ref(repo, pr)
         if branch is None:
             return [f"PR #{pr} 의 head 브랜치를 읽을 수 없다 (fail closed)"]
-        detected = _issue_from_branch(branch)
+        detected = _issue_and_role_from_branch(branch)
         if detected is None:
             return [f"브랜치 {branch!r} 에서 이슈 번호를 추출할 수 없다 "
                     f"(issue-<n>/<role> 형태가 아니다) — fail closed: 이슈에 "
                     f"연결 안 된 PR을 이 검사 없이 통과시키지 않는다. 브랜치를 "
                     f"issue-<n>/<role> 로 바꾸면 재검사된다."]
-        issue = detected
+        detected_issue, role = detected
+        if issue is None:
+            issue = detected_issue
     if phase is None:
-        body = pr_reference._pr_view(repo, pr)
-        if body is None:
-            return [f"PR #{pr} 본문을 읽을 수 없다(`gh pr view` 실패) — 검사 불가는 통과가 아니다."]
-        phase = _phase_from_body(body, issue)
+        phase = _phase_from_approval(repo, pr, issue, role)
     return issue, phase
 
 
@@ -160,8 +250,16 @@ def check(repo: Path, pr: int | None = None, issue: int | None = None,
                 body = pr_reference._pr_view(repo, pr)
                 if body is None:
                     bad.append(f"PR #{pr} 본문을 읽을 수 없다(`gh pr view` 실패) — 검사 불가는 통과가 아니다.")
-                else:
-                    bad += _phase1_mismatch(body, issue)
+                title = _pr_title(repo, pr)
+                if title is None:
+                    bad.append(f"PR #{pr} 제목을 읽을 수 없다(`gh pr view` 실패) — 검사 불가는 통과가 아니다.")
+                commit_messages = _pr_commit_messages(repo, pr)
+                if commit_messages is None:
+                    bad.append(f"PR #{pr} 커밋 목록을 읽을 수 없다(`gh api` 실패) — 검사 불가는 통과가 아니다.")
+                if body is not None and title is not None and commit_messages is not None:
+                    surfaces = ([("본문", body), ("제목", title)]
+                                + [("커밋 메시지", m) for m in commit_messages])
+                    bad += _phase1_surface_mismatch(issue, surfaces)
     if closes_only:
         return bad
     if pr is not None:
