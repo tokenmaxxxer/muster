@@ -315,6 +315,24 @@ alternative under a two-account, agent-account-separated hardening — in the
 default (single-account) setup a PR review Approve on one's own PR is not
 possible, so the issue comment is the only path (contract v3 s19).
 
+When the human's decision is approve-with-feedback (conditional approval),
+the recipe is two separate issue comments, in order: comment A's body is
+the exact token string `APPROVE issue-<n>/<role>` and nothing else, ever;
+comment B, posted immediately after, carries the feedback and points back
+at comment A instead of repeating any part of the token. Token-first
+ordering means a valid approval already stands the instant comment A
+lands — feedback arriving a moment later in comment B never puts that in
+question.
+
+If a near-miss comment appears — approval-shaped (contains the literal
+substring `APPROVE`) but not whole-body-identical to the canonical token —
+the session posts exactly one reply pointing at the two-comment recipe
+above and keeps waiting; it never treats the near-miss as approval, and
+never posts more than one such reply per near-miss. (Two related code
+defects — `approve-scope`'s `/scope`-vs-`/role` literal mismatch and the
+30-comment pagination cap on issue-comment fetch — are issue #224's, not
+fixed here.)
+
 ### From a conversation
 
 Calling it from a conversation is the default. No separate trigger was built — the
