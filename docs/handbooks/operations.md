@@ -746,9 +746,9 @@ The comparison base is the default branch `origin/HEAD` points at. `GATE_BASE` o
 `gates/ci.py --pr <n> --autodetect --closes-only`를 돌려 계획-인지 Closes
 게이트(`gates/pr_reference.py`, issue #228)를 강제한다 — 위 "게이트"와 달리
 이건 **막는다**: `--closes-only`는 write_scope/protected-path/deps/record
-검사는 건너뛰고 Closes 게이트만 돈다. 이슈 번호는 PR 본문이 아니라 head
-브랜치명(`issue-<n>/<role>`)에서, phase는 본문의 closing 키워드 유무에서
-끌어낸다 — 추출 실패는 fail-closed(차단). 근거는
+검사는 건너뛰고 Closes 게이트만 돈다. 이슈 번호와 role은 PR 본문이 아니라
+head 브랜치명(`issue-<n>/<role>`)에서 뽑는다 — 추출 실패는
+fail-closed(차단). 근거는
 `docs/issue-245/decisions/2026-08-04-closes-gate-wiring-tradeoffs.md`.
 
 **2026-08-04 부로 실제로 막는다** — main 브랜치 보호 규칙에 `closes-gate`가
@@ -758,6 +758,28 @@ repos/tokenmaxxxer/on-the-record/branches/main/protection`으로 직접
 확인된다. 검증용 일회용 PR #263(머지 안 됨)이 closing 키워드가 있는
 상태에서의 차단과 제거 후 통과를 양방향으로 실측했다. 활성화 경과는
 `docs/issue-245/reports/implementation.md`("Activation completed").
+
+phase는 closing 키워드 유무가 아니라 사람의 승인 이벤트에서 끌어낸다(issue
+#271): `docs/specs/approvers.md` 계정이 단 이슈 코멘트에 정확한 `APPROVE
+issue-<n>/<role>` 문자열이 있으면(single-account 모드), 또는 PR 작성자와
+*다른* approvers.md 계정의 PR 리뷰 Approve가 있으면(two-account 모드) —
+`gates/flows.py`의 `_pr_approved()`, 상황판이 미승인 PR을 표시할 때 이미
+쓰는 그 함수를 그대로 재사용한다. 승인 신호가 아직 없으면 PR 본문이 뭐라고
+하든 phase1이다. PR 자신의 대화 스레드에 달린 코멘트는 승인으로 안
+친다(issue #275 F3) — contract v3 s19의 single-account 경로가 인정하는
+건 이슈-레벨 코멘트뿐이다. 이는 술어 결합 결함(issue #245 자체
+실행-관찰, Finding F1)을 해소한다: phase가 closing 키워드 자체에서
+나오던 때는 phase-1의 "closing 키워드 없음" 검사가 그 키워드가 있는
+상태를 영영 관찰할 수 없었다 — 키워드가 있으면 이미 phase2로 분류돼
+버리기 때문이다.
+
+phase-1 불일치 검사 자체도 이제 PR 본문 한 표면만이 아니라 세 표면을
+본다: PR 제목과 브랜치의 모든 커밋 메시지도 이슈를 겨냥한 closing
+키워드가 있는지 스캔한다(`gates/ci.py`의 `_phase1_surface_mismatch`) —
+본문만 보던 옛 검사가 못 본 커밋 메시지 자체의 closing 키워드가 머지
+순간 이슈를 자동으로 닫아버린 실제 사고 두 건 이후 추가됐다. 두 변경
+모두의 근거는
+`docs/issue-271/decisions/2026-08-04-phase-signal-and-surface-coverage-mechanism.md`.
 
 ## Merge gate (CI)
 
@@ -782,12 +804,15 @@ Activation history: `docs/issue-245/reports/implementation.md`
 ("Activation completed").
 
 Phase is derived from a human approval event, not from closing-keyword
-presence (issue #271): a qualifying `APPROVE issue-<n>/<role>` issue/PR
+presence (issue #271): a qualifying `APPROVE issue-<n>/<role>` issue
 comment from a `docs/specs/approvers.md` login (single-account mode), or
 a PR review Approve from a *different* approvers.md login (two-account
 mode) — `gates/flows.py`'s `_pr_approved()`, the same function the status
 board already uses to flag unapproved PRs. No qualifying approval yet
-means phase1, regardless of what the PR body says. This closes a
+means phase1, regardless of what the PR body says. A comment posted on
+the PR's own conversation thread does not count (issue #275 F3) —
+contract v3 s19's single-account path recognizes only an issue-level
+comment. This closes a
 predicate-coupling defect (issue #245's own execution-observation,
 Finding F1): when phase used to come from the closing keyword itself,
 the phase-1 "no closing keyword" check could never observe the one state

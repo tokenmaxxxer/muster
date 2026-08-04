@@ -3751,7 +3751,7 @@ class WatchFollow(unittest.TestCase):
         # 이미 events.jsonl 에 남겼는데(progress 다음 줄), 그 줄이 아직
         # 소비되지 않은 첫 반복에서 pid 가 죽어 있어도 잔여 session-end 를
         # 먼저 소진해야지, 그 반복에서 곧장 크래시로 오판하면 안 된다 —
-        # spawn.py:1884-1894 의 드레인-우선 블록이 지키는 순서.
+        # spawn.py:1943-1953 의 드레인-우선 블록이 지키는 순서.
         #
         # 이슈 #271 관찰(survey.md §5): 이전 버전은 로스터 엔트리를
         # `roster_remove`로 아예 지워 죽음 신호를 흉내냈는데, 이슈 #266이
@@ -3759,7 +3759,7 @@ class WatchFollow(unittest.TestCase):
         # 블록과 무관하게(entry-absence 자체가 이미 pid 체크를 건너뛰므로)
         # 같은 결과를 내 더 이상 이 블록을 판별하지 못했다 — 살아있는
         # 로스터 엔트리 + 죽은 wrapper_pid(`test_follow_detects_dead_session_and_returns_crash_rc`
-        # 와 같은 구성, test_spawn.py:3480-3485) 로 다시 배치해 판별력을
+        # 와 같은 구성, test_spawn.py:3719-3747) 로 다시 배치해 판별력을
         # 복원한다: 드레인 블록이 없으면 첫 반복에서 곧장 WATCH_CRASH_RC 로
         # 리턴하고(session-end 잔여를 못 보고 죽은 pid 부터 본다), 있으면
         # 이 테스트가 기대하는 대로 session-end 를 먼저 소진하고 rc=0 이다.

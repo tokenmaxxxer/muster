@@ -144,18 +144,22 @@ def _closes_ref_for_issue(body: str, issue: int):
 def _phase_from_approval(repo: Path, pr: int, issue: int, role: str) -> str:
     """phase2 를 closing 키워드가 아니라 승인 이벤트로 판정한다 — 없으면
     phase1(issue #271 요구사항 2, #245 관찰 F1 술어 결합 해소). contract
-    v3 s19 의 두 경로 그대로: 정확한 `APPROVE issue-<n>/<role>` 이슈/PR
+    v3 s19 의 두 경로 그대로: 정확한 `APPROVE issue-<n>/<role>` 이슈
     코멘트(single-account, 승인자 allowlist) 또는 differing-account PR
     리뷰 Approve(two-account) — closing 키워드 유무는 이 판정에 전혀
     관여하지 않는다. `flows._pr_approved`(issue #172, 상황판이 이미 같은
     두 경로를 검증하는 코드, `flows.py:130`)를 그대로 재사용한다 —
     새로 손으로 짜지 않는다. `spawn._approvers`/`spawn._issue_comments`
     를 `gates/` 에서 쓰는 것은 `closure_sweep.py:21`의 기존 전례를
-    따른다."""
+    따른다. issue 번호로만 조회한다 — PR 번호로 `spawn._issue_comments`
+    를 다시 부르면 GitHub 가 `/issues/<n>/comments` 한 엔드포인트로
+    이슈·PR 대화 코멘트를 함께 서빙하는 성질 때문에 PR 자신의 대화
+    스레드에 달린 APPROVE 형태 코멘트까지 승인으로 계산돼 버린다 —
+    contract v3 s19 의 single-account 경로가 인정하는 건 이슈-레벨
+    코멘트뿐이다(issue #275 F3, #271 관찰이 남긴 fail-open 결함)."""
     subject = f"issue-{issue}"
     approvers = spawn._approvers(repo)
     comments = spawn._issue_comments(repo, issue)
-    comments += spawn._issue_comments(repo, pr)
     reviews = _pr_reviews(repo, pr)
     pr_dict = {"reviews": reviews or []}
     approved = flows._pr_approved(pr_dict, comments, approvers, subject, role)
