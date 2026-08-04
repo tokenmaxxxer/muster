@@ -127,6 +127,28 @@ to police.
   §20 also requires an open-findings section (and, while non-terminal,
   next-steps/resolution-path) even for a fresh skeleton. Added all three
   headings to the skeleton before the first commit.
+- **Post-landing rebase (2026-08-04), PR #273 vs latest `origin/main`.**
+  PR #247 (self-triggered abandoned-work respawn) landed on `main` mid-PR,
+  putting this branch's PR into merge conflict — expected: a purely
+  mechanical/textual conflict from #247's unrelated `spawn.py`/
+  `test_spawn.py` edits landing first; actual: `test_spawn.py` auto-merged
+  cleanly (#247's `SessionEndVerdict`/`SelfTriggeredRespawn` insertions
+  sit in a disjoint region of the file from this branch's
+  `test_follow_prioritizes_pending_session_end_over_pid_check` rearrangement
+  — only line numbers shifted, from :3497 to :3749), but
+  `docs/handbooks/operations.md` carried a genuine **logical** conflict:
+  `origin/main` (issue-245's F3 wrap-up, already landed via PR #272)
+  states the closes-gate is "**Blocking for real as of 2026-08-04**"
+  (registered as a required status check), while this branch's own
+  "Merge gate (CI)" paragraph — drafted before that activation landed —
+  still said "**Nothing is actually blocked yet**." Resolved by keeping
+  the landed activation status as ground truth (the board is what is
+  merged to main) and dropping this branch's now-stale
+  not-yet-blocking claim, retaining the phase-signal/surface-coverage
+  paragraphs unchanged. Re-ran `test_spawn.py` (206/206),
+  `gates/test_closes_gate_ci.py` (26/26), and `test_flows.py` (10/10)
+  post-rebase; all green, matching pre-rebase counts. Force-pushed the
+  rebased branch to update PR #273 in place.
 
 ## Rationale for deviations
 
