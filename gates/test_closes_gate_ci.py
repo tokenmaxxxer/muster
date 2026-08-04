@@ -196,6 +196,28 @@ def t_phase_from_approval_pr_review_approve_from_differing_account_is_phase2():
         spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
 
 
+def t_phase_from_approval_pr_thread_comment_is_not_issue_level_is_phase1():
+    # F3 (issue #275) red-green: contract v3 s19's single-account path
+    # recognizes only an issue-level comment — a qualifying APPROVE-shaped
+    # comment posted on the PR's own conversation thread (mocked here as
+    # `spawn._issue_comments(repo, pr=1)`, distinct from the issue-level
+    # `spawn._issue_comments(repo, issue=245)`, which stays empty) must
+    # not open phase2. Pre-fix, `_phase_from_approval` unioned
+    # `spawn._issue_comments(repo, pr)` into its input and this exact
+    # arrangement returned "phase2"; post-fix (the second fetch removed)
+    # it stays "phase1".
+    orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
+    spawn._approvers = lambda repo: {"jjongkwann"}
+    spawn._issue_comments = (
+        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-245/implementation"}]
+        if n == 1 else [])
+    ci._pr_reviews = lambda repo, pr: []
+    try:
+        assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase1"
+    finally:
+        spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
+
+
 def t_autodetect_success_derives_issue_role_and_phase_from_approval():
     # --autodetect 는 이제 phase 를 본문 키워드가 아니라 승인 이벤트에서
     # 끌어낸다 — 본문에 closing 키워드가 있어도 승인이 없으면 phase1.
@@ -317,6 +339,25 @@ def t_autodetect_reachability_fix_blocks_closes_keyword_without_approval():
         ci._pr_title, ci._pr_commit_messages = orig_title, orig_commits
         spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
     assert any("본문에" in b and "closing 키워드" in b for b in bad), bad
+
+
+def t_phase1_mismatch_pre_271_body_only_gate_missed_commit_message_keyword():
+    # F4 (issue #275) — behavioral red proof for requirement 4, replacing
+    # the original record's proof (docs/issue-271/reports/implementation.md
+    # closed_checks red entry), which showed only an `AttributeError` from
+    # a not-yet-existing symbol (evidence the new API didn't exist yet,
+    # not evidence of old behavior). The pre-#271 gate shape is still
+    # live: `_phase1_mismatch` (gates/ci.py:169, kept at its pre-#271
+    # single-surface shape because older unit tests call it directly)
+    # only ever inspected the PR body — a closing keyword sitting only in
+    # a commit message passed it silently, regardless of the commit
+    # messages' actual content. Pairs with
+    # t_autodetect_closes_only_blocks_commit_message_keyword_with_clean_body
+    # below, which drives the real post-#271 multi-surface check
+    # (`_phase1_surface_mismatch` via `--autodetect --closes-only`)
+    # against the identical scenario and shows it blocking.
+    clean_body = "no closing keyword, see #245"
+    assert ci._phase1_mismatch(clean_body, 245) == []
 
 
 def t_autodetect_closes_only_blocks_commit_message_keyword_with_clean_body():
