@@ -472,7 +472,7 @@ _WRITE_SCOPE_OVERRIDE = re.compile(
 def _always_writable(role: str) -> list[str]:
     return [f"docs/issue-*/reports/{role}.md",
             f"docs/issue-*/reports/{role}/**",
-            f"docs/issue-*/proposals/{role}.md"]
+            "docs/issue-*/proposals/**"]
 
 
 def _write_scope_overrides(work: Path) -> dict[str, list[str]]:
