@@ -918,6 +918,22 @@ def t_role_scope_undeclared_write_scope_fails_closed():
         gates.ON_THE_RECORD_ROOT = old
 
 
+def t_role_scope_proposal_date_slug_filename_passes():
+    """issue-262: 제안 파일이 `<role>.md` 가 아니라 실제 관행인 날짜-슬러그
+    이름을 써도 always-writable 로 통과해야 한다 (issue #245/PR #257 dry-run
+    에서 실측된 회귀)."""
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _scope_repo(td, "implementation", ["src/**", "test/**"])
+            prop = work / "docs" / "issue-262" / "proposals"
+            prop.mkdir(parents=True)
+            (prop / "2026-08-04-always-writable-proposal-glob-fix.md").write_text("x")
+            assert gates.role_scope(work, "issue-262/implementation") == []
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
 def _fulfils_repo(td: str, subject: str, role: str, record_text: str,
                   pre_files: dict = None, ops=None) -> Path:
     """fulfils 게이트 전용 픽스처: 초기 커밋(pre_files 포함) 후 origin/main 을
