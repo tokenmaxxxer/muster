@@ -2493,6 +2493,50 @@ class SessionEndVerdict(unittest.TestCase):
                                           alive_fn=lambda pid: False),
                 "normal")
 
+    def test_prior_generations_session_end_does_not_mask_new_generations_crash(self):
+        # 이슈 #247: self-trigger 재귀가 만드는 다중-세대 이벤트 시퀀스
+        # (한 워크스페이스의 events.jsonl 에 세대 여러 개가 이어 쌓인다)
+        # 에서도, 이전 세대의 session-end 가 **자기 session-start 뒤,
+        # 다음 세대의 session-start 보다 앞**에 제대로 찍혀 있으면
+        # (spawn.py `_spawn_one()` 이 이제 강제하는 순서) 마지막
+        # session-start(새 세대)의 진짜 죽음이 가려지지 않는다.
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            self._write_events(work, [
+                {"type": "session-start", "detail": {"pid": 111, "ts": 1}},
+                {"type": "session-end", "detail": "uncommitted-work"},
+                {"type": "respawn-attempt", "detail": {"session_start_ts": 1, "attempt": 1}},
+                {"type": "session-start", "detail": {"pid": 222, "ts": 2}},
+            ])
+            self.assertEqual(
+                spawn.session_end_verdict(str(work), log_path=None,
+                                          alive_fn=lambda pid: pid != 222),
+                "crashed")
+
+    def test_misordered_prior_session_end_would_mask_new_generations_crash(self):
+        # 이 테스트는 회귀를 지키려는 위험을 그대로 문서화한다(hunt finding
+        # 1) — session_end_verdict() 자신은 이 이슈에서 안 바뀐다(제안서
+        # 스코프 밖). 만약 어떤 호출부가 이전 세대의 session-end 를 다음
+        # 세대의 session-start **뒤에** 남기면(제안서 원문 그대로
+        # self-trigger 를 session-end 보다 먼저 불렀을 때 실제로 벌어졌던
+        # 순서), session_end_verdict() 는 마지막 session-start 뒤에 있는
+        # 아무 session-end 나 매치로 보고 새 세대가 진짜 죽어도 `crashed`
+        # 대신 `normal` 을 낸다 — `_spawn_one()` 이 이제 자기 session-end
+        # 를 self-trigger 보다 먼저 남기는 이유가 바로 이 시퀀스를 절대
+        # 만들지 않기 위해서다.
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            self._write_events(work, [
+                {"type": "session-start", "detail": {"pid": 111, "ts": 1}},
+                {"type": "respawn-attempt", "detail": {"session_start_ts": 1, "attempt": 1}},
+                {"type": "session-start", "detail": {"pid": 222, "ts": 2}},
+                {"type": "session-end", "detail": "uncommitted-work"},
+            ])
+            self.assertEqual(
+                spawn.session_end_verdict(str(work), log_path=None,
+                                          alive_fn=lambda pid: pid != 222),
+                "normal")
+
     def test_unmatched_alive_stale_log_is_stalled(self):
         with tempfile.TemporaryDirectory() as td:
             work = Path(td) / "w"
@@ -2635,6 +2679,214 @@ class AutoRespawnClaim(unittest.TestCase):
                 spawn._post_crash_comment = orig_comment
             self.assertEqual(len(called), 1)
             self.assertEqual(called[0][0], "comment")
+
+
+class SelfTriggeredRespawn(unittest.TestCase):
+    """이슈 #247: 정상 종료(crashed 아님)했지만 미커밋 작업을 남긴 헤드리스
+    세션이, 워치독 틱을 기다리지 않고 `_spawn_one()` 자기 프로세스 안에서
+    같은 claim/attempt-cap/cap-comment 헬퍼(`_respawn_or_cap()`)를 직접
+    부른다(`_self_trigger_respawn()`)."""
+
+    def test_fires_on_uncommitted_work(self):
+        called = []
+        orig_respawn = spawn._respawn_or_cap
+        orig_state = spawn._respawn_state_load
+        spawn._respawn_or_cap = lambda *a, **k: called.append(a)
+        spawn._respawn_state_load = lambda: {"seen": True}
+        try:
+            spawn._self_trigger_respawn("uncommitted-work", "issue-247/coding",
+                                        "w", 247, "implementation", "l", 123)
+        finally:
+            spawn._respawn_or_cap = orig_respawn
+            spawn._respawn_state_load = orig_state
+        self.assertEqual(len(called), 1)
+        (key, work, issue, role, log, ts, state, trigger) = called[0]
+        self.assertEqual(key, "issue-247/coding")
+        self.assertEqual((work, issue, role, log, ts), ("w", 247, "implementation", "l", 123))
+        self.assertEqual(state, {"seen": True})
+        self.assertEqual(trigger, "self-triggered-abandoned")
+
+    def test_fires_on_failed_no_commit(self):
+        called = []
+        orig_respawn = spawn._respawn_or_cap
+        spawn._respawn_or_cap = lambda *a, **k: called.append(a)
+        try:
+            spawn._self_trigger_respawn("failed-no-commit", "issue-247/coding",
+                                        "w", 247, "implementation", "l", 123)
+        finally:
+            spawn._respawn_or_cap = orig_respawn
+        self.assertEqual(len(called), 1)
+        self.assertEqual(called[0][-1], "self-triggered-abandoned")
+
+    def test_does_not_fire_on_legitimate_stops(self):
+        # refused/waiting-on-human 은 사람이 봐야 할 정당한 정지고,
+        # 맨 silent-failure 는 정말 할 일이 없던 정당한 무변화다 — 이
+        # 결함의 모양(방치된-미커밋-작업)이 아니므로 재스폰하지 않는다
+        # (프로포절의 두 번째 기각안).
+        for outcome in ("refused", "waiting-on-human", "silent-failure",
+                        "progressed", "errored", "progressed-dirty-tree"):
+            called = []
+            orig_respawn = spawn._respawn_or_cap
+            spawn._respawn_or_cap = lambda *a, **k: called.append(1)
+            try:
+                spawn._self_trigger_respawn(outcome, "issue-247/coding", "w",
+                                            247, "implementation", "l", 123)
+            finally:
+                spawn._respawn_or_cap = orig_respawn
+            self.assertEqual(called, [], outcome)
+
+    def test_respects_cap_and_posts_comment_with_trigger_label(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            state = {"issue-247/coding": {"attempts": spawn.RESPAWN_MAX_ATTEMPTS}}
+            called = []
+            orig_spawn = spawn._spawn_one
+            orig_comment = spawn._post_crash_comment
+            spawn._spawn_one = lambda *a, **k: called.append(("spawn", a))
+            spawn._post_crash_comment = lambda *a, **k: called.append(("comment", a))
+            try:
+                spawn._respawn_or_cap("issue-247/coding", str(work), 247,
+                                      "implementation", "l", 123, state,
+                                      "self-triggered-abandoned")
+            finally:
+                spawn._spawn_one = orig_spawn
+                spawn._post_crash_comment = orig_comment
+            self.assertEqual(len(called), 1)
+            self.assertEqual(called[0][0], "comment")
+            self.assertEqual(called[0][1][-1], "self-triggered-abandoned")
+
+    def test_under_cap_claims_and_respawns(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            Path(str(work) + ".task.txt").write_text("원래 맡길 일")
+            state = {}
+            called = []
+            orig = spawn._spawn_one
+            spawn._spawn_one = lambda *a, **k: called.append((a, k))
+            try:
+                spawn._respawn_or_cap("issue-247/coding", str(work), 247,
+                                      "implementation", "l", 456, state,
+                                      "self-triggered-abandoned")
+            finally:
+                spawn._spawn_one = orig
+            self.assertEqual(len(called), 1)
+            self.assertEqual(state["issue-247/coding"]["attempts"], 1)
+            events = Path(str(work) + ".events.jsonl").read_text()
+            self.assertIn("respawn-attempt", events)
+
+    def test_self_trigger_and_watchdog_do_not_double_respawn(self):
+        # 이 세션 자신의 self-trigger 와, 같은 워크스페이스를 보는 동시
+        # 워치독 틱(`_auto_respawn_check` 이 재구성한 같은 session_start_ts)
+        # 이 동시에 `_respawn_or_cap` 에 도달해도, claim 하나만 통과해야
+        # 한다 — 트리거 라벨이 다를 뿐 같은 원자적 claim 파일을 공유한다
+        # (프로포절: "reuses the existing atomic claim's race protection —
+        # no new concurrency mechanism").
+        import threading
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            Path(str(work) + ".task.txt").write_text("원래 맡길 일")
+            called = []
+            lock = threading.Lock()
+            orig = spawn._spawn_one
+
+            def fake_spawn(*a, **k):
+                with lock:
+                    called.append(1)
+            spawn._spawn_one = fake_spawn
+            try:
+                threads = [
+                    threading.Thread(
+                        target=spawn._respawn_or_cap,
+                        args=("issue-247/coding", str(work), 247, "implementation",
+                              "l", 1, {}, "self-triggered-abandoned")),
+                    threading.Thread(
+                        target=spawn._respawn_or_cap,
+                        args=("issue-247/coding", str(work), 247, "implementation",
+                              "l", 1, {}, "watchdog-observed-crashed")),
+                ]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join()
+            finally:
+                spawn._spawn_one = orig
+            self.assertEqual(len(called), 1)
+
+    def _prep_repo(self, td):
+        work = Path(td) / "w"
+        work.mkdir()
+        run = lambda *a: subprocess.run(a, cwd=str(work), capture_output=True,
+                                        text=True, check=True)
+        run("git", "init", "-q")
+        run("git", "config", "user.email", "t@example.com")
+        run("git", "config", "user.name", "t")
+        (work / "f.txt").write_text("x")
+        run("git", "add", "f.txt")
+        run("git", "commit", "-q", "-m", "init")
+        return work
+
+    def test_spawn_one_call_site_fires_after_own_session_end_event(self):
+        # 이슈 #247 통합 테스트: 실제 _spawn_one() bounded/issue 꼬리를(fork
+        # 만 모킹해서) 끝까지 돌려, 세션이 미커밋 파일을 남기고 정상
+        # 종료하면 self-trigger 가 불릴 때 이 세션 **자신의** session-end
+        # 가 이미 남아 있는지 확인한다.
+        #
+        # 제안서의 원래 문구는 "before the bounded child's terminal
+        # session-end event append/exit" 였지만, 구현 중 어써샬-브로큰
+        # 헌트가 그 문구 그대로 구현하면(self-trigger 먼저) 깨지는 걸
+        # 찾았다: self-trigger 가 상한 안이면 `_respawn_or_cap()` 이
+        # `_spawn_one(..., bounded=True)` 를 재귀 호출하고, 그 재귀 호출은
+        # 새 세대가 자기 session-start 를 남길 때까지 이 프로세스를
+        # `_await_bounded()` 안에서 블록한다 — session-end 를 그 뒤로
+        # 미루면 이 세션 자신의 session-end 가 새 세대의 session-start
+        # **뒤에** events.jsonl 에 찍혀, `session_end_verdict()` 가 새
+        # 세대의 진짜 죽음을 이 세션의(남의) session-end 로 가리고
+        # 영원히 `normal` 로 오판한다. session-end 를 먼저 남기면 순서가
+        # 뒤집혀 그 오판이 구조적으로 불가능해진다 — 이 테스트는 그
+        # 순서(session-end 가 self-trigger 보다 먼저)를 고정한다.
+        with tempfile.TemporaryDirectory() as td:
+            work = self._prep_repo(td)
+            (work / "left-behind.txt").write_text("uncommitted")
+            roster = Path(td) / "active.json"
+            old_roster = spawn.ROSTER
+            spawn.ROSTER = roster
+            triggered = []
+
+            def fake_trigger(outcome, roster_key, w, issue, role, log, ts):
+                events_text = Path(str(w) + ".events.jsonl").read_text()
+                self.assertIn("session-end", events_text)
+                triggered.append(outcome)
+
+            saved_fds = [os.dup(0), os.dup(1), os.dup(2)]
+            try:
+                with mock.patch.object(spawn, "issue_workspace",
+                                       lambda cwd, issue, role: str(work)), \
+                     mock.patch.object(spawn, "checkout_issue_branch",
+                                       lambda cwd, issue, role: "b"), \
+                     mock.patch.object(spawn, "plugin_dirs", lambda *a, **k: []), \
+                     mock.patch.object(spawn, "checkout_version", lambda *a, **k: "v0"), \
+                     mock.patch.object(spawn, "core_plugin_dirs", lambda: []), \
+                     mock.patch.object(spawn, "core_version", lambda: "v0"), \
+                     mock.patch.object(spawn, "spawn_cmd",
+                                       lambda *a, **k: (["cat"], {})), \
+                     mock.patch.object(spawn, "ensure_pushed", lambda *a, **k: None), \
+                     mock.patch.object(spawn, "roster_register", lambda *a, **k: None), \
+                     mock.patch.object(spawn, "roster_remove", lambda *a, **k: None), \
+                     mock.patch.object(spawn, "ledger_write", lambda *a, **k: None), \
+                     mock.patch.object(spawn, "_release_spawn_claim", lambda *a, **k: None), \
+                     mock.patch.object(spawn, "_rewrite_spawn_claim_pid", lambda w: None), \
+                     mock.patch.object(spawn, "_self_trigger_respawn", fake_trigger), \
+                     mock.patch.object(os, "fork", return_value=0), \
+                     mock.patch.object(os, "setsid", lambda: None), \
+                     mock.patch.object(os, "_exit", lambda *a: None):
+                    spawn._spawn_one(str(work), "implementation", "task\n",
+                                     unattended=True, issue=247, bounded=True)
+            finally:
+                for fd, real in zip((0, 1, 2), saved_fds):
+                    os.dup2(real, fd)
+                    os.close(real)
+                spawn.ROSTER = old_roster
+            self.assertEqual(triggered, ["uncommitted-work"])
 
 
 class SpawnOneIssueRoleClaim(unittest.TestCase):
