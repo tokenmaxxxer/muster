@@ -168,6 +168,45 @@ python3 spawn.py approve <kind> --subject <s>  # 사람이 직접 승인 토큰�
 실측이 보증하는 — 사실 위에 서 있으므로, `spawn.py doctor` 가 CLI 버전마다
 한 번 그 실측을 다시 해야 스폰이 열린다.
 
+### 방치된 미커밋 작업 — 자동 재스폰 (이슈 #132, #247)
+
+헤드리스 역할 세션이 `Agent`/`Task` 서브에이전트로 일을 쪼갠 뒤 "워커가
+끝나면 이어가겠다"고 말하고 자기 턴을 끝내면, 그 프로세스는 정상 종료한다
+(`rc=0`, 크래시 아님) — 하지만 다음 턴은 없다. 워커가 남긴 편집물은
+워크스페이스에 미커밋인 채로 남고, 커밋할 프로세스는 이미 없다.
+
+이 모양은 `errored`/`progressed`/`waiting-on-human`/`silent-failure` 와
+갈라지는 두 개의 별도 처분으로 잡힌다:
+
+- **`uncommitted-work`.** `silent-failure`(exit 0, 보드 무변화, 거부도
+  없음)로 분류됐어야 할 세션인데, 워크스페이스에 `git status --porcelain`
+  으로 잡히는 미커밋 변경이 있으면 여기로 재분류된다.
+- **`failed-no-commit`.** 세션이 스스로 `progressed` 라고 보고했지만
+  (보드 변화가 있었지만) 새 커밋도 없고 미커밋 변경도 없으면(또는 있으면
+  `progressed-dirty-tree`) `fail_closed_downgrade()` 가 여기로 깎는다.
+
+두 outcome 모두 **크래시가 아니다** — `roster_watchdog()`/
+`session_end_verdict()` 의 `crashed`/`stalled` 3분법은 절대 이 경우를
+잡지 못한다: 프로세스가 정상 종료하며 `session-end` 이벤트를 스스로 남기고,
+`roster_remove()` 가 로스터 엔트리를 동기적으로 지우기 때문에, 어떤
+`spawn.py watchdog` 틱도 "죽었는데 등록만 남은" 엔트리를 볼 기회가 없다.
+
+이슈 #132 가 `crashed` 에만 걸어 둔 상한부(2회) 자동 재스폰/캡-코멘트
+기계를, 이슈 #247 이 이 두 outcome 에도 그대로 연결했다 — 워치독 틱을
+기다리지 않고, `_spawn_one()` 자기 프로세스가 outcome 을 확정하는 바로 그
+자리에서 즉시 재스폰을 시도한다. 상한(2회)에 닿으면 `crashed` 때와 같은
+이슈 코멘트가 남는다(어느 트리거가 상한을 채웠는지 본문에 적힌다). 상한을
+기다리지 않고 더 일찍 개입하고 싶거나, 상한이 이미 소진됐다면 같은
+워크스페이스/브랜치로 수동 재스폰한다:
+
+```bash
+python3 spawn.py <역할> "<맡길 일>" --issue <n>
+```
+
+`issue_workspace()` 가 새로 클론하지 않고 기존 워크스페이스를 fetch 해
+이어받으므로, 미커밋 변경이 그대로 남아 있으면 세션이 커밋부터 끝낼 수
+있다.
+
 ### 일부러 멈추는 자리
 
 두 정지는 계약이 지켜지는 것이지 우회할 실패가 아니다:
@@ -374,6 +413,50 @@ mint an approval from them. A human's approval is minted only in the human's
 own session. And because rulebook enforcement rests on hooks firing in
 headless sessions — a fact measured, not documented — `spawn.py doctor` must
 re-measure it once per CLI version before any role spawns.
+
+### Abandoned uncommitted work — automatic respawn (issues #132, #247)
+
+When a headless role session splits work across `Agent`/`Task` subagents,
+says "I'll continue once the workers finish," and ends its own turn there,
+the process exits normally (`rc=0`, not crashed) — but there is no next
+turn. Whatever a worker already wrote lands on disk uncommitted, and there
+is no process left to commit it.
+
+Two outcomes, distinct from `errored`/`progressed`/`waiting-on-human`/
+`silent-failure`, name this shape:
+
+- **`uncommitted-work`.** A session that would otherwise classify as
+  `silent-failure` (exit 0, unchanged board, nothing blocked) gets
+  reclassified here when the workspace has uncommitted changes visible to
+  `git status --porcelain`.
+- **`failed-no-commit`.** A session that self-reported `progressed` (the
+  board did change) but left neither a new commit nor uncommitted changes
+  (or left both — that case is `progressed-dirty-tree` instead) gets
+  downgraded here by `fail_closed_downgrade()`.
+
+Neither outcome is a **crash** — `roster_watchdog()`/
+`session_end_verdict()`'s `crashed`/`stalled` trichotomy can never catch
+this case: the process exits normally and appends its own `session-end`
+event, and `roster_remove()` deletes the roster entry synchronously, so no
+`spawn.py watchdog` tick ever gets a chance to see a dead-but-registered
+entry.
+
+Issue #132's capped (2 attempts) auto-respawn and cap-comment machinery,
+previously wired only to `crashed`, now also fires for these two outcomes
+(issue #247) — without waiting for a watchdog tick, `_spawn_one()` itself
+triggers the respawn attempt the moment it finalizes its own outcome. On
+hitting the cap, the same issue comment as the `crashed` case appears
+(naming which trigger filled the cap). To intervene sooner than the cap,
+or once the cap is already exhausted, respawn the same
+workspace/branch manually:
+
+```bash
+python3 spawn.py <role> "<task>" --issue <n>
+```
+
+`issue_workspace()` fetches into the existing workspace rather than
+re-cloning, so any uncommitted changes are still there for the resumed
+session to commit.
 
 ### Where a run stops on purpose
 

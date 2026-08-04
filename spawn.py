@@ -1659,10 +1659,17 @@ def _respawn_state_save(d: dict) -> None:
     RESPAWN_STATE.write_text(json.dumps(d, indent=2, ensure_ascii=False))
 
 
-def _post_crash_comment(root: Path, issue: int, key: str, work: str, log: str) -> None:
+def _post_crash_comment(root: Path, issue: int, key: str, work: str, log: str,
+                        trigger: str = "crashed") -> None:
     """재스폰 상한(2) 도달 시 이슈에 남기는 코멘트. 멱등: 고정 마커 문자열을
     기존 코멘트에서 먼저 찾는다(`_issue_comments`/`approve_scope` 와 같은
-    read-then-check 패턴) — 워치독을 반복 호출해도 두 번째 코멘트는 없다."""
+    read-then-check 패턴) — 워치독을 반복 호출해도 두 번째 코멘트는 없다.
+
+    `trigger` (이슈 #247): 어느 경로가 상한을 채웠는지(예:
+    `watchdog-observed-crashed` / `self-triggered-abandoned`) 본문에
+    남긴다 — 마커 문자열 자체는 이슈 #132 부터 쓰던 그대로 둔다. 멱등성
+    키는 트리거 종류와 무관하게 key+상한 하나여야 두 경로가 같은
+    attempt-cap 예산을 공유한다는 프로포절의 결정이 그대로 성립한다."""
     marker = _CRASH_COMMENT_MARKER.format(key=key, cap=RESPAWN_MAX_ATTEMPTS)
     if any(marker in c.get("body", "") for c in _issue_comments(root, issue)):
         return
@@ -1670,17 +1677,79 @@ def _post_crash_comment(root: Path, issue: int, key: str, work: str, log: str) -
     if not slug:
         return
     body = (f"{marker}\n\n"
-            f"워크스페이스: {work}\n로그: {log}\n\n"
+            f"트리거: {trigger}\n워크스페이스: {work}\n로그: {log}\n\n"
             f"{RESPAWN_MAX_ATTEMPTS}회 자동 재스폰을 모두 소진했다 — 사람이 개입해야 한다.")
     subprocess.run(["gh", "api", f"repos/{slug}/issues/{issue}/comments",
                     "-f", f"body={body}"], cwd=root, capture_output=True, text=True)
 
 
+def _respawn_or_cap(key: str, work: str, issue: int, role: str, log: str,
+                    session_start_ts, state: dict, trigger: str) -> None:
+    """공유 재스폰 시퀀스: 원자적 클레임 확인, 상한(`RESPAWN_MAX_ATTEMPTS`)
+    확인, `.task.txt` 를 통한 `_spawn_one()` 재생, 상한 도달 시 캡-코멘트.
+
+    이슈 #132 워치독 `crashed` 경로(`_auto_respawn_check()`)와 이슈 #247
+    self-trigger 경로(`_spawn_one()` 자신이 정상 종료하며 미커밋 작업을
+    감지한 경우, spawn.py `_self_trigger_respawn()`)가 이 시퀀스를
+    그대로 공유한다 — 재스폰 로직을 두 벌 두지 않고, attempt-cap 카운터도
+    `key` 하나로 공유해 두 경로가 같은 예산을 쓴다(프로포절의 명시적
+    결정). `trigger` 는 어느 쪽이 불렀는지 로그/코멘트에 남겨 사람이
+    나중에 구분할 수 있게 한다.
+
+    `session_start_ts` 로 세션마다 다른 클레임 키(`.respawn-claim-{ts}`)를
+    만든다 — 두 트리거가 같은 세션(같은 ts)을 동시에 관측해도, 실제 락은
+    이 원자적 파일 생성 하나뿐이다: O_CREAT|O_EXCL 은 POSIX 에서 프로세스
+    간에도 원자적이라 정확히 하나만 이 파일을 만들 수 있다(실측:
+    warrant-hunter 리포트, 이슈 #132).
+    """
+    events_path = _events_path(work)
+    events = []
+    if events_path.exists():
+        for line in events_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(ev, dict):
+                events.append(ev)
+    already_claimed = any(
+        ev.get("type") == "respawn-attempt"
+        and isinstance(ev.get("detail"), dict)
+        and ev["detail"].get("session_start_ts") == session_start_ts
+        for ev in events)
+    if already_claimed:
+        return
+    attempts = state.get(key, {}).get("attempts", 0)
+    root = Path(work)
+    if attempts >= RESPAWN_MAX_ATTEMPTS:
+        _post_crash_comment(root, issue, key, work, log, trigger)
+        return
+    claim_path = Path(str(work) + f".respawn-claim-{session_start_ts}")
+    try:
+        fd = os.open(str(claim_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        return
+    task_path = Path(str(work) + ".task.txt")
+    if not task_path.exists():
+        print(f"[respawn] {key}: {trigger} 인데 {task_path} 가 없어 재스폰 불가 "
+              f"— 사람이 직접 재스폰해야 한다", file=sys.stderr)
+        return
+    task = task_path.read_text(encoding="utf-8")
+    attempt_n = attempts + 1
+    _append_event(events_path, "respawn-attempt",
+                  {"session_start_ts": session_start_ts, "attempt": attempt_n})
+    state[key] = {"attempts": attempt_n}
+    _respawn_state_save(state)
+    print(f"[respawn] {key}: {trigger} — 재스폰 시도 {attempt_n}/{RESPAWN_MAX_ATTEMPTS}",
+          file=sys.stderr)
+    _spawn_one(work, role, task, unattended=True, issue=issue, bounded=True)
+
+
 def _auto_respawn_check(key: str, entry: dict, state: dict) -> None:
-    """죽은 로스터 엔트리 하나에 대해 `crashed` 인지 판정하고, 그렇다면 상한
-    안에서 재스폰을 시도하거나(2회 미만) 상한 코멘트를 남긴다(2회 도달).
-    `stalled`/`normal`/`in-progress` 는 그냥 보고만 하고 끝난다(관찰-전용
-    계약 유지, 이슈 #132)."""
+    """죽은 로스터 엔트리 하나에 대해 `crashed` 인지 판정하고, 그렇다면
+    `_respawn_or_cap()` 에 넘긴다. `stalled`/`normal`/`in-progress` 는
+    그냥 보고만 하고 끝난다(관찰-전용 계약 유지, 이슈 #132)."""
     work = entry.get("work")
     issue = entry.get("issue")
     role = entry.get("role")
@@ -1706,44 +1775,34 @@ def _auto_respawn_check(key: str, entry: dict, state: dict) -> None:
         if ev.get("type") == "session-start":
             start_ts = (ev.get("detail") or {}).get("ts")
             break
-    already_claimed = any(
-        ev.get("type") == "respawn-attempt"
-        and isinstance(ev.get("detail"), dict)
-        and ev["detail"].get("session_start_ts") == start_ts
-        for ev in events)
-    if already_claimed:
+    _respawn_or_cap(key, work, issue, role, entry.get("log", ""), start_ts, state,
+                    "watchdog-observed-crashed")
+
+
+_ABANDONED_WORK_OUTCOMES = ("uncommitted-work", "failed-no-commit")
+
+
+def _self_trigger_respawn(outcome: str, roster_key: str, work: str, issue: int,
+                          role: str, log: str, session_start_ts) -> None:
+    """이슈 #247: `_spawn_one()` 자신이 정상 종료(`session-end` 가 이미
+    남는다)했지만 outcome 이 미커밋-방치 신호(`uncommitted-work`/
+    `failed-no-commit`)일 때, 다음 `spawn.py watchdog` 틱을 기다리지 않고
+    지금 이 자리에서 바로 `_respawn_or_cap()` 을 부른다.
+
+    `roster_watchdog()`/`_auto_respawn_check()` 의 crashed 판정은 이
+    경우에 절대 못 걸린다 — `roster_remove()` 가 `proc.wait()` 직후
+    동기적으로 로스터 엔트리를 지우고, `session-end` 이벤트도 이미
+    남으므로(spawn.py `_spawn_one()` 끝부분), 이후 어떤 워치독 틱도
+    dead-but-registered 엔트리를 볼 수 없다(survey.md). `refused`/
+    `waiting-on-human`/그냥 `silent-failure` 는 사람이 봐야 하거나
+    정당한 무변화이지 이 결함의 모양이 아니라서 여기서 건드리지 않는다
+    (프로포절의 두 번째 기각안).
+    """
+    if outcome not in _ABANDONED_WORK_OUTCOMES:
         return
-    attempts = state.get(key, {}).get("attempts", 0)
-    root = Path(work)
-    if attempts >= RESPAWN_MAX_ATTEMPTS:
-        _post_crash_comment(root, issue, key, work, entry.get("log", ""))
-        return
-    # 위의 already_claimed 은 events.jsonl 을 읽기만 한다 — 두 watchdog
-    # 프로세스가 동시에 이 지점에 도달하면 둘 다 통과한다(실측: warrant-hunter
-    # 리포트, 스레드 두 개로 재현: 둘 다 _spawn_one 을 호출해 같은 워크스페이스
-    # 에 중복 세션이 뜬다). 실제 락은 이 원자적 파일 생성 하나뿐이다 —
-    # O_CREAT|O_EXCL 은 POSIX 에서 프로세스 간에도 원자적이라, 두 워치독 중
-    # 정확히 하나만 이 파일을 만들 수 있다.
-    claim_path = Path(str(work) + f".respawn-claim-{start_ts}")
-    try:
-        fd = os.open(str(claim_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.close(fd)
-    except FileExistsError:
-        return
-    task_path = Path(str(work) + ".task.txt")
-    if not task_path.exists():
-        print(f"[watchdog] {key}: crashed 인데 {task_path} 가 없어 재스폰 불가 "
-              f"— 사람이 직접 재스폰해야 한다", file=sys.stderr)
-        return
-    task = task_path.read_text(encoding="utf-8")
-    attempt_n = attempts + 1
-    _append_event(events_path, "respawn-attempt",
-                  {"session_start_ts": start_ts, "attempt": attempt_n})
-    state[key] = {"attempts": attempt_n}
-    _respawn_state_save(state)
-    print(f"[watchdog] {key}: crashed — 재스폰 시도 {attempt_n}/{RESPAWN_MAX_ATTEMPTS}",
-          file=sys.stderr)
-    _spawn_one(work, role, task, unattended=True, issue=issue, bounded=True)
+    state = _respawn_state_load()
+    _respawn_or_cap(roster_key, work, issue, role, log, session_start_ts, state,
+                    "self-triggered-abandoned")
 
 
 def _read_offset(offset_path: Path) -> int:
@@ -2848,8 +2907,21 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             # events.jsonl 에 아무 흔적도 안 남았다(실측: survey.md 사건 #2) —
             # append-only 라 크래시에도 살아남는 이 기록이 session_end_verdict
             # 의 기준선이다 (이슈 #132).
+            # session_start_ts 를 변수로 남겨 두는 이유(이슈 #247): 이 세션
+            # 자신이 정상 종료하며 미커밋 작업을 남기면, 아래 self-trigger
+            # 호출이 워치독처럼 events.jsonl 을 다시 읽어 이 ts 를 재구성할
+            # 필요 없이 같은 값을 그대로 재스폰 claim 키로 쓴다.
+            # 이슈 #132 의 워치독-전용 재스폰은 ~10-15분 워치독 주기가 자연히
+            # 세대 사이를 벌려 놓아 초 단위(int) ts 충돌이 실무에서 안 났지만,
+            # self-trigger 는 그 간격 없이 곧바로 다음 세대를 낳을 수 있다 —
+            # 초 단위로 자르면 같은 초 안에서 시작한 서로 다른 세대의
+            # session_start_ts 가 우연히 같아져 `_respawn_or_cap()` 의
+            # already_claimed 검사가 남의 respawn-attempt 를 자기 것으로
+            # 오인하고 상한 확인도 없이 조용히 빠져나갈 수 있다(실측:
+            # 어써샬-브로큰 헌트). 초 단위로 자르지 않아 충돌 창을 좁힌다.
+            session_start_ts = time.time()
             _append_event(events_path, "session-start",
-                          {"pid": proc.pid, "ts": int(time.time())})
+                          {"pid": proc.pid, "ts": session_start_ts})
         try:
             proc.stdin.write(task)
             proc.stdin.close()
@@ -3098,8 +3170,24 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
               file=sys.stderr)
     if bounded and issue is not None:
         # 자식(detach 된 프로세스)만 여기 닿는다 — 부모는 이미 fork 직후
-        # _await_bounded 에서 리턴했다. 마지막 사건을 남기고 그대로 끝낸다.
+        # _await_bounded 에서 리턴했다. session-end 를 self-trigger 보다
+        # **먼저** 남긴다(이슈 #247 hunt finding 1). self-trigger 가 상한
+        # 안이면 `_respawn_or_cap()` -> `_spawn_one(..., bounded=True)` 를
+        # 재귀 호출하는데, 그 재귀 호출은 새 세대가 자기 `session-start` 를
+        # 남길 때까지 `_await_bounded()` 에서 이 프로세스 자신을 블록한다.
+        # session-end 를 그 뒤로 미루면(제안서의 원래 문구가 그랬다) 이
+        # 세션 자신의 session-end 가 events.jsonl 에 새 세대의 session-start
+        # **뒤에** 찍힌다 — `session_end_verdict()` 는 마지막
+        # session-start(새 세대의 것) 뒤에 session-end 가 있는지만 보므로,
+        # 이 순서에서는 그 자리에 남의(이 세션 자신의) session-end 를 보고
+        # 새 세대가 진짜 죽어도 영원히 `normal` 로 오판한다 — 이 이슈가
+        # 넓히려는 바로 그 안전망이 재귀 지점에서 스스로 꺼진다(실측:
+        # 어써샬-브로큰 헌트, 실제 재귀 이벤트 시퀀스로 재현). 먼저
+        # session-end 를 남기면 새 세대의 session-start 가 이 세션 자신의
+        # session-end **뒤에** 오므로 그 오판이 구조적으로 불가능해진다.
         _append_event(events_path, "session-end", outcome)
+        _self_trigger_respawn(outcome, roster_key, cwd, issue, role,
+                              str(log_path), session_start_ts)
         os._exit(rc if isinstance(rc, int) else 0)
     return rc
 
