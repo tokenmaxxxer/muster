@@ -657,6 +657,38 @@ impossible (not a git repository, no default branch) it reports **"cannot check"
 
 The comparison base is the default branch `origin/HEAD` points at. `GATE_BASE` overrides it.
 
+## 머지 게이트 (CI)
+
+`.github/workflows/plan-aware-closes-gate.yml`(issue #245)이 PR 이벤트마다
+`gates/ci.py --pr <n> --autodetect --closes-only`를 돌려 계획-인지 Closes
+게이트(`gates/pr_reference.py`, issue #228)를 강제한다 — 위 "게이트"와 달리
+이건 **막는다**: `--closes-only`는 write_scope/protected-path/deps/record
+검사는 건너뛰고 Closes 게이트만 돈다. 이슈 번호는 PR 본문이 아니라 head
+브랜치명(`issue-<n>/<role>`)에서, phase는 본문의 closing 키워드 유무에서
+끌어낸다 — 추출 실패는 fail-closed(차단). 근거는
+`docs/issue-245/decisions/2026-08-04-closes-gate-wiring-tradeoffs.md`.
+
+**아직 아무것도 실제로 막지 않는다** — main 브랜치 보호 규칙에 이 체크가
+필수로 등록돼야 머지 버튼이 실제로 잠긴다. 등록 절차는
+`docs/issue-245/reports/implementation.md`("What was NOT done").
+
+## Merge gate (CI)
+
+`.github/workflows/plan-aware-closes-gate.yml` (issue #245) runs
+`gates/ci.py --pr <n> --autodetect --closes-only` on every PR event to
+enforce the plan-aware Closes gate (`gates/pr_reference.py`, issue #228)
+— unlike the "Gates" section above, this one **does** block:
+`--closes-only` skips the write_scope/protected-path/deps/record checks
+and runs only the Closes gate. The issue number is derived from the head
+branch name (`issue-<n>/<role>`), not the PR body; phase from whether the
+body has a closing keyword. Extraction failure is fail-closed. Rationale:
+`docs/issue-245/decisions/2026-08-04-closes-gate-wiring-tradeoffs.md`.
+
+**Nothing is actually blocked yet** — the check has to be registered as
+required on main's branch protection rule before the merge button is
+really locked. Activation procedure:
+`docs/issue-245/reports/implementation.md` ("What was NOT done").
+
 ## 자체 점검
 
 ```bash
