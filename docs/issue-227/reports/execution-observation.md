@@ -4,7 +4,7 @@ role: execution-observation
 observed_role: implementation
 observed_pr: 254
 code_under_review: 144b413a1a2f4eff6458cf4bdc114622ddffdd4c
-loop_state: observing
+loop_state: landed
 ---
 
 # Execution-observation record — issue #227, step 2
@@ -412,8 +412,9 @@ the human agrees with it.
 
 ## Next steps
 
-1. Commit this record on `issue-227/execution-observation` and flip
-   `loop_state` to `landed`.
+1. Done — this record was committed on `issue-227/execution-observation`
+   as `3eef686` with `loop_state: observing`, then flipped to `landed`
+   in the following commit once the verdict was complete.
 2. Push and update PR #264, which carries this record as its sole phase-2
    artifact.
 3. Stop. Merge or closure of that PR is the human's act.
