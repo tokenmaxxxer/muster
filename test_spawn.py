@@ -549,6 +549,90 @@ class WebToolPermissionAccess(unittest.TestCase):
             f.write_text(original_text)
 
 
+class MustMcpAllowEnv(unittest.TestCase):
+    """MUSTER_MCP_ALLOW: #58/#65 와 같은 TOOL-PERMISSION 결함이 사용자가 직접
+    붙인 MCP 서버에도 있다 — 서버는 연결되는데 도구 호출은 permissions.allow
+    에 규칙이 없어 거부된다(실측: reasona issue-3, world-data MCP,
+    permission_denials 에 mcp__world-data__korean_law__search_laws 가 남았다).
+    #58/#65 와 달리 대상 도구명을 tokenmaxxxer 코드가 미리 알 수 없으므로
+    (사용자마다 다른 이름의 개인 MCP 서버), 운영자가 스폰 시점에 콤마로
+    나열한다."""
+
+    def setUp(self):
+        self._saved = os.environ.pop("MUSTER_MCP_ALLOW", None)
+
+    def tearDown(self):
+        os.environ.pop("MUSTER_MCP_ALLOW", None)
+        if self._saved is not None:
+            os.environ["MUSTER_MCP_ALLOW"] = self._saved
+
+    def test_unset_env_leaves_allow_list_unchanged(self):
+        out = spawn.role_settings("implementation")
+        allow = out["permissions"]["allow"]
+        self.assertEqual(allow, ["WebSearch", "WebFetch", "Read", "Grep", "Glob"])
+
+    def test_single_pattern_is_merged_in(self):
+        os.environ["MUSTER_MCP_ALLOW"] = "mcp__world-data__korean_law__*"
+        out = spawn.role_settings("implementation")
+        self.assertIn("mcp__world-data__korean_law__*", out["permissions"]["allow"])
+
+    def test_multiple_patterns_with_whitespace_are_all_merged(self):
+        os.environ["MUSTER_MCP_ALLOW"] = (
+            " mcp__world-data__korean_law__* , mcp__world-data__finnhub__* ")
+        out = spawn.role_settings("implementation")
+        allow = out["permissions"]["allow"]
+        self.assertIn("mcp__world-data__korean_law__*", allow)
+        self.assertIn("mcp__world-data__finnhub__*", allow)
+
+    def test_empty_segments_between_commas_are_ignored(self):
+        os.environ["MUSTER_MCP_ALLOW"] = "mcp__world-data__korean_law__*,,  ,"
+        out = spawn.role_settings("implementation")
+        allow = out["permissions"]["allow"]
+        self.assertIn("mcp__world-data__korean_law__*", allow)
+        self.assertEqual(len(allow), 6)  # 5 고정 + 이 항목 하나뿐
+
+    def test_non_mcp_prefixed_entries_are_dropped(self):
+        """안전장치: 이 통로로 Write/Edit/Bash 처럼 board-gate/approval-gate
+        가 지키는 도구를 열 수 없다 — 운영자 실수로도, 접두사가 mcp__ 가
+        아니면 조용히 버린다."""
+        os.environ["MUSTER_MCP_ALLOW"] = "Bash,Write,Edit,mcp__world-data__korean_law__*"
+        out = spawn.role_settings("implementation")
+        allow = out["permissions"]["allow"]
+        self.assertIn("mcp__world-data__korean_law__*", allow)
+        self.assertNotIn("Bash", allow)
+        self.assertNotIn("Write", allow)
+        self.assertNotIn("Edit", allow)
+
+    def test_duplicate_within_env_var_is_not_duplicated_in_output(self):
+        os.environ["MUSTER_MCP_ALLOW"] = ("mcp__world-data__korean_law__*,"
+                                          "mcp__world-data__korean_law__*")
+        out = spawn.role_settings("implementation")
+        allow = out["permissions"]["allow"]
+        self.assertEqual(allow.count("mcp__world-data__korean_law__*"), 1)
+
+    def test_duplicate_against_role_declared_entry_is_not_duplicated(self):
+        f = Path(spawn.ROOT) / "roles" / "implementation.json"
+        original_text = f.read_text()
+        spec = json.loads(original_text)
+        spec["permissions"] = {"allow": ["mcp__world-data__korean_law__*"]}
+        os.environ["MUSTER_MCP_ALLOW"] = "mcp__world-data__korean_law__*"
+        try:
+            f.write_text(json.dumps(spec))
+            out = spawn.role_settings("implementation")
+            allow = out["permissions"]["allow"]
+            self.assertEqual(allow.count("mcp__world-data__korean_law__*"), 1)
+        finally:
+            f.write_text(original_text)
+
+    def test_applies_to_every_role_not_just_one(self):
+        os.environ["MUSTER_MCP_ALLOW"] = "mcp__world-data__korean_law__*"
+        for role_file in (Path(spawn.ROOT) / "roles").glob("*.json"):
+            role = role_file.stem
+            out = spawn.role_settings(role)
+            self.assertIn("mcp__world-data__korean_law__*",
+                          out["permissions"]["allow"], role)
+
+
 class PackageRegistryAccess(unittest.TestCase):
     """이슈 #38: 패키지 레지스트리 접근 — 호스트 캐시 마운트 + 레지스트리 허용목록."""
 
