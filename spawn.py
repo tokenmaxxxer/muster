@@ -2277,14 +2277,11 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
     # 그래서 토큰을 env 로 명시 주입한다: 에이전트 토큰이 있으면 그것,
     # 없으면(1계정 기본) 사용자의 gh 토큰을 꺼내 넘긴다. gh-guard 가
     # 역할 세션의 사람-행위 명령은 어차피 막는다.
-    agent_token = os.environ.get("MUSTER_AGENT_GH_TOKEN")
-    if not agent_token:
-        try:
-            t = subprocess.run(["gh", "auth", "token"], capture_output=True,
-                               text=True, timeout=15)
-            agent_token = t.stdout.strip() if t.returncode == 0 else ""
-        except Exception:
-            agent_token = ""
+    # `_resolve_gh_token()` 과 로직을 공유한다(중복 제거, 이슈 발견:
+    # 오케스트레이터 자신의 git 호출은 이 로직이 없어서 인증 없이 돌았다) —
+    # 캐시도 공유해서, 이 스폰에서 `_fetch_or_halt()` 가 먼저 불렸다면
+    # `gh auth token` 을 또 shell-out 하지 않는다.
+    agent_token = _resolve_gh_token()
     if agent_token:
         env["GH_TOKEN"] = agent_token
         env["GIT_TERMINAL_PROMPT"] = "0"
@@ -2508,6 +2505,57 @@ def main() -> int:
                       stall_timeout_min=a.stall_timeout)
 
 
+_GH_TOKEN_CACHE: str | None = None
+
+
+def _resolve_gh_token() -> str:
+    """`MUSTER_AGENT_GH_TOKEN` 이 있으면 그것, 없으면 `gh auth token` 을 한
+    번만 불러 프로세스 전체에서 캐시한다(issue_workspace/checkout_issue_branch
+    가 한 스폰에서 `_fetch_or_halt` 를 최대 2번까지 부르므로, 캐시 없이는
+    `gh auth token` 을 그만큼 다시 shell-out 한다). 실패하면 빈 문자열 —
+    호출부가 "주입 안 함"으로 처리한다.
+
+    `spawn_cmd()` 가 역할 세션의 `GH_TOKEN` env 를 채울 때 쓰던 것과 같은
+    로직이다(중복 제거) — 두 소비자가 정확히 같은 우선순위를 공유해야,
+    오케스트레이터 자신의 git 호출과 역할 세션이 서로 다른 계정으로 인증하는
+    일이 없다."""
+    global _GH_TOKEN_CACHE
+    if _GH_TOKEN_CACHE is not None:
+        return _GH_TOKEN_CACHE
+    token = os.environ.get("MUSTER_AGENT_GH_TOKEN")
+    if not token:
+        try:
+            t = subprocess.run(["gh", "auth", "token"], capture_output=True,
+                               text=True, timeout=15)
+            token = t.stdout.strip() if t.returncode == 0 else ""
+        except Exception:
+            token = ""
+    _GH_TOKEN_CACHE = token
+    return token
+
+
+def _git_env() -> dict[str, str] | None:
+    """오케스트레이터 자신이 origin 에 하는 git 호출(fetch/push)에 얹을 env.
+
+    `issue_workspace()` 가 작업 클론에 심는 credential.helper
+    (`!f() { ...; echo password=$GH_TOKEN; }; f`)는 그 helper 를 실행하는
+    프로세스의 `$GH_TOKEN` 을 읽는다. 역할 세션에는 `spawn_cmd()` 가 이
+    값을 명시 주입하지만, `_fetch_or_halt()`/`ensure_pushed()` 는
+    오케스트레이터 자신의 프로세스에서 돈다 — 아무도 이 프로세스의 env 에는
+    넣어주지 않았다(실측: reasona 검증 중 `GH_TOKEN` 없이 `python3
+    spawn.py` 를 그냥 돌리면 재사용 워크스페이스 fetch 가 인증 실패로
+    막힌다. 이 개발 기계에서는 github.com 용 osxkeychain 항목이 우연히
+    있어서 처음엔 안 보였다 — `security find-internet-password -s
+    github.com` 으로 그 항목이 fetch 를 대신 통과시켰다는 것과, env 헬퍼
+    하나만 남기면 `Authentication failed` 로 재현된다는 것 둘 다 확인했다).
+
+    토큰을 못 구하면 `None` 을 돌려 `subprocess.run` 이 부모 env 를 그대로
+    물려받게 한다 — 빈 문자열로 덮어써서 사용자의 다른 자격증명 경로
+    (ssh-agent, osxkeychain)를 막지 않는다."""
+    token = _resolve_gh_token()
+    return {**os.environ, "GH_TOKEN": token} if token else None
+
+
 def _fetch_or_halt(work_dir: str, label: str, after=None) -> None:
     """fail-closed fetch. returncode 만 보면 놓치는 실패가 있다 — 실측:
     core issue-90 관찰 세션에서 `git fetch origin`이 stderr 에 "failed to
@@ -2522,7 +2570,7 @@ def _fetch_or_halt(work_dir: str, label: str, after=None) -> None:
     clone 경로 한정으로, `.git`은 이미 생겨 재사용 분기로 넘어가 버려 다시
     시도할 기회 자체가 없다(hunt 발견, composition-regression stance)."""
     r = subprocess.run(["git", "-C", work_dir, "fetch", "-q", "origin"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=_git_env())
     if after is not None:
         after()
     if r.returncode != 0 or "failed to store" in r.stderr:
@@ -2645,7 +2693,14 @@ def ensure_pushed(work: str, issue: int, role: str) -> None:
     """
     br = f"issue-{issue}/{role}"
     def git(*a):
-        return subprocess.run(["git", "-C", work, *a], capture_output=True, text=True)
+        # env=_git_env(): 이 클로저의 유일한 네트워크 호출은 아래 push 다 —
+        # rev-parse/rev-list 는 로컬이라 영향 없다. push 도 _fetch_or_halt
+        # 와 같은 원인(오케스트레이터 자신의 env 에 GH_TOKEN 이 없음)으로
+        # 막힐 수 있다 — 이 함수 자체가 "샌드박스 egress 가 막히면 호스트
+        # 에서 대신 push 한다"는 백업 경로인데, 그 백업 경로 자신이
+        # 무인증으로 막히면 산출물이 로컬 커밋으로만 남는다.
+        return subprocess.run(["git", "-C", work, *a], capture_output=True,
+                              text=True, env=_git_env())
     if git("rev-parse", "--verify", "-q", br).returncode != 0:
         return
     ahead = git("rev-list", "--count", f"origin/{br}..{br}")

@@ -1232,6 +1232,172 @@ class WorkspaceSyncFailClosed(unittest.TestCase):
             self.assertIn("local unpushed commit", log)
 
 
+class OrchestratorGitToken(unittest.TestCase):
+    """실측: reasona issue-3 검증 중, GH_TOKEN 없이 `python3 spawn.py` 를
+    그냥 돌리면 재사용 워크스페이스 fetch 가 인증 실패로 막힌다.
+    `issue_workspace()` 가 작업 클론에 심는 credential.helper 는 그 helper
+    를 실행하는 프로세스의 $GH_TOKEN 을 읽는데, `spawn_cmd()` 는 역할
+    세션의 env 에 그 값을 명시 주입하면서 오케스트레이터 자신의 프로세스에는
+    아무도 넣어주지 않았다. `_fetch_or_halt()`/`ensure_pushed()` 의 git
+    호출에 `_git_env()` 를 통해 주입되는지, fake git wrapper 로 실제
+    프로세스 env 를 검사해 확인한다."""
+
+    def _git(self, cwd, *a):
+        return subprocess.run(["git", "-C", str(cwd), *a],
+                              capture_output=True, text=True)
+
+    def _init_repo(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        self._git(path, "init", "-q")
+        self._git(path, "config", "user.email", "t@t.t")
+        self._git(path, "config", "user.name", "t")
+
+    def setUp(self):
+        spawn._GH_TOKEN_CACHE = None
+        self._saved_agent = os.environ.pop("MUSTER_AGENT_GH_TOKEN", None)
+
+    def tearDown(self):
+        spawn._GH_TOKEN_CACHE = None
+        os.environ.pop("MUSTER_AGENT_GH_TOKEN", None)
+        if self._saved_agent is not None:
+            os.environ["MUSTER_AGENT_GH_TOKEN"] = self._saved_agent
+
+    def _token_recording_git_wrapper(self, fake_bin, record_path):
+        """`$GH_TOKEN` 을 record_path 에 적고 real git 에 위임하는 wrapper —
+        어느 값이 실제로 이 프로세스에 도달했는지 실 subprocess 실행으로
+        검사한다(mock 이 아니라)."""
+        real_git = shutil.which("git")
+        wrapper = fake_bin / "git"
+        wrapper.write_text(
+            "#!/bin/sh\n"
+            f"echo \"${{GH_TOKEN}}\" > {record_path}\n"
+            f"exec {real_git} \"$@\"\n"
+        )
+        wrapper.chmod(0o755)
+
+    def test_fetch_or_halt_injects_muster_agent_gh_token(self):
+        os.environ["MUSTER_AGENT_GH_TOKEN"] = "test-token-abc"
+        with tempfile.TemporaryDirectory() as td:
+            origin = Path(td) / "origin"
+            work = Path(td) / "work"
+            self._init_repo(origin)
+            (origin / "a.txt").write_text("x")
+            self._git(origin, "add", "a.txt")
+            self._git(origin, "commit", "-q", "-m", "init")
+            r = subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            record = Path(td) / "seen-token.txt"
+            self._token_recording_git_wrapper(fake_bin, record)
+            old_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            try:
+                spawn._fetch_or_halt(str(work), "test-label")
+            finally:
+                os.environ["PATH"] = old_path
+            self.assertEqual(record.read_text().strip(), "test-token-abc")
+
+    def test_ensure_pushed_push_call_injects_token_too(self):
+        os.environ["MUSTER_AGENT_GH_TOKEN"] = "test-token-xyz"
+        with tempfile.TemporaryDirectory() as td:
+            origin = Path(td) / "origin"
+            work = Path(td) / "work"
+            self._init_repo(origin)
+            (origin / "a.txt").write_text("x")
+            self._git(origin, "add", "a.txt")
+            self._git(origin, "commit", "-q", "-m", "init")
+            self._git(origin, "branch", "-m", "main")
+            r = subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self._git(work, "config", "user.email", "t@t.t")
+            self._git(work, "config", "user.name", "t")
+
+            issue, role = 999903, "implementation"
+            br = f"issue-{issue}/{role}"
+            self._git(work, "checkout", "-q", "-b", br)
+            (work / "c.txt").write_text("wip")
+            self._git(work, "add", "c.txt")
+            self._git(work, "commit", "-q", "-m", "wip")
+
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            record = Path(td) / "seen-token.txt"
+            self._token_recording_git_wrapper(fake_bin, record)
+            old_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            gh_stub = fake_bin / "gh"
+            gh_stub.write_text("#!/bin/sh\nexit 1\n")  # gh pr list/create no-op
+            gh_stub.chmod(0o755)
+            try:
+                spawn.ensure_pushed(str(work), issue, role)
+            finally:
+                os.environ["PATH"] = old_path
+            self.assertEqual(record.read_text().strip(), "test-token-xyz")
+
+    def test_token_resolution_shells_out_to_gh_at_most_once(self):
+        """캐시 검증: gh auth token 을 두 번 부르지 않는다 — 한 스폰 안에서
+        _fetch_or_halt 가 여러 번 불려도(issue_workspace + checkout_issue_branch)."""
+        with tempfile.TemporaryDirectory() as td:
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            call_count_file = Path(td) / "gh-calls.txt"
+            gh_wrapper = fake_bin / "gh"
+            gh_wrapper.write_text(
+                "#!/bin/sh\n"
+                f"echo x >> {call_count_file}\n"
+                "echo fake-shelled-out-token\n"
+            )
+            gh_wrapper.chmod(0o755)
+            old_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            try:
+                first = spawn._resolve_gh_token()
+                second = spawn._resolve_gh_token()
+            finally:
+                os.environ["PATH"] = old_path
+            self.assertEqual(first, "fake-shelled-out-token")
+            self.assertEqual(second, "fake-shelled-out-token")
+            self.assertEqual(len(call_count_file.read_text().splitlines()), 1)
+
+    def test_unresolvable_token_returns_none_not_empty_override(self):
+        """토큰을 못 구하면 _git_env() 는 None 이어야 한다 — 빈 문자열로
+        덮어쓰면 subprocess.run 이 부모 env 를 안 물려받아, 사용자의 다른
+        자격증명 경로(ssh-agent, osxkeychain)까지 막힌다."""
+        with tempfile.TemporaryDirectory() as td:
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            gh_wrapper = fake_bin / "gh"
+            gh_wrapper.write_text("#!/bin/sh\nexit 1\n")  # gh auth token 실패
+            gh_wrapper.chmod(0o755)
+            old_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            try:
+                self.assertIsNone(spawn._git_env())
+            finally:
+                os.environ["PATH"] = old_path
+
+    def test_muster_agent_gh_token_wins_over_gh_auth_token(self):
+        os.environ["MUSTER_AGENT_GH_TOKEN"] = "explicit-agent-token"
+        with tempfile.TemporaryDirectory() as td:
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            gh_wrapper = fake_bin / "gh"
+            # gh 가 불리면 다른 토큰을 낸다 — 실제로 불렸다면 테스트가 잡는다.
+            gh_wrapper.write_text("#!/bin/sh\necho should-not-be-used\n")
+            gh_wrapper.chmod(0o755)
+            old_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            try:
+                token = spawn._resolve_gh_token()
+            finally:
+                os.environ["PATH"] = old_path
+            self.assertEqual(token, "explicit-agent-token")
+
+
 class Ledger(unittest.TestCase):
     def test_appends_jsonl(self):
         with tempfile.TemporaryDirectory() as td:
