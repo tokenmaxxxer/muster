@@ -433,6 +433,27 @@ def role_settings(role: str) -> dict:
         if tool not in allow:
             allow.append(tool)
 
+    # MUSTER_MCP_ALLOW: 같은 TOOL-PERMISSION 층 결함이 사용자가 직접 붙인
+    # MCP 서버에도 그대로 있다 — 서버 연결은 되는데(`mcp_servers` 에
+    # "connected" 로 뜬다) 도구 호출은 permissions.allow 에 규칙이 없어
+    # #58/#65 와 똑같이 거부된다(실측: reasona issue-3, world-data MCP).
+    # #58/#65 와 다른 점은 대상이 tokenmaxxxer 가 아는 고정 도구가 아니라
+    # **사용자마다 다른 이름의 개인 MCP 서버**라는 것 — 코드에 이름을 박을
+    # 수 없다. 그래서 운영자가 스폰 시점에 콤마로 나열한다
+    # (MUSTER_ROLE_MODEL/MUSTER_AGENT_GH_TOKEN/MUSTER_WORK_DIR 와 같은
+    # 환경변수 관례). 빈 문자열/공백뿐인 항목은 미설정과 동일하게 버린다.
+    #
+    # `mcp__` 접두사만 받는다 — 이 통로는 MCP 도구 permission 층의 구멍을
+    # 메우는 것이 유일한 목적이고, Write/Edit/Bash 처럼 board-gate/
+    # approval-gate 가 지키는 도구까지 여는 우회로가 되면 안 된다. 접두사가
+    # 안 맞는 항목은 조용히 버린다 — 운영자가 실수로 `MUSTER_MCP_ALLOW=Bash`
+    # 를 넣어도 게이트가 지키는 표면은 넓어지지 않는다.
+    extra_mcp = [t.strip() for t in os.environ.get("MUSTER_MCP_ALLOW", "").split(",")
+                 if t.strip().startswith("mcp__")]
+    for tool in extra_mcp:
+        if tool not in allow:
+            allow.append(tool)
+
     # 자격증명 마스킹은 TLS 종료가 없으면 sentinel 값만 흘러 도구 인증이 깨진다.
     sb = s.get("sandbox", {})
     if sb.get("credentials", {}).get("envVars") and "tlsTerminate" not in sb.get("network", {}):
