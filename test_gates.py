@@ -872,17 +872,18 @@ def t_find_violations_uses_record_evidence_for_keywordless_merge(tmp_path):
     original_fetch_ref_file = ci._fetch_ref_file
     spawn._pr_for_branch = lambda root, branch: 368
     closure_sweep._pr_view_state_body = (
-        lambda root, pr: ("MERGED", "no closing keyword here"))
+        lambda root, pr: (("MERGED", "no closing keyword here"), True))
     ci._fetch_ref_file = (
         lambda repo, pr, branch, path: ("---\nloop_state: delivered\n---\n\n본문\n", None))
     try:
-        violations = closure_sweep.find_violations(
+        violations, skips = closure_sweep.find_violations(
             root, subjects=subjects, issue_states={135: "OPEN"})
     finally:
         spawn._pr_for_branch = original_pr_for_branch
         closure_sweep._pr_view_state_body = original_pr_view
         ci._fetch_ref_file = original_fetch_ref_file
 
+    assert not skips, skips
     assert len(violations) == 1, violations
     assert violations[0]["kind"] == closure_sweep.MERGED_DELIVERY_ISSUE_OPEN, violations
 
@@ -900,9 +901,10 @@ def t_find_violations_uses_prefetched_issue_state_skips_issue_view():
     spawn._pr_for_branch = lambda root, branch: None
     try:
         subjects = {"issue-135": {"implementation": {}}}
-        violations = closure_sweep.find_violations(
+        violations, skips = closure_sweep.find_violations(
             Path("."), subjects=subjects, issue_states={135: "OPEN"})
         assert violations == [], violations
+        assert skips == [], skips
     finally:
         closure_sweep._issue_view = original_issue_view
         spawn._pr_for_branch = original_pr_for_branch
@@ -917,7 +919,7 @@ def t_find_violations_without_issue_states_still_calls_issue_view():
 
     def fake_issue_view(root, issue):
         calls.append(issue)
-        return "OPEN"
+        return "OPEN", True
 
     closure_sweep._issue_view = fake_issue_view
     spawn._pr_for_branch = lambda root, branch: None

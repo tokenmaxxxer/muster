@@ -58,26 +58,32 @@ def classify(issue_state: str, pr_state: str, pr_body: str, issue: int,
     return None
 
 
-def _issue_view(root: Path, issue: int) -> str | None:
+def _issue_view(root: Path, issue: int) -> tuple[str | None, bool]:
+    """(state, ok) — ok=False means the `gh` call itself failed; state is
+    then meaningless and must not be read as "no such issue"."""
     r = subprocess.run(["gh", "issue", "view", str(issue), "--json", "state",
                         "-q", ".state"], cwd=root, capture_output=True, text=True)
-    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+    if r.returncode != 0:
+        return None, False
+    state = r.stdout.strip()
+    return (state or None), True
 
 
-def _pr_view_state_body(root: Path, pr: int) -> tuple[str, str] | None:
+def _pr_view_state_body(root: Path, pr: int) -> tuple[tuple[str, str] | None, bool]:
+    """(view, ok) — ok=False means the `gh` call itself failed/unparseable."""
     r = subprocess.run(["gh", "pr", "view", str(pr), "--json", "state,body"],
                        cwd=root, capture_output=True, text=True)
     if r.returncode != 0:
-        return None
+        return None, False
     try:
         data = json.loads(r.stdout)
     except ValueError:
-        return None
-    return data.get("state", ""), data.get("body", "") or ""
+        return None, False
+    return (data.get("state", ""), data.get("body", "") or ""), True
 
 
 def find_violations(root: Path, subjects: dict | None = None,
-                     issue_states: dict[int, str] | None = None) -> list[dict]:
+                     issue_states: dict[int, str] | None = None) -> tuple[list[dict], list[dict]]:
     """보드의 각 subject x role 브랜치에 대해 이슈/PR 상태를 읽고 위반을 모은다.
 
     `subjects` 는 `spawn.board(root)` 와 같은 모양(subject -> role -> ...) —
@@ -86,10 +92,15 @@ def find_violations(root: Path, subjects: dict | None = None,
     호출을 건너뛰고 그 값을 그대로 쓴다(레포 전체 한 번짜리 프리페치 재사용,
     새 `gh` 호출 종류를 추가하지 않는다). 네트워크(`gh`)만 쓰고 아무것도
     쓰지 않는다.
+
+    `(violations, skips)` 를 돌려준다 — `skips` 는 `gh` 호출이 실패해서
+    끝내 확인하지 못한 subject/role 목록이다(issue #287 S1): 위반이
+    0건이어도 skips 가 있으면 "위반 없음"이 아니라 "확인 불가"다.
     """
     if subjects is None:
         subjects = spawn.board(root)
     violations = []
+    skips = []
     for subject, roles in subjects.items():
         m = subject.split("-", 1)
         if len(m) != 2 or not m[1].isdigit():
@@ -98,7 +109,10 @@ def find_violations(root: Path, subjects: dict | None = None,
         if issue_states is not None and issue in issue_states:
             issue_state = issue_states[issue]
         else:
-            issue_state = _issue_view(root, issue)
+            issue_state, ok = _issue_view(root, issue)
+            if not ok:
+                skips.append({"subject": subject, "reason": "gh-issue-view-failed"})
+                continue
         if issue_state is None:
             continue
         for role in roles:
@@ -106,7 +120,11 @@ def find_violations(root: Path, subjects: dict | None = None,
             pr = spawn._pr_for_branch(root, branch)
             if pr is None:
                 continue
-            view = _pr_view_state_body(root, pr)
+            view, ok = _pr_view_state_body(root, pr)
+            if not ok:
+                skips.append({"subject": subject, "role": role, "pr": pr,
+                              "reason": "gh-pr-view-failed"})
+                continue
             if view is None:
                 continue
             pr_state, pr_body = view
@@ -114,7 +132,7 @@ def find_violations(root: Path, subjects: dict | None = None,
             kind = classify(issue_state, pr_state, pr_body, issue, has_record_evidence)
             if kind:
                 violations.append({"issue": issue, "pr": pr, "role": role, "kind": kind})
-    return violations
+    return violations, skips
 
 
 def format_report(violations: list[dict]) -> str:
@@ -127,25 +145,34 @@ def _violations_digest(violations: list[dict]) -> str:
     return hashlib.sha256(json.dumps(key).encode("utf-8")).hexdigest()[:12]
 
 
-def post_sweep_comments(root: Path, violations: list[dict]) -> None:
+def post_sweep_comments(root: Path, violations: list[dict]) -> list[int]:
     """위반이 있는 이슈마다, 그 이슈의 위반 집합에 대해 한 번만 코멘트를 단다.
 
     마커에 위반 집합의 해시를 넣어 — 위반 집합이 바뀌면 새 코멘트, 그대로면
     무음(`_post_crash_comment` 와 같은 read-then-check 패턴).
+
+    코멘트 POST 자체가 실패한 이슈 번호 목록을 돌려준다(issue #287 S7) —
+    호출부가 "위반은 찾았는데 알림이 안 갔다"를 조용히 삼키지 않게.
     """
     by_issue: dict[int, list[dict]] = {}
     for v in violations:
         by_issue.setdefault(v["issue"], []).append(v)
+    failed: list[int] = []
     for issue, vs in by_issue.items():
         marker = _SWEEP_COMMENT_MARKER.format(digest=_violations_digest(vs))
-        if any(marker in c.get("body", "") for c in spawn._issue_comments(root, issue)):
+        comments, ok = spawn._issue_comments(root, issue)
+        if ok and any(marker in c.get("body", "") for c in comments):
             continue
         slug = spawn._repo_slug(root)
         if not slug:
+            failed.append(issue)
             continue
         body = f"{marker}\n\n" + format_report(vs)
-        subprocess.run(["gh", "api", f"repos/{slug}/issues/{issue}/comments",
+        r = subprocess.run(["gh", "api", f"repos/{slug}/issues/{issue}/comments",
                         "-f", f"body={body}"], cwd=root, capture_output=True, text=True)
+        if r.returncode != 0:
+            failed.append(issue)
+    return failed
 
 
 def main() -> int:
@@ -155,14 +182,28 @@ def main() -> int:
         root = Path(argv[argv.index("--repo") + 1]).resolve()
     post = "--post" in argv
 
-    violations = find_violations(root)
+    violations, skips = find_violations(root)
+    if skips:
+        print("종결 일관성 스윕: 확인 불가")
+        print(f"{len(skips)}건 확인 못함: " +
+              ", ".join(s.get("subject", "?") for s in skips))
+        if violations:
+            print("(부분적으로 확인된 위반)")
+            print(format_report(violations))
+        if post and violations:
+            failed = post_sweep_comments(root, violations)
+            if failed:
+                print(f"코멘트 게시 실패: 이슈 {', '.join(str(i) for i in failed)}")
+        return 2
     if not violations:
         print("종결 일관성 스윕: 위반 없음")
         return 0
     print("종결 일관성 스윕: 위반 발견")
     print(format_report(violations))
     if post:
-        post_sweep_comments(root, violations)
+        failed = post_sweep_comments(root, violations)
+        if failed:
+            print(f"코멘트 게시 실패: 이슈 {', '.join(str(i) for i in failed)}")
     return 1
 
 

@@ -40,10 +40,10 @@ class ApproveScope(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _patch_gh(self, comments, pr=None):
+    def _patch_gh(self, comments, pr=None, ok=True):
         self._start(mock.patch.object(spawn, "_repo_slug", lambda root: "acme/repo"))
         self._start(mock.patch.object(spawn, "_pr_for_branch", lambda root, branch: pr))
-        self._start(mock.patch.object(spawn, "_issue_comments", lambda root, n: comments))
+        self._start(mock.patch.object(spawn, "_issue_comments", lambda root, n: (comments, ok)))
 
     def _patch_run(self, fake_run):
         self._start(mock.patch.object(spawn.subprocess, "run", fake_run))
@@ -110,6 +110,16 @@ class ApproveScope(unittest.TestCase):
         # 커밋이 실패했으니 파일은 scope-proposed 로 되돌아가 있어야 한다 —
         # 안 그러면 다음 호출이 idempotency 가드에 걸려 커밋 없이 성공을 보고한다.
         self.assertEqual(spawn.frontmatter(record).get("loop_state"), "scope-proposed")
+
+    def test_gh_failure_message_differs_from_no_comment_message(self):
+        """issue #287 S6: gh 호출 실패("코멘트를 못 읽었다")와 승인 코멘트
+        부재("코멘트가 없다")는 서로 다른 메시지여야 한다."""
+        _record(self.root, "issue-7", "product-discovery", "scope-proposed")
+        _approvers(self.root, "alice")
+        self._patch_gh([], ok=False)
+        with self.assertRaises(SystemExit) as ctx:
+            spawn.approve_scope(str(self.root), 7)
+        self.assertIn("읽지 못했다", str(ctx.exception))
 
     def test_wrong_loop_state_is_rejected(self):
         _record(self.root, "issue-5", "product-discovery", "in-progress")

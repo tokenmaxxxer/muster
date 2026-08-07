@@ -960,7 +960,7 @@ def _pr_for_branch(root: Path, branch: str) -> int | None:
     return int(out) if r.returncode == 0 and out.isdigit() else None
 
 
-def _issue_comments(root: Path, number: int) -> list[dict]:
+def _issue_comments(root: Path, number: int) -> tuple[list[dict], bool]:
     """`number` 앞으로 달린 코멘트. GitHub 는 이슈든 PR 이든 같은
     `/issues/<n>/comments` 로 대화 코멘트를 낸다 — PR 리뷰 코멘트가 아니라
     일반 코멘트가 필요하므로 이 엔드포인트로 충분하다.
@@ -971,22 +971,27 @@ def _issue_comments(root: Path, number: int) -> list[dict]:
     넘는 스레드에서 결함이 악화되는 걸 막으려고 `--slurp`(페이지들을
     바깥 배열 하나로 감싼다)를 같이 쓰고, 파싱 직후 평탄화한다(이슈
     #224).
+
+    `(comments, ok)` 를 돌려준다(issue #287 S6) — `ok=False` 는 `gh` 호출
+    자체가 실패했다는 뜻이고, 그때 `comments` 는 빈 리스트지만 "코멘트가
+    0개"로 읽으면 안 된다: 호출부가 "승인 코멘트가 없다"와 "코멘트를
+    못 읽었다"를 구별할 수 있게 하는 게 이 튜플의 존재 이유다.
     """
     slug = _repo_slug(root)
     if not slug:
-        return []
+        return [], False
     r = subprocess.run(["gh", "api", f"repos/{slug}/issues/{number}/comments",
                         "--paginate", "--slurp"],
                        cwd=root, capture_output=True, text=True)
     if r.returncode != 0:
-        return []
+        return [], False
     try:
         data = json.loads(r.stdout)
     except ValueError:
-        return []
+        return [], False
     data = [c for page in data for c in page]
     return [{"login": c.get("user", {}).get("login", ""), "body": c.get("body", "")}
-            for c in data]
+            for c in data], True
 
 
 _UPSTREAM_PATH = re.compile(r"^\s*-\s*path:\s*(\S+)", re.M)
@@ -1062,13 +1067,18 @@ def approve_scope(cwd: str, issue: int) -> int:
     # 이슈 댓글이 승인 정본이다 — 먼저 본다. PR 댓글은 PR 이 있을 때만 보는
     # fallback 이지 대등한 소스가 아니다(issue-126: 위치 드리프트로 승인을
     # 놓친 사례가 있었다). 순서를 바꾸지 말 것.
-    comments = _issue_comments(root, issue)
+    comments, issue_ok = _issue_comments(root, issue)
+    pr_ok = True
     if pr:
-        comments += _issue_comments(root, pr)
+        pr_comments, pr_ok = _issue_comments(root, pr)
+        comments += pr_comments
     match = next((c for c in comments
                   if c["body"].strip() == needle and c["login"] in approvers), None)
     if not match:
         where = f"이슈 #{issue}" + (f" 또는 PR #{pr}" if pr else "")
+        if not issue_ok or not pr_ok:
+            sys.exit(f"이슈/PR 코멘트를 읽지 못했다 ({where}) — gh 호출이 실패했다. "
+                     f"승인 코멘트가 없는지조차 확인할 수 없다.")
         sys.exit(f"승인 코멘트를 못 찾았다: 정확히 \"{needle}\" 를 "
                  f"{', '.join(sorted(approvers))} 중 한 계정이 {where} 에 달아야 한다.")
 
@@ -1822,7 +1832,8 @@ def _post_crash_comment(root: Path, issue: int, key: str, work: str, log: str,
     키는 트리거 종류와 무관하게 key+상한 하나여야 두 경로가 같은
     attempt-cap 예산을 공유한다는 프로포절의 결정이 그대로 성립한다."""
     marker = _CRASH_COMMENT_MARKER.format(key=key, cap=RESPAWN_MAX_ATTEMPTS)
-    if any(marker in c.get("body", "") for c in _issue_comments(root, issue)):
+    comments, ok = _issue_comments(root, issue)
+    if ok and any(marker in c.get("body", "") for c in comments):
         return
     slug = _repo_slug(root)
     if not slug:
@@ -1830,8 +1841,11 @@ def _post_crash_comment(root: Path, issue: int, key: str, work: str, log: str,
     body = (f"{marker}\n\n"
             f"트리거: {trigger}\n워크스페이스: {work}\n로그: {log}\n\n"
             f"{RESPAWN_MAX_ATTEMPTS}회 자동 재스폰을 모두 소진했다 — 사람이 개입해야 한다.")
-    subprocess.run(["gh", "api", f"repos/{slug}/issues/{issue}/comments",
+    r = subprocess.run(["gh", "api", f"repos/{slug}/issues/{issue}/comments",
                     "-f", f"body={body}"], cwd=root, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"[spawn] 이슈 #{issue} 크래시-캡 코멘트 게시 실패 (사람 개입 필요 경고가 "
+              f"전달되지 않았다): {r.stderr.strip()}", file=sys.stderr)
 
 
 def _post_stall_comment(root: Path, issue: int, key: str, work: str, log: str) -> None:
@@ -2549,7 +2563,17 @@ def main() -> int:
         sys.path.insert(0, str((Path(__file__).parent / "gates").resolve()))
         import closure_sweep
         root = Path(a.cwd).resolve()
-        violations = closure_sweep.find_violations(root)
+        violations, skips = closure_sweep.find_violations(root)
+        if skips:
+            print("종결 일관성 스윕: 확인 불가")
+            print(f"{len(skips)}건 확인 못함: " +
+                  ", ".join(s.get("subject", "?") for s in skips))
+            if violations:
+                print("(부분적으로 확인된 위반)")
+                print(closure_sweep.format_report(violations))
+            if a.post and violations:
+                closure_sweep.post_sweep_comments(root, violations)
+            return 2
         if not violations:
             print("종결 일관성 스윕: 위반 없음")
             return 0

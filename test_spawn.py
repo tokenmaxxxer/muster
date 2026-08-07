@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """spawn.py 의 순수 함수들 — 세션을 띄우지 않고 검사한다."""
 import argparse
+import contextlib
 import io
 import json
 import os
@@ -3695,7 +3696,7 @@ class PostCrashComment(unittest.TestCase):
         marker = spawn._CRASH_COMMENT_MARKER.format(key="issue-132/coding",
                                                      cap=spawn.RESPAWN_MAX_ATTEMPTS)
         orig_comments = spawn._issue_comments
-        spawn._issue_comments = lambda root, n: [{"login": "bot", "body": marker}]
+        spawn._issue_comments = lambda root, n: ([{"login": "bot", "body": marker}], True)
         calls = []
         orig_run = subprocess.run
         def fake_run(cmd, *a, **k):
@@ -3712,7 +3713,7 @@ class PostCrashComment(unittest.TestCase):
     def test_posts_when_marker_absent(self):
         orig_comments = spawn._issue_comments
         orig_slug = spawn._repo_slug
-        spawn._issue_comments = lambda root, n: []
+        spawn._issue_comments = lambda root, n: ([], True)
         spawn._repo_slug = lambda root: "acme/repo"
         calls = []
         orig_run = subprocess.run
@@ -3728,6 +3729,29 @@ class PostCrashComment(unittest.TestCase):
             subprocess.run = orig_run
         self.assertEqual(len(calls), 1)
         self.assertIn("gh", calls[0])
+
+    def test_post_failure_is_logged_not_silent(self):
+        """issue #287 S7: 코멘트 POST 자체가 실패하면(returncode!=0)
+        stderr 에 경고가 남아야 한다 — "사람 개입 필요" 알림이 조용히
+        사라지면 안 된다."""
+        orig_comments = spawn._issue_comments
+        orig_slug = spawn._repo_slug
+        spawn._issue_comments = lambda root, n: ([], True)
+        spawn._repo_slug = lambda root: "acme/repo"
+        orig_run = subprocess.run
+
+        def fake_run(cmd, *a, **k):
+            return orig_run(["false"], capture_output=True, text=True)
+        subprocess.run = fake_run
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                spawn._post_crash_comment(Path("."), 132, "issue-132/coding", "w", "l")
+            self.assertIn("게시 실패", buf.getvalue())
+        finally:
+            spawn._issue_comments = orig_comments
+            spawn._repo_slug = orig_slug
+            subprocess.run = orig_run
 
 
 class PostStallComment(unittest.TestCase):
@@ -3816,10 +3840,11 @@ class IssueComments(unittest.TestCase):
 
         spawn.subprocess.run = fake_run
         try:
-            out = spawn._issue_comments(Path("."), 999)
+            out, ok = spawn._issue_comments(Path("."), 999)
         finally:
             spawn._repo_slug = orig_slug
             spawn.subprocess.run = orig_run
+        self.assertTrue(ok)
         self.assertEqual(out, [{"login": "a", "body": "one"},
                                {"login": "b", "body": "two"}])
         self.assertIn("--paginate", calls[0])
@@ -3839,10 +3864,30 @@ class IssueComments(unittest.TestCase):
 
         spawn.subprocess.run = fake_run
         try:
-            out = spawn._issue_comments(Path("."), 999)
+            out, ok = spawn._issue_comments(Path("."), 999)
         finally:
             spawn._repo_slug = orig_slug
             spawn.subprocess.run = orig_run
+        self.assertTrue(ok)
+        self.assertEqual(out, [])
+
+    def test_gh_failure_yields_ok_false(self):
+        """gh 호출 자체가 실패하면(returncode!=0) ok=False — 빈 리스트를
+        "코멘트 0개"로 읽으면 안 된다(issue #287 S6)."""
+        orig_slug = spawn._repo_slug
+        orig_run = subprocess.run
+        spawn._repo_slug = lambda root: "acme/repo"
+
+        def fake_run(cmd, *a, **k):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="rate limited")
+
+        spawn.subprocess.run = fake_run
+        try:
+            out, ok = spawn._issue_comments(Path("."), 999)
+        finally:
+            spawn._repo_slug = orig_slug
+            spawn.subprocess.run = orig_run
+        self.assertFalse(ok)
         self.assertEqual(out, [])
 
 
@@ -3965,7 +4010,7 @@ class FlowsPayload(unittest.TestCase):
         self.addCleanup(self.td.cleanup)
         self._patched = []
         self._patch(spawn, "_repo_slug", lambda root: "acme/repo")
-        self._patch(spawn, "_issue_comments", lambda root, n: [])
+        self._patch(spawn, "_issue_comments", lambda root, n: ([], True))
         self._patch(spawn, "_roster_load", lambda: {})
         old_root = spawn.ROOT
         spawn.ROOT = self.root
@@ -3973,12 +4018,12 @@ class FlowsPayload(unittest.TestCase):
         sys.path.insert(0, str((Path(spawn.__file__).parent / "gates").resolve()))
         import flows
         self.flows = flows
-        self._patch(flows, "_pr_list_all", lambda root: [])
-        self._patch(flows, "_issue_list_all", lambda root: [])
+        self._patch(flows, "_pr_list_all", lambda root: ([], True))
+        self._patch(flows, "_issue_list_all", lambda root: ([], True))
         import closure_sweep
         self.closure_sweep = closure_sweep
         self._patch(closure_sweep, "find_violations",
-                    lambda root, subjects=None, issue_states=None: [])
+                    lambda root, subjects=None, issue_states=None: ([], []))
 
     def _patch(self, obj, name, fn):
         orig = getattr(obj, name)
@@ -4017,10 +4062,10 @@ class FlowsPayload(unittest.TestCase):
 
     def test_decision_queue_from_open_pr(self):
         self._write_record("issue-20", "product-discovery", "scope-proposed")
-        self._patch(self.flows, "_pr_list_all", lambda root: [
+        self._patch(self.flows, "_pr_list_all", lambda root: ([
             {"number": 99, "headRefName": "issue-20/product-discovery",
              "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         self.assertEqual(len(payload["decision_queue"]), 1)
         entry = payload["decision_queue"][0]
@@ -4031,10 +4076,10 @@ class FlowsPayload(unittest.TestCase):
     def test_decision_queue_from_open_pr_with_no_board_record(self):
         """issue #216 결함 1 회귀: 머지된 레코드도 계획 블록도 없는 이슈의
         PR(PR #86 재현)이 decision_queue 에 phase 1 로 떠야 한다."""
-        self._patch(self.flows, "_pr_list_all", lambda root: [
+        self._patch(self.flows, "_pr_list_all", lambda root: ([
             {"number": 86, "headRefName": "issue-86/product-discovery",
              "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         self.assertEqual(len(payload["decision_queue"]), 1)
         entry = payload["decision_queue"][0]
@@ -4047,10 +4092,10 @@ class FlowsPayload(unittest.TestCase):
         """issue #216: 레코드가 scope-approved(scope-proposed 아님)면 기존대로
         phase 2 로 분류돼야 한다 — 회귀 방지."""
         self._write_record("issue-31", "implementation", "scope-approved")
-        self._patch(self.flows, "_pr_list_all", lambda root: [
+        self._patch(self.flows, "_pr_list_all", lambda root: ([
             {"number": 56, "headRefName": "issue-31/implementation",
              "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         self.assertEqual(len(payload["decision_queue"]), 1)
         entry = payload["decision_queue"][0]
@@ -4137,12 +4182,12 @@ class FlowsPayload(unittest.TestCase):
 
     def test_hygiene_includes_closure_sweep_and_unapproved_prs(self):
         self._write_record("issue-30", "implementation", "scope-approved")
-        self._patch(self.flows, "_pr_list_all", lambda root: [
+        self._patch(self.flows, "_pr_list_all", lambda root: ([
             {"number": 55, "headRefName": "issue-30/implementation",
              "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
-        ])
+        ], True))
         self._patch(self.closure_sweep, "find_violations",
-                    lambda root, subjects=None, issue_states=None: [{"kind": "open-pr-on-closed-issue"}])
+                    lambda root, subjects=None, issue_states=None: ([{"kind": "open-pr-on-closed-issue"}], []))
         payload = self.flows.flows_payload(self.root)
         self.assertEqual(payload["hygiene"]["closure_sweep"],
                          [{"kind": "open-pr-on-closed-issue"}])
@@ -4151,9 +4196,9 @@ class FlowsPayload(unittest.TestCase):
 
     def test_flows_plan_is_null_without_plan_block(self):
         self._write_record("issue-40", "product-discovery", "scope-proposed")
-        self._patch(self.flows, "_issue_list_all", lambda root: [
+        self._patch(self.flows, "_issue_list_all", lambda root: ([
             {"number": 40, "state": "OPEN", "body": "일반 이슈 본문, 계획 없음"},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         by_issue = {f["issue"]: f for f in payload["flows"]}
         self.assertIsNone(by_issue[40]["plan"])
@@ -4168,9 +4213,9 @@ class FlowsPayload(unittest.TestCase):
             "\n## 다른 섹션\n"
             "무시되어야 하는 줄\n"
         )
-        self._patch(self.flows, "_issue_list_all", lambda root: [
+        self._patch(self.flows, "_issue_list_all", lambda root: ([
             {"number": 41, "state": "OPEN", "body": body},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         by_issue = {f["issue"]: f for f in payload["flows"]}
         self.assertEqual(by_issue[41]["plan"], [
@@ -4182,9 +4227,9 @@ class FlowsPayload(unittest.TestCase):
         """requirement-4 gap this issue closes: an open issue with a plan
         block but zero merged role records still shows up in `flows[]`."""
         body = "## 실행 계획\n- [ ] step 1  product-discovery\n"
-        self._patch(self.flows, "_issue_list_all", lambda root: [
+        self._patch(self.flows, "_issue_list_all", lambda root: ([
             {"number": 50, "state": "OPEN", "body": body},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         by_issue = {f["issue"]: f for f in payload["flows"]}
         self.assertIn(50, by_issue)
@@ -4202,9 +4247,9 @@ class FlowsPayload(unittest.TestCase):
         `_PLAN_STEP_RE`(불변)가 그대로 캡처하는 실물 결과이며 다듬지 않고
         그대로 단언한다(proposal Rationale, hunt pass 발견 사항)."""
         body = '## 배경\n\n스텝별 사람 확인(1단계 승인 / 2단계 머지)과 병렬 spawn 은 이미 동작한다. 없는 것은\n진행 형태를 사전에 합의해 **글로 남기는 자리**다. 지금 "다음은 누구"는 오케스트레이터의\n매 턴 판단으로만 존재하고 어디에도 기록되지 않는다.\n\n측정 (2026-08-02, 이 레포 `docs/issue-*/reports/`):\n\n```\n54개 이슈\n├─ 48개  역할 1개로 끝남           89%\n├─  5개  역할 2~3개 (최대 3)\n└─  0개  같은 역할이 두 번 돈 적 없음\n```\n\n즉 이 레포는 아직 멀티 스텝을 거의 안 써봤다. 계획 기능의 값어치는 반복 관리가 아니라\n**안 쓰던 병렬 스텝을 미리 짜두는 쪽**에 있다.\n\n## 요구사항\n\n1. 이슈를 열 때 사용자와 대화로 **실행 계획**(스텝 순서, 각 스텝의 룰북, 어느 스텝이\n   병렬인지)을 합의하고 이슈에 기록한다.\n2. 계획은 수정 가능하되 최소로. 수정 이력이 남을 것.\n3. **자동 진행 없음** — 스텝이 끝나면 사람 확인을 받고 다음 스텝을 spawn 한다.\n   이슈 #120의 "기계가 평가하는 라우팅 표 금지"는 그대로 유효하다.\n4. `repo-status-board` 에서 계획과 진척(현재 몇 번째 스텝, 각 스텝의 stage)을 본다.\n   이 이슈는 `flows --json` 쪽 데이터 계약까지만 책임진다 (§결정됨 D3).\n5. 계획이 소진되면 오케스트레이터가 보고하고, **사용자가 완료를 응답하면 이슈를 닫는다.**\n   자동 종결 아님 — `closure_sweep.py` 의 "탐지만, 종결은 사람 몫" 원칙 유지.\n\n## 이미 결정된 것 (대화에서 확정, 제안이 뒤집지 말 것)\n\n- **D1. 루프 문법을 만들지 않는다.** 위 측정대로 계획된 루프 사례가 0건이고, 가장\n  가까운 사례(이슈 #162: `coding.md` landed → `implementation.md` progressed,\n  "phase 2 follow-up: fix stale role names after PR #164")도 예정에 없던 사후\n  재작업이었다. 반복이 필요해지면 계획에 줄을 하나 더 붙인다 — #162가 실제로 그렇게\n  처리된 케이스다.\n- **D2. 종결은 사람이 한다.** 요구 5. 자동 종결 없음.\n- **D3. `repo-status-board` 레포 수정은 이 이슈 범위 밖.** 별도 이슈로 그쪽 레포에서\n  다룬다. 근거: 현행 계약이 브랜치(`issue-<n>/<role>`)와 보드 레코드(`docs/issue-<n>/`)를\n  레포 하나에 묶고 있어, 한 이슈로 두 레포를 다루면 레코드가 어디 남는지가 미정의다.\n  그 레포도 자체 보드다(`docs/specs/approvers.md` 보유).\n\n## 알려진 제약 (제안이 다룰 것)\n\n- `flows --json` 은 `gates/flows.py:flows_payload` → `spawn.board(root)` 위에 서 있고,\n  보드는 **머지된 레코드만** 본다. 이슈 생성 직후 ~ 첫 머지 전 구간은 flows 에 아예\n  나타나지 않는다. 계획은 생성 직후부터 보여야 하므로 **이것이 요구 4의 핵심 갭이다.**\n- stage 6개 값(`proposal`/`approval`/`implementation`/`verification`/`merge`/`close`)은\n  `gates/flows.py:_stage_for` 로 이미 나온다. 새로 만들 필요 없음.\n- `docs/specs/flows-schema.md` 는 `schema_version` 정수 하나로 관리되고 소비자 1개를\n  전제한다. 필드 추가 = 버전 범프. `repo-status-board` 레포가 이 스키마 문서의 **사본을\n  따로 들고 있다** — 동기화 필요 (실제 수정은 D3에 따라 별도 이슈).\n\n## 방향 (사용자 선호, 제안이 검토할 것)\n\n계획은 이슈 본문에 체크박스 목록으로. 새 파일·새 보드 레코드·새 게이트 없이,\n`gh issue edit` 로 수정하고 GitHub 편집 이력이 곧 요구 2의 감사 추적이 된다.\n병렬 스텝은 한 줄에 `‖` 로 묶는다.\n\n```markdown\n## 실행 계획\n- [ ] step 1  product-discovery\n- [ ] step 2  architecture ‖ security-threat-model\n- [ ] step 3  implementation\n- [ ] step 4  execution-observation ‖ conformance-review\n```\n\n## 실행 계획 (이 이슈 자체 — 요구 1의 첫 적용 사례)\n\n- [x] step 1  product-discovery — 요구사항·수용기준 확정, 위 갭에 대한 접근 결정\n- [x] step 2  implementation — 확정된 스펙대로 구현\n- [x] step 3  execution-observation — 실제 동작 확인\n\nstep 2 이후는 step 1 결과를 보고 조정한다 (요구 2의 "최소 수정" 대상).\n\n\n\n\n'
-        self._patch(self.flows, "_issue_list_all", lambda root: [
+        self._patch(self.flows, "_issue_list_all", lambda root: ([
             {"number": 189, "state": "OPEN", "body": body},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         by_issue = {f["issue"]: f for f in payload["flows"]}
         self.assertEqual(by_issue[189]["plan"], [
@@ -4230,9 +4275,9 @@ class FlowsPayload(unittest.TestCase):
             "- [ ] step 1  product-discovery\n"
             "```\n"
         )
-        self._patch(self.flows, "_issue_list_all", lambda root: [
+        self._patch(self.flows, "_issue_list_all", lambda root: ([
             {"number": 51, "state": "OPEN", "body": body},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         by_issue = {f["issue"]: f for f in payload["flows"]}
         self.assertIsNone(by_issue[51]["plan"])
@@ -4246,9 +4291,9 @@ class FlowsPayload(unittest.TestCase):
             "## 실행 계획 (두 번째, 무시되어야 함)\n"
             "- [ ] step 9  implementation\n"
         )
-        self._patch(self.flows, "_issue_list_all", lambda root: [
+        self._patch(self.flows, "_issue_list_all", lambda root: ([
             {"number": 52, "state": "OPEN", "body": body},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         by_issue = {f["issue"]: f for f in payload["flows"]}
         self.assertEqual(by_issue[52]["plan"],
@@ -4261,12 +4306,12 @@ class FlowsPayload(unittest.TestCase):
         그 두 PR 번호가 모두 채워져야 한다 — 이전에는 `roles`(레코드가
         있는 role만) 필터 때문에 빈 배열이었다."""
         self._write_record("issue-27", "implementation", "scope-approved")
-        self._patch(self.flows, "_pr_list_all", lambda root: [
+        self._patch(self.flows, "_pr_list_all", lambda root: ([
             {"number": 31, "headRefName": "issue-27/execution-observation",
              "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
             {"number": 32, "headRefName": "issue-27/conformance-review",
              "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         by_issue = {f["issue"]: f for f in payload["flows"]}
         self.assertEqual(by_issue[27]["prs"], [31, 32])
@@ -4281,14 +4326,14 @@ class FlowsPayload(unittest.TestCase):
             "- reviewer1\n", encoding="utf-8")
         self._write_record("issue-45", "conformance-review", "scope-approved")
         self._write_record("issue-45", "execution-observation", "scope-approved")
-        self._patch(self.flows, "_pr_list_all", lambda root: [
+        self._patch(self.flows, "_pr_list_all", lambda root: ([
             {"number": 101, "headRefName": "issue-45/conformance-review",
              "createdAt": "2026-07-30T00:00:00Z", "body": "",
              "reviews": [{"state": "APPROVED",
                          "author": {"login": "reviewer1"}}]},
             {"number": 102, "headRefName": "issue-45/execution-observation",
              "createdAt": "2026-07-30T00:00:00Z", "body": "", "reviews": []},
-        ])
+        ], True))
         payload = self.flows.flows_payload(self.root)
         dq_prs = {d["pr"] for d in payload["decision_queue"] if d["issue"] == 45}
         by_issue = {f["issue"]: f for f in payload["flows"]}

@@ -30,9 +30,22 @@ guard() { # want name file_path board(yes/no)
 }
 guard deny  guard-docs-in-board      docs/issue-3/reports/product.md yes
 guard deny  guard-src-in-board       src/app.py                      yes
+guard deny  guard-tests-in-board     tests/test_app.py               yes
 guard allow guard-approvers-ok       docs/specs/approvers.md         yes
 guard allow guard-nonboard-repo      docs/notes.md                   no
 guard allow guard-outside-trees      scratch/notes.md                yes
+
+# issue #287 S4: an unparseable stdin payload must DENY, not silently ALLOW —
+# a delivery failure on stdin is not evidence the write is safe.
+guard_raw() { # want name payload
+  printf '%s' "$3" | env -u CLAUDE_ROLE /bin/bash "$H/deliverable-guard.sh" >/dev/null 2>&1
+  rc=$?; case "$rc" in 0) got=allow ;; 2) got=deny ;; *) got="exit-$rc" ;; esac
+  report "$1" "$got" "$2"
+}
+guard_raw deny guard-empty-stdin      ''
+guard_raw deny guard-non-json-stdin   'not json at all'
+guard_raw deny guard-non-dict-json    '["a","b"]'
+guard_raw deny guard-missing-file-path '{"tool_name":"Write","tool_input":{"content":"x"}}'
 
 printf '\n== %d passed, %d failed ==\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

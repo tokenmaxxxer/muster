@@ -78,16 +78,16 @@ class FlowsStageMapping(unittest.TestCase):
         self.addCleanup(self.td.cleanup)
         self._patched = []
         self._patch(spawn, "_repo_slug", lambda root: "acme/repo")
-        self._patch(spawn, "_issue_comments", lambda root, n: [])
+        self._patch(spawn, "_issue_comments", lambda root, n: ([], True))
         self._patch(spawn, "_roster_load", lambda: {})
         old_root = spawn.ROOT
         spawn.ROOT = self.root
         self.addCleanup(setattr, spawn, "ROOT", old_root)
-        self._patch(flows, "_pr_list_all", lambda root: [])
+        self._patch(flows, "_pr_list_all", lambda root: ([], True))
         self._issues = []
-        self._patch(flows, "_issue_list_all", lambda root: self._issues)
+        self._patch(flows, "_issue_list_all", lambda root: (self._issues, True))
         self._patch(closure_sweep, "find_violations",
-                    lambda root, subjects=None, issue_states=None: [])
+                    lambda root, subjects=None, issue_states=None: ([], []))
 
     def _patch(self, obj, name, fn):
         orig = getattr(obj, name)
@@ -119,6 +119,38 @@ class FlowsStageMapping(unittest.TestCase):
         by_issue = {f["issue"]: f for f in payload["flows"]}
         self.assertEqual(by_issue[12]["stage"], "closed")
         self.assertTrue(by_issue[12]["stage_derived"])
+
+    def test_gh_failure_reports_errors_not_empty_board(self):
+        """issue #287 S2: `gh pr list`/`gh issue list` 실패는 빈 배열이
+        아니라 `errors` 에 명시적으로 남아야 한다 — 조용한 빈 보드 금지."""
+        self._patch(flows, "_pr_list_all", lambda root: ([], False))
+        self._patch(flows, "_issue_list_all", lambda root: ([], False))
+        payload = flows.flows_payload(self.root)
+        self.assertEqual(payload["decision_queue"], [])
+        self.assertEqual(payload["flows"], [])
+        self.assertTrue(payload["errors"]["pr_list"])
+        self.assertTrue(payload["errors"]["issue_list"])
+
+    def test_closure_sweep_skips_surface_in_hygiene(self):
+        """issue #287 S1: `find_violations` 가 못 확인한 subject 는
+        `hygiene.closure_sweep_skips` 에 남아야 한다 — 0건 위반과
+        구별된다."""
+        self._patch(closure_sweep, "find_violations",
+                    lambda root, subjects=None, issue_states=None:
+                    ([], [{"subject": "issue-99", "reason": "gh-issue-view-failed"}]))
+        payload = flows.flows_payload(self.root)
+        self.assertEqual(payload["hygiene"]["closure_sweep"], [])
+        self.assertEqual(payload["hygiene"]["closure_sweep_skips"],
+                         [{"subject": "issue-99", "reason": "gh-issue-view-failed"}])
+
+    def test_ledger_skipped_line_is_counted(self):
+        """issue #287 S3: 손상된 ledger 줄은 조용히 버려지지 않고
+        `unattributed.ledger_skipped` 로 집계된다."""
+        p = self.root / "runs"
+        p.mkdir(parents=True, exist_ok=True)
+        (p / "ledger.jsonl").write_text('{"role": "coding"}\nnot-json\n', encoding="utf-8")
+        payload = flows.flows_payload(self.root)
+        self.assertEqual(payload["unattributed"]["ledger_skipped"], 1)
 
 
 if __name__ == "__main__":

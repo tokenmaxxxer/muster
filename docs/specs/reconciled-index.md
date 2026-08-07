@@ -20,8 +20,8 @@ updating "Resolved ambiguities" if the edit touches a resolved point.
 | `README.md` | `9b76bea1a2fae899bf7632c47139bbcd1ab2ba35ebc1d0eb29eb1338d7f6205a` |
 | `README.ko.md` | `dcf2c9d28a6c1058eb0950a5fc0a15c2883d95da081d65e0531cdac168873f16` |
 | `docs/specs/approvers.md` | `bbcb4e239a5aed872956a01acc04c9431027a1f2df483b53265f72577ba16ab9` |
-| `docs/specs/flows-schema.md` | `1a5bbd9cc1c3f75785c74a9c4276ecca8aef243d60acb1b39a369d124588d038` |
-| `docs/handbooks/on-the-record.md` | `21dbff37005e7601c201fc626fb39cbac8c3055190b64867df3dfb6db7880fbe` |
+| `docs/specs/flows-schema.md` | `cb19ed6d9b209733f0ad3b02ed7e0bb8c395c5bce9a28b3c563b1e3d64bc5623` |
+| `docs/handbooks/on-the-record.md` | `9e314a347f6265950b2eedc791891e329255ee4adf9f6b5ffab5554f2e6e20f1` |
 | `docs/handbooks/operations.md` | `7424add4f836f0d6ef1f22c7ccd839575bdc352927d6beaa40241dda99de296f` |
 | `docs/handbooks/setup.md` | `df9c710683663f260679d3629ce8733c7f0af60196dbfbaf6b92d8e2205f3e73` |
 | `on-the-record/commands/run.md` | `eea7e54eec9b958562d68fe459b1a14350b5652de298bc191d7871fc1d98430b` |
