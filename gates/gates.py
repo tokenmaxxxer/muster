@@ -670,12 +670,50 @@ def reach_check(work: Path, record_text: str, base: str = BASE) -> list[str]:
     return bad
 
 
+_TEST_BASENAME = re.compile(r"^(test_.+|.+_test)\.py$")
+
+
+def duplicate_test_basenames(root: Path) -> list[str]:
+    """저장소 전체를 훑어, `__init__.py` 없는(= pytest가 패키지 경계 없이
+    최상위 이름공간에 얹는) 디렉터리들 사이에서 같은 테스트 모듈 베이스네임이
+    겹치는지 찾는다.
+
+    (issue #398) diff 가 아니라 파일트리 전체를 본다 — merge 가 일어나기
+    전에도, PR 단독으로도 이 충돌 모양을 잡아야 한다는 이슈의 요구사항
+    그대로. `gates/test_gates.py` 와 루트 `test_gates.py` 충돌(#330/#337)이
+    각 PR 단독 검사에서는 안 보이고 merge 후에야 `pytest -q` 수집 자체가
+    깨지는 걸로 드러났다."""
+    by_basename: dict[str, list[str]] = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != ".git"]
+        if "__init__.py" in filenames:
+            continue
+        rel_dir = os.path.relpath(dirpath, root)
+        for fn in filenames:
+            if _TEST_BASENAME.match(fn):
+                rel_path = fn if rel_dir == "." else f"{rel_dir}/{fn}"
+                by_basename.setdefault(fn, []).append(rel_path)
+    bad = []
+    for basename, paths in sorted(by_basename.items()):
+        if len(paths) > 1:
+            bad.append(
+                f"중복 테스트 모듈 베이스네임: {basename} — "
+                f"{', '.join(sorted(paths))} (패키지 경계(`__init__.py`) 없이 "
+                "같은 이름이라 pytest 수집이 충돌한다)")
+    return bad
+
+
+def duplicate_test_basenames_gate(d: Path, cfg: dict) -> list[str]:
+    return duplicate_test_basenames(d / "work")
+
+
 ALL = {"writeset": writeset, "deps": deps,
        "record_enums": record_enums,
        "record_wellformed": record_wellformed,
        "record_no_tool_residue": record_no_tool_residue,
        "record_derived_counts": record_derived_counts,
-       "record_fulfils_diff": record_fulfils_diff}
+       "record_fulfils_diff": record_fulfils_diff,
+       "duplicate_test_basenames": duplicate_test_basenames_gate}
 
 
 def check(names: list[str], d: Path, cfg: dict) -> list[str]:

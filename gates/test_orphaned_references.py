@@ -5,7 +5,7 @@
 `test_closes_gate_ci.py`와 같은 오프라인 관례. 각 테스트가 자기 repo를
 만들고 지운다.
 
-  python3 gates/test_gates.py
+  python3 gates/test_orphaned_references.py
 """
 from __future__ import annotations
 import shutil
