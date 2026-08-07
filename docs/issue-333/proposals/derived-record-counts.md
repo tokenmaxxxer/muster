@@ -95,19 +95,31 @@ again.
   loop shape `record_no_tool_residue_in` already uses), skipping lines
   inside fenced code blocks entirely (a number inside a fence is
   reproduced tool output, not typed).
-- Outside fences, a line matching a count/ratio pattern (`\d+\s*(?:of|/)\s*\d+`
-  — e.g. "107 of 122", "15/20") is a violation UNLESS that same line
-  carries an inline derivation tag: a backtick-quoted
-  `` `derived: <text>` `` immediately following the number (any non-empty
-  `<text>` is accepted — this check enforces the *presence* of a
-  derivation pointer, not the correctness of what it points to, which is
-  outside what a text-only gate can verify).
+- Outside fences, a line matching either of two count shapes is a
+  violation UNLESS that same line carries an inline derivation tag: a
+  backtick-quoted `` `derived: <text>` `` immediately following the
+  number (any non-empty `<text>` is accepted — this check enforces the
+  *presence* of a derivation pointer, not the correctness of what it
+  points to, which is outside what a text-only gate can verify):
+  - a ratio: `\d+\s*(?:of|/)\s*\d+` (e.g. "107 of 122", "15/20"), and
+  - a bare count noun-phrase: `\d+\s+(?:detection\s+)?items?\b` and the
+    same shape for the other count nouns the issue's own example uses
+    ("N work[s]", "N checks", "N cases") — the exact form is finalized in
+    phase 2 against the real corpus of count nouns found across
+    `docs/issue-*/reports/*.md`, but it must cover the issue's own
+    motivating example, "107 detection items exist," which the ratio
+    pattern alone does not match (caught by the after-proposal warrant
+    hunt, `docs/reports/2026-08-07-hunt-derived-record-counts.md`: the
+    ratio-only regex never fires on a bare single-number count, so this
+    exact motivating case would have slipped through untagged).
 - Add unit tests to `test_gates.py` mirroring
   `t_record_no_tool_residue_blocks_leaked_tag`/
   `t_record_no_tool_residue_allows_fenced_tag`/
   `t_record_no_tool_residue_passes_clean_record`: a bare ratio in prose
-  blocks; the same ratio inside a fenced block passes; the same ratio
-  with a `` `derived: ...` `` tag passes; a record with no ratio at all
+  blocks; a bare single-number count noun-phrase in prose blocks (the
+  issue's own "107 detection items exist" shape); the same two shapes
+  inside a fenced block pass; the same two shapes with a
+  `` `derived: ...` `` tag pass; a record with no count claim at all
   passes untouched.
 - Register `record_derived_counts` in `ALL` (`gates/gates.py`'s registry
   dict) so it is callable through `check()` the same way every other
