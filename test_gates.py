@@ -17,6 +17,7 @@ import gates
 import spawn
 import pr_reference
 import closure_sweep
+import spawn_coverage
 import ci
 import flows
 
@@ -821,6 +822,34 @@ def t_find_violations_without_issue_states_still_calls_issue_view():
     finally:
         closure_sweep._issue_view = original_issue_view
         spawn._pr_for_branch = original_pr_for_branch
+
+
+def t_spawn_coverage_flags_open_issue_with_no_board_entry():
+    """이슈 #325: 발행됐지만 보드에 `issue-<n>` 키가 없는 열린 이슈는
+    grace window 를 넘기면 uncovered 로 잡힌다."""
+    from datetime import datetime, timezone
+    now = datetime(2026, 8, 7, 12, 0, 0, tzinfo=timezone.utc)
+    open_issues = [{"number": 325, "createdAt": "2026-08-07T00:00:00Z"}]
+    board = {}
+    out = spawn_coverage.find_uncovered(open_issues, board, now, grace_hours=3)
+    assert out == [325], out
+
+
+def t_spawn_coverage_covered_issue_not_flagged():
+    from datetime import datetime, timezone
+    now = datetime(2026, 8, 7, 12, 0, 0, tzinfo=timezone.utc)
+    open_issues = [{"number": 325, "createdAt": "2026-08-07T00:00:00Z"}]
+    board = {"issue-325": {"implementation": {}}}
+    assert spawn_coverage.find_uncovered(open_issues, board, now, grace_hours=3) == []
+
+
+def t_spawn_coverage_grace_window_suppresses_freshly_filed_issue():
+    """발행 몇 분 지난 이슈까지 잡으면 노이즈다 — grace window 안에 있으면 넘어간다."""
+    from datetime import datetime, timezone
+    now = datetime(2026, 8, 7, 12, 5, 0, tzinfo=timezone.utc)
+    open_issues = [{"number": 326, "createdAt": "2026-08-07T12:00:00Z"}]
+    out = spawn_coverage.find_uncovered(open_issues, {}, now, grace_hours=3)
+    assert out == [], out
 
 
 def _scope_repo(td: str, role: str, write_scope: list) -> Path:

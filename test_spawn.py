@@ -3401,6 +3401,72 @@ class PostCrashComment(unittest.TestCase):
         self.assertIn("gh", calls[0])
 
 
+class PostStallComment(unittest.TestCase):
+    """이슈 #325: stalled 판정이 최초 1회만 이슈 코멘트로 남는다."""
+
+    def test_skips_when_marker_already_present(self):
+        marker = spawn._STALL_COMMENT_MARKER.format(key="issue-325/coding")
+        orig_comments = spawn._issue_comments
+        spawn._issue_comments = lambda root, n: [{"login": "bot", "body": marker}]
+        calls = []
+        orig_run = subprocess.run
+        def fake_run(cmd, *a, **k):
+            calls.append(cmd)
+            return orig_run(["true"], capture_output=True, text=True)
+        subprocess.run = fake_run
+        try:
+            spawn._post_stall_comment(Path("."), 325, "issue-325/coding", "w", "l")
+        finally:
+            spawn._issue_comments = orig_comments
+            subprocess.run = orig_run
+        self.assertEqual(calls, [])
+
+    def test_posts_when_marker_absent(self):
+        orig_comments = spawn._issue_comments
+        orig_slug = spawn._repo_slug
+        spawn._issue_comments = lambda root, n: []
+        spawn._repo_slug = lambda root: "acme/repo"
+        calls = []
+        orig_run = subprocess.run
+        def fake_run(cmd, *a, **k):
+            calls.append(cmd)
+            return orig_run(["true"], capture_output=True, text=True)
+        subprocess.run = fake_run
+        try:
+            spawn._post_stall_comment(Path("."), 325, "issue-325/coding", "w", "l")
+        finally:
+            spawn._issue_comments = orig_comments
+            spawn._repo_slug = orig_slug
+            subprocess.run = orig_run
+        self.assertEqual(len(calls), 1)
+        self.assertIn("gh", calls[0])
+
+    def test_auto_respawn_check_posts_stall_comment_once_across_two_ticks(self):
+        """워치독 두 번 연속 틱에서도 코멘트 호출은 정확히 한 번(멱등)."""
+        orig_verdict = spawn.session_end_verdict
+        orig_post = spawn._post_stall_comment
+        spawn.session_end_verdict = lambda work, log_path: "stalled"
+        calls = []
+        posted_markers = []
+
+        def fake_post(root, issue, key, work, log):
+            marker = spawn._STALL_COMMENT_MARKER.format(key=key)
+            if marker in posted_markers:
+                return
+            posted_markers.append(marker)
+            calls.append((issue, key))
+
+        spawn._post_stall_comment = fake_post
+        try:
+            entry = {"work": "w", "issue": 325, "role": "coding", "log": "l"}
+            spawn._auto_respawn_check("issue-325/coding", entry, {})
+            spawn._auto_respawn_check("issue-325/coding", entry, {})
+        finally:
+            spawn.session_end_verdict = orig_verdict
+            spawn._post_stall_comment = orig_post
+        self.assertEqual(len(calls), 1)
+
+
 class IssueComments(unittest.TestCase):
     """이슈 #224: `--paginate --slurp`로 30개 코멘트 상한을 넘긴다 —
     페이지 리스트를 평탄화해 기존과 같은 dict 리스트를 돌려줘야 한다."""
