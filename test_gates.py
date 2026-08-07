@@ -629,6 +629,34 @@ def t_pr_reference_phase2_requires_closes():
     assert bad2, bad2
 
 
+def t_pr_reference_phase2_full_closing_keyword_set():
+    # issue #280 — GitHub 의 9개 closing 키워드 변형 전부(대소문자 무관)를
+    # phase-2 check_body 가 잡아야 한다.
+    keywords = [
+        "close", "closes", "closed",
+        "fix", "fixes", "fixed",
+        "resolve", "resolves", "resolved",
+    ]
+    for kw in keywords:
+        for variant in (kw, kw.capitalize(), kw.upper()):
+            assert pr_reference.check_body(126, f"{variant} #126", "phase2") == [], variant
+
+
+def t_pr_reference_phase2_fenced_closing_keyword_matches():
+    # GitHub 자신이 코드펜스 안 인용도 closing 키워드로 파싱한다(실물 사고,
+    # docs/issue-245/reports/implementation/survey.md). check_body 도 같은
+    # 동작을 유지해야 한다 — 펜스 안 "Fixed #126"도 phase-2 를 통과시킨다.
+    body = "설명 중 인용:\n```\nFixed #126\n```\n"
+    assert pr_reference.check_body(126, body, "phase2") == []
+
+
+def t_pr_reference_phase1_does_not_gate_closing_keywords_itself():
+    # check_body 의 phase1 분기는 그 자체로 closing 키워드를 차단하지
+    # 않는다 — 그 책임은 gates/ci.py 의 _phase1_mismatch 에 있다(코드
+    # 확인, proposal 참조). phase1 은 #126 참조 존재 여부만 본다.
+    assert pr_reference.check_body(126, "Closes #126", "phase1") == []
+
+
 def t_pr_reference_phase2_plan_none_regression_unaffected():
     # issue-228 요구 (a): plan 인자를 안 주거나 None 이면 기존 동작 그대로.
     assert pr_reference.check_body(126, "Closes #126", "phase2", plan=None) == []
