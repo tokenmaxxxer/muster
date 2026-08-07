@@ -803,6 +803,32 @@ role이 작업할 것"이라는 세 번째 tell은 이슈 텍스트에 구조화
 배정 데이터가 없어 의도적으로 검사하지 않는다. 상세:
 `docs/issue-328/reports/implementation.md`.
 
+## 종결 일관성 스윕 (CI)
+
+`.github/workflows/closure-sweep.yml`(issue #383)이 `gates/closure_sweep.py
+--post`를 main 푸시마다, 매일 한 번 스케줄로, 그리고 수동 dispatch로
+돌린다 — 위 closes-gate와 달리 이건 **막지 않는다**: 보드 전체(여러
+subject x role)를 훑어 위반이 있는 이슈에 코멘트만 남긴다. `classify()`는
+이제 PR 본문의 closing 키워드뿐 아니라 #284가 세운 phase-2 기록 증거
+(`ci._phase2_record_evidence`)도 "머지된 인도"의 대안 증거로 본다 —
+#284가 그 키워드를 선택사항으로 만든 뒤, 키워드 없이 머지된 인도 PR을
+스윕이 놓치던 것(issue #383, 실측: 이슈 #367)을 고친다. 근거는
+`docs/issue-383/decisions/record-evidence-for-closure-sweep.md`.
+
+## Closure-consistency sweep (CI)
+
+`.github/workflows/closure-sweep.yml` (issue #383) runs
+`gates/closure_sweep.py --post` on every push to `main`, daily on a
+schedule, and on manual dispatch — unlike the closes-gate above, this
+one does **not** block: it walks the whole board (every subject x role)
+and only comments on issues with a violation. `classify()` now treats
+the phase-2 record evidence #284 established
+(`ci._phase2_record_evidence`) as alternate evidence of a merged
+delivery alongside the PR body's closing keyword — fixing the case
+where #284 made that keyword optional and the sweep then missed a
+delivery merged without one (issue #383, measured against issue #367).
+Rationale: `docs/issue-383/decisions/record-evidence-for-closure-sweep.md`.
+
 ## Merge gate (CI)
 
 `.github/workflows/plan-aware-closes-gate.yml` (issue #245) runs

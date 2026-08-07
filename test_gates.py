@@ -835,6 +835,58 @@ def t_closure_sweep_everything_consistent_not_violation():
     assert closure_sweep.classify("CLOSED", "MERGED", "Closes #135", 135) is None
 
 
+def t_closure_sweep_merged_no_keyword_but_record_evidence_violates():
+    # issue #383: #284가 closing 키워드를 선택사항으로 만든 뒤 실제로 발생한
+    # 케이스 — PR 본문에 Closes/Fixes/Resolves가 전혀 없고 plain #n 참조뿐인데
+    # (또는 참조가 아예 없는데) phase-2 기록 증거가 있으면, 여전히 인도로 본다.
+    kind = closure_sweep.classify("OPEN", "MERGED", "no closing keyword here",
+                                   135, has_record_evidence=True)
+    assert kind == closure_sweep.MERGED_DELIVERY_ISSUE_OPEN, kind
+
+
+def t_closure_sweep_merged_no_keyword_no_record_evidence_not_violation():
+    # 키워드도 기록 증거도 없으면 인도라고 단정할 근거가 없다 — 노이즈를
+    # 만들지 않는다(phase-1 제안 PR과 구별 불가한 경우와 동형).
+    kind = closure_sweep.classify("OPEN", "MERGED", "no closing keyword here",
+                                   135, has_record_evidence=False)
+    assert kind is None, kind
+
+
+def t_closure_sweep_properly_closed_delivery_no_violation_with_record_evidence():
+    # 짝 테스트: 인도가 제대로 이슈를 닫았으면(issue CLOSED) 기록 증거가
+    # 있어도 위반이 아니다 — 고침이 스윕을 시끄럽게 만드는 방식으로
+    # 달성되지 않았다는 것을 고정한다.
+    kind = closure_sweep.classify("CLOSED", "MERGED", "Closes #135", 135,
+                                   has_record_evidence=True)
+    assert kind is None, kind
+
+
+def t_find_violations_uses_record_evidence_for_keywordless_merge(tmp_path):
+    """closure_sweep.find_violations이 실제로 기록 파일을 읽어
+    has_record_evidence를 계산해 classify에 넘기는지 — issue #367/PR #368
+    모양(머지, 닫는 키워드 없음, 기록 파일 존재)을 재현한다."""
+    root = tmp_path / "repo"
+    (root / "docs" / "issue-135" / "reports").mkdir(parents=True)
+    (root / "docs" / "issue-135" / "reports" / "implementation.md").write_text(
+        "---\nloop_state: delivered\n---\n\n본문\n")
+
+    subjects = {"issue-135": {"implementation": {}}}
+    original_pr_for_branch = spawn._pr_for_branch
+    original_pr_view = closure_sweep._pr_view_state_body
+    spawn._pr_for_branch = lambda root, branch: 368
+    closure_sweep._pr_view_state_body = (
+        lambda root, pr: ("MERGED", "no closing keyword here"))
+    try:
+        violations = closure_sweep.find_violations(
+            root, subjects=subjects, issue_states={135: "OPEN"})
+    finally:
+        spawn._pr_for_branch = original_pr_for_branch
+        closure_sweep._pr_view_state_body = original_pr_view
+
+    assert len(violations) == 1, violations
+    assert violations[0]["kind"] == closure_sweep.MERGED_DELIVERY_ISSUE_OPEN, violations
+
+
 def t_find_violations_uses_prefetched_issue_state_skips_issue_view():
     """issue #189: `issue_states` 로 이슈 상태가 이미 있으면 `_issue_view`
     를 호출하지 않는다 — 레포 전체 `gh issue list` 프리페치를 그대로 쓴다."""

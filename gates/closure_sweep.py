@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import pr_reference  # noqa: E402
 import spawn  # noqa: E402
+import ci  # noqa: E402
 
 OPEN_PR_ON_CLOSED_ISSUE = "open-pr-on-closed-issue"
 MERGED_DELIVERY_ISSUE_OPEN = "merged-delivery-issue-open"
@@ -35,17 +36,24 @@ def _refs_issue(body: str, issue: int) -> tuple[bool, bool]:
     return has_plain, has_closes
 
 
-def classify(issue_state: str, pr_state: str, pr_body: str, issue: int) -> str | None:
+def classify(issue_state: str, pr_state: str, pr_body: str, issue: int,
+             has_record_evidence: bool = False) -> str | None:
     """네트워크 없는 순수 판정 (테스트 용이) — 상태 문자열과 PR 본문만으로 결정한다.
 
     phase-1 제안 PR(merged, plain-ref 뿐, 이슈는 열림)은 **의도된 모양**이라
     violation 이 아니다 — 계약 v3 s19. Closes/Fixes/Resolves 로 실제 인도를
     약속했을 때만 '머지됐는데 이슈는 열림'이 위반이다.
-    """
+
+    `has_record_evidence`(issue #383)는 closes-gate가 #284에서 받아들인
+    것과 같은 대안 증거다 — 브랜치의 phase-2 기록 파일이 존재하고
+    `loop_state`가 채워져 있으면, PR 본문에 Closes/Fixes/Resolves가
+    없어도 실제 인도로 본다. #284가 그 키워드를 선택사항으로 만든
+    이후로는 키워드 부재만으로 '인도 아님'을 단정할 수 없다 — 키워드도
+    기록 증거도 없을 때만 위반이 아니다."""
     has_plain, has_closes = _refs_issue(pr_body, issue)
     if issue_state == "CLOSED" and pr_state == "OPEN" and (has_plain or has_closes):
         return OPEN_PR_ON_CLOSED_ISSUE
-    if pr_state == "MERGED" and has_closes and issue_state == "OPEN":
+    if pr_state == "MERGED" and issue_state == "OPEN" and (has_closes or has_record_evidence):
         return MERGED_DELIVERY_ISSUE_OPEN
     return None
 
@@ -102,7 +110,8 @@ def find_violations(root: Path, subjects: dict | None = None,
             if view is None:
                 continue
             pr_state, pr_body = view
-            kind = classify(issue_state, pr_state, pr_body, issue)
+            has_record_evidence = ci._phase2_record_evidence(root, branch, issue)
+            kind = classify(issue_state, pr_state, pr_body, issue, has_record_evidence)
             if kind:
                 violations.append({"issue": issue, "pr": pr, "role": role, "kind": kind})
     return violations
