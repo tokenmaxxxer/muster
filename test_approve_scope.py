@@ -7,6 +7,7 @@ frontmatter 읽기/쓰기와 승인자 매칭 로직만 실측한다.
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import spawn
 
@@ -35,10 +36,17 @@ class ApproveScope(unittest.TestCase):
     def tearDown(self):
         self._td.cleanup()
 
+    def _start(self, patcher):
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _patch_gh(self, comments, pr=None):
-        spawn._repo_slug = lambda root: "acme/repo"
-        spawn._pr_for_branch = lambda root, branch: pr
-        spawn._issue_comments = lambda root, n: comments
+        self._start(mock.patch.object(spawn, "_repo_slug", lambda root: "acme/repo"))
+        self._start(mock.patch.object(spawn, "_pr_for_branch", lambda root, branch: pr))
+        self._start(mock.patch.object(spawn, "_issue_comments", lambda root, n: comments))
+
+    def _patch_run(self, fake_run):
+        self._start(mock.patch.object(spawn.subprocess, "run", fake_run))
 
     def test_matching_approver_writes_scope_approved(self):
         record = _record(self.root, "issue-1", "product-discovery", "scope-proposed")
@@ -54,7 +62,7 @@ class ApproveScope(unittest.TestCase):
                 returncode = 0
                 stdout = ""
             return R()
-        spawn.subprocess.run = fake_run
+        self._patch_run(fake_run)
 
         rc = spawn.approve_scope(str(self.root), 1)
         self.assertEqual(rc, 0)
@@ -95,7 +103,7 @@ class ApproveScope(unittest.TestCase):
                 stderr = "git: 커밋 실패 (테스트)"
             import subprocess as sp
             raise sp.CalledProcessError(1, cmd, output="", stderr=R.stderr)
-        spawn.subprocess.run = fake_run
+        self._patch_run(fake_run)
 
         with self.assertRaises(SystemExit):
             spawn.approve_scope(str(self.root), 6)

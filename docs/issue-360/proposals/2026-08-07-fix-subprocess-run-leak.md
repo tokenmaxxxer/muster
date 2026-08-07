@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: landed
 files:
   - test_approve_scope.py
   - conftest.py
