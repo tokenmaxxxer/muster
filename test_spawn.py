@@ -3731,7 +3731,7 @@ class EnsurePushedStrandedComment(unittest.TestCase):
             orig_comments = spawn._issue_comments
             orig_run = spawn.subprocess.run
             spawn._repo_slug = lambda root: "acme/repo"
-            spawn._issue_comments = lambda root, n: []
+            spawn._issue_comments = lambda root, n: ([], True)
             calls = []
 
             def fake_run(cmd, *a, **k):
@@ -3766,7 +3766,7 @@ class EnsurePushedStrandedComment(unittest.TestCase):
             orig_comments = spawn._issue_comments
             orig_run = spawn.subprocess.run
             spawn._repo_slug = lambda root: "acme/repo"
-            spawn._issue_comments = lambda root, n: []
+            spawn._issue_comments = lambda root, n: ([], True)
             calls = []
 
             def fake_run(cmd, *a, **k):
@@ -3804,7 +3804,7 @@ class EnsurePushedStrandedComment(unittest.TestCase):
             orig_run = spawn.subprocess.run
             spawn._repo_slug = lambda root: "acme/repo"
             marker = spawn._STRANDED_PUSH_COMMENT_MARKER.format(key=f"{br}:push-failed")
-            spawn._issue_comments = lambda root, n: [{"login": "bot", "body": marker}]
+            spawn._issue_comments = lambda root, n: ([{"login": "bot", "body": marker}], True)
             calls = []
 
             def fake_run(cmd, *a, **k):
@@ -3828,6 +3828,41 @@ class EnsurePushedStrandedComment(unittest.TestCase):
 
             comment_calls = [c for c in calls if c[0] == "gh" and any("comments" in x for x in c)]
             self.assertEqual(len(comment_calls), 0)
+
+    def test_ensure_pushed_stranded_comment_posts_when_comments_unreadable(self):
+        """이슈 #432: ok=False 면 마커가 이미 있어도 확인할 수 없으므로
+        중복을 감수하고 코멘트를 남긴다."""
+        issue, role = 999913, "implementation"
+        with tempfile.TemporaryDirectory() as td:
+            work, br = self._make_work_with_commit(td, issue, role)
+            orig_slug = spawn._repo_slug
+            orig_comments = spawn._issue_comments
+            orig_run = spawn.subprocess.run
+            spawn._repo_slug = lambda root: "acme/repo"
+            marker = spawn._STRANDED_PUSH_COMMENT_MARKER.format(key=f"{br}:push-failed")
+            spawn._issue_comments = lambda root, n: ([{"login": "bot", "body": marker}], False)
+            calls = []
+
+            def fake_run(cmd, *a, **k):
+                calls.append(cmd)
+                if cmd[:2] == ["git", "-C"] and "push" in cmd:
+                    return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="push rejected")
+                if cmd[:2] == ["git", "-C"]:
+                    return orig_run(cmd, *a, **k)
+                if cmd[0] == "gh":
+                    return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+                return orig_run(cmd, *a, **k)
+
+            spawn.subprocess.run = fake_run
+            try:
+                spawn.ensure_pushed(str(work), issue, role)
+            finally:
+                spawn._repo_slug = orig_slug
+                spawn._issue_comments = orig_comments
+                spawn.subprocess.run = orig_run
+
+            comment_calls = [c for c in calls if c[0] == "gh" and any("comments" in x for x in c)]
+            self.assertEqual(len(comment_calls), 1)
 
 
 class PostCrashComment(unittest.TestCase):
@@ -3901,7 +3936,7 @@ class PostStallComment(unittest.TestCase):
     def test_skips_when_marker_already_present(self):
         marker = spawn._STALL_COMMENT_MARKER.format(key="issue-325/coding")
         orig_comments = spawn._issue_comments
-        spawn._issue_comments = lambda root, n: [{"login": "bot", "body": marker}]
+        spawn._issue_comments = lambda root, n: ([{"login": "bot", "body": marker}], True)
         calls = []
         orig_run = subprocess.run
         def fake_run(cmd, *a, **k):
@@ -3918,7 +3953,32 @@ class PostStallComment(unittest.TestCase):
     def test_posts_when_marker_absent(self):
         orig_comments = spawn._issue_comments
         orig_slug = spawn._repo_slug
-        spawn._issue_comments = lambda root, n: []
+        spawn._issue_comments = lambda root, n: ([], True)
+        spawn._repo_slug = lambda root: "acme/repo"
+        calls = []
+        orig_run = subprocess.run
+        def fake_run(cmd, *a, **k):
+            calls.append(cmd)
+            return orig_run(["true"], capture_output=True, text=True)
+        subprocess.run = fake_run
+        try:
+            spawn._post_stall_comment(Path("."), 325, "issue-325/coding", "w", "l")
+        finally:
+            spawn._issue_comments = orig_comments
+            spawn._repo_slug = orig_slug
+            subprocess.run = orig_run
+        self.assertEqual(len(calls), 1)
+        self.assertIn("gh", calls[0])
+
+    def test_posts_when_comments_unreadable(self):
+        """이슈 #432: `_issue_comments` 가 ok=False(코멘트를 읽지 못함)를
+        돌려주면, 마커가 실제로 있는지 확인할 수 없으므로 "확인 못 함은
+        통과가 아니다"(#287) 원칙에 따라 중복을 감수하고 코멘트를
+        남긴다 — 조용히 건너뛰지 않는다."""
+        orig_comments = spawn._issue_comments
+        orig_slug = spawn._repo_slug
+        marker = spawn._STALL_COMMENT_MARKER.format(key="issue-325/coding")
+        spawn._issue_comments = lambda root, n: ([{"login": "bot", "body": marker}], False)
         spawn._repo_slug = lambda root: "acme/repo"
         calls = []
         orig_run = subprocess.run
