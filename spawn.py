@@ -1593,14 +1593,21 @@ def roster_watchdog(auto_respawn: bool = False) -> int:
     `auto_respawn=True` (이슈 #132): 죽은 로스터 엔트리도 스캔 대상에
     넣어(원래는 살아있는 것만 봤다) `session_end_verdict` 를 매겨, `crashed`
     에 한해서만 재스폰/상한-코멘트를 시도한다. `stalled` 는 여전히
-    보고만 한다 — 아무 것도 고치거나 죽이지 않는다는 계약은 그대로다."""
+    보고만 한다 — 아무 것도 고치거나 죽이지 않는다는 계약은 그대로다.
+
+    반환값(이슈 #327): 이상 신호가 하나 이상 나온 로스터 엔트리 수 — 깨끗한
+    스캔이면 0(기존과 동일), 아니면 0 초과. `spawn.py watchdog` CLI 가 이
+    값을 그대로 프로세스 종료 코드로 쓴다(spawn.py:2445) — stdout 파싱 없이
+    idle/deadlock/불필요한 작업이 있었는지 종료 코드만으로 알 수 있게 한다.
+    `auto_respawn` 의 부작용(재스폰/상한-코멘트)은 이 변경과 무관 — 반환값만
+    바뀐다."""
     d = _roster_load()
     if not d:
         print("돌고 있는 역할 세션 없음")
         return 0
     state = _watchdog_state_load()
     respawn_state = _respawn_state_load() if auto_respawn else {}
-    found_any = False
+    anomaly_count = 0
     for key, e in sorted(d.items()):
         if not _alive(e.get("pid", 0)):
             if auto_respawn:
@@ -1608,16 +1615,16 @@ def roster_watchdog(auto_respawn: bool = False) -> int:
             continue
         anomalies = watchdog_check_one(key, e, state=state)
         if anomalies:
-            found_any = True
+            anomaly_count += 1
             print(f"[watchdog] {key}: 이상 신호 {len(anomalies)}건")
             for a in anomalies:
                 print(f"  - {a}")
         else:
             print(f"[watchdog] {key}: 정상")
     _watchdog_state_save(state)
-    if not found_any:
+    if not anomaly_count:
         print("이상 신호 없음")
-    return 0
+    return anomaly_count
 
 
 EVENTS_SUFFIX = ".events.jsonl"
