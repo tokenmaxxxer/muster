@@ -125,6 +125,63 @@ None outstanding. The item 3 audit above surfaced one working-tree read
 the correct, `main`-pinned tree for an allowlist, not PR content) and is
 reported, not silently left unmentioned.
 
+## PR #370 bootstrap — body-edit Closes line
+
+PR #370's own body carried no `Closes #369` line: it was written at
+phase 1, before approval flipped this session to phase 2, and #284's
+record-evidence alternative cannot rescue it — reading the record from
+the local tree is precisely the bug this PR fixes, so the alternative is
+unusable on this PR by construction (the same chicken-and-egg already
+seen on #360 and #284). To unblock, PR #370's body was edited via `gh pr
+edit --body-file` to add a `Closes #369` line; `python3 gates/ci.py --pr
+370 --issue 369 --autodetect --closes-only` was re-run afterward and
+reports 게이트 통과. This is a one-time BOOTSTRAP for this PR only, not
+the fix, and not a precedent: once #369 lands on `main`, the gate's
+record-evidence alternative works for any future PR of this shape
+without a body edit, so the need for this bootstrap disappears with this
+landing. An unlabelled body edit would read to a future reader as
+evidence that editing PR bodies is the accepted remedy for a failing
+closes-gate — the operator explicitly rejected that reading (#363) — so
+this section exists to label the edit as what it was: a one-time
+exception, not a pattern to repeat.
+
+## Review point — `_fetch_ref_file` conflates "not found" with "API failed"
+
+`_fetch_ref_file` (`gates/ci.py:169-193`) returns `None` uniformly on
+`r.returncode != 0` (any `gh api` failure — 404, auth failure, rate
+limit, network error) and also on a JSON-decode or base64-decode failure.
+`_phase2_record_evidence` (`gates/ci.py:215-219`) then treats every
+`None` the same as "the record does not exist," i.e. the alternative
+check fails. This means a transient `gh api` error (rate limit, a
+network blip in the Actions runner) is indistinguishable from "no
+record was ever written," and both produce the same gate failure on a
+PR that may otherwise be a fully valid phase-2 delivery — the shape #287
+exists to stop (a system-level failure misread as a content-level one).
+
+This was left unexamined by the original phase-2 delivery and is being
+examined now per the explicit review request on this bootstrap turn,
+in scope: distinguish the two cases, or say plainly why conflating them
+is acceptable here.
+
+Judgment: conflating them is acceptable in this specific spot, for one
+reason — before `_fetch_ref_file` runs, the PR has already failed the
+primary `Closes #369` body check (the record-evidence path is reached
+only as an *alternative* when the primary check already failed,
+`gates/ci.py:320`ish call site). A `gh api` failure here therefore
+degrades a PR from "possibly rescued by the alternative" to "gate fails
+via the primary check's own message" — it never turns a passing PR into
+a failing one, and the failure message the PR author sees already names
+the primary fix (add the `Closes` line) as the resolution independent of
+whether the alternative's `gh api` call happened to succeed. The
+distinguishing information (was it 404 vs. transient) would not change
+what the PR author needs to do differently. Widening `_fetch_ref_file`
+to distinguish and surface the two cases (e.g. retry-on-transient, or a
+distinct gate message for "could not verify record — API error") is
+useful defense-in-depth but is out of this bootstrap turn's scope per
+the operator's explicit instruction not to widen beyond the three listed
+items; it is named here, unexamined-no-longer, as a candidate follow-up
+rather than actioned.
+
 ## What did not work
 
 None.
