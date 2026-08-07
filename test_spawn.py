@@ -1302,6 +1302,55 @@ class WorkspaceSyncFailClosed(unittest.TestCase):
             self.assertIn("local unpushed commit", log)
 
 
+class WorkspaceExcludesHomeDotfiles(unittest.TestCase):
+    """이슈 #289 H1: 샌드박스가 홈 dotfile 을 워크스페이스 루트에 오버레이해
+    `git status`에 untracked 로 잡힌다 — `.muster-cache/`와 같은 방식으로
+    `.git/info/exclude`에 등록해 `git add -A`가 이들을 못 줍게 한다."""
+
+    def _git(self, cwd, *a):
+        return subprocess.run(["git", "-C", str(cwd), *a],
+                              capture_output=True, text=True)
+
+    def _init_repo(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        self._git(path, "init", "-q")
+        self._git(path, "config", "user.email", "t@t.t")
+        self._git(path, "config", "user.name", "t")
+
+    def test_fresh_workspace_excludes_dotfile_set(self):
+        with tempfile.TemporaryDirectory() as td:
+            github = Path(td) / "github.git"
+            self._git(github.parent, "init", "-q", "--bare", str(github))
+            src = Path(td) / "src"
+            r = subprocess.run(["git", "clone", "-q", str(github), str(src)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self._git(src, "config", "user.email", "t@t.t")
+            self._git(src, "config", "user.name", "t")
+            (src / "a.txt").write_text("x")
+            self._git(src, "add", "a.txt")
+            self._git(src, "commit", "-q", "-m", "init")
+            self._git(src, "push", "-q", "origin", "HEAD:main")
+
+            work_base = Path(td) / "workbase"
+            old_base = os.environ.get("MUSTER_WORK_DIR")
+            os.environ["MUSTER_WORK_DIR"] = str(work_base)
+            try:
+                work = spawn.issue_workspace(str(src), 999905, "implementation")
+            finally:
+                if old_base is None:
+                    os.environ.pop("MUSTER_WORK_DIR", None)
+                else:
+                    os.environ["MUSTER_WORK_DIR"] = old_base
+
+            exclude = (Path(work) / ".git" / "info" / "exclude").read_text()
+            for dotfile in (".bashrc", ".bash_profile", ".profile",
+                            ".zshrc", ".zprofile", ".gitconfig",
+                            ".gitmodules", ".mcp.json", ".claude",
+                            ".idea", ".vscode", ".ripgreprc"):
+                self.assertIn(dotfile, exclude, exclude)
+
+
 class OrchestratorGitToken(unittest.TestCase):
     """실측: reasona issue-3 검증 중, GH_TOKEN 없이 `python3 spawn.py` 를
     그냥 돌리면 재사용 워크스페이스 fetch 가 인증 실패로 막힌다.
@@ -1983,6 +2032,23 @@ class EventReporting(unittest.TestCase):
                                    tool_use + "\n" + tool_result + "\n" + result_line + "\n")
                 self.assertTrue([e for e in events if e["type"] == "sandbox-refusal"], events)
                 self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+
+    def test_git_lock_masquerade_is_classified_as_sandbox_refusal(self):
+        # 이슈 #289 H2: 샌드박스가 거부한 .git/config 쓰기가 EEXIST 로 변환돼
+        # git 이 마치 진짜 잠금 경합인 것처럼 보고한다 — 예전엔 분류기가
+        # 이 문구를 놓쳐 unclassified-refusal 로 떨어졌다.
+        text = "error: cannot lock config file .git/config: File exists"
+        tool_use = self._tool_use_line("t1", "Bash")
+        tool_result = json.dumps({"type": "user", "message": {"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": text}]}})
+        result_line = json.dumps({"type": "result", "is_error": False,
+                                  "permission_denials": [{"tool_name": "Bash"}]})
+        events = self._run(tempfile.mkdtemp(),
+                           tool_use + "\n" + tool_result + "\n" + result_line + "\n")
+        self.assertTrue([e for e in events if e["type"] == "sandbox-refusal"], events)
+        self.assertFalse([e for e in events if e["type"] == "gate-refusal"], events)
+        self.assertFalse([e for e in events if e["type"] == "unclassified-refusal"], events)
 
     def test_non_error_tool_result_matching_refusal_text_fires_nothing(self):
         # issue-129 의 구조적 판정(is_error 우선, 텍스트 매치만으로 판정하지

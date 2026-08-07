@@ -1654,6 +1654,12 @@ _HARNESS_REFUSAL_PATTERNS = (
 _SANDBOX_REFUSAL_PATTERNS = (
     re.compile(r"Operation not permitted"),
     re.compile(r"haven't granted it yet"),
+    # 이슈 #289 H2: 샌드박스가 거부한 생성이 EEXIST 로 변환되면 git 은 이를
+    # 진짜 잠금 경합처럼 보고한다(`cannot lock config file .git/config:
+    # File exists`) — 실측: 세션이 이걸 실제 잠금으로 오인해
+    # `.git/config.lock`을 지웠다. `.git/config`류 경로로 범위를 좁혀 무관한
+    # "File exists" 오류를 삼키지 않는다.
+    re.compile(r"cannot lock config file .*\.git/config.*: File exists"),
 )
 
 
@@ -2868,9 +2874,21 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
     try:
         ex = work / ".git" / "info" / "exclude"
         ex.parent.mkdir(parents=True, exist_ok=True)
-        if ".muster-cache" not in (ex.read_text() if ex.exists() else ""):
+        existing = ex.read_text() if ex.exists() else ""
+        lines = [".muster-cache/"]
+        # 이슈 #289 H1: Claude Code 샌드박스는 홈 디렉터리의 이 dotfile 들을
+        # 워크스페이스 루트에 오버레이한다 — 밖에서 보면 없고, 세션 안에서만
+        # `git status`에 untracked 로 잡힌다. `git add -A` 한 번이면
+        # .mcp.json/.gitconfig 같은 자격증명성 파일이 공개 레포에 커밋된다.
+        # .muster-cache/ 와 같은 방식(워크스페이스 로컬 exclude)으로 막는다.
+        lines += [".bashrc", ".bash_profile", ".profile", ".zshrc",
+                  ".zprofile", ".gitconfig", ".gitmodules", ".mcp.json",
+                  ".claude/", ".idea", ".vscode", ".ripgreprc"]
+        missing = [ln for ln in lines if ln.rstrip("/") not in existing]
+        if missing:
             with ex.open("a") as fh:
-                fh.write(".muster-cache/\n")
+                for ln in missing:
+                    fh.write(ln + "\n")
     except OSError:
         pass
     subprocess.run(["git", "-C", str(work), "config", "credential.helper",
