@@ -109,3 +109,50 @@ None.
 ## Open findings
 
 None outstanding. No blocking finding has been addressed to this record.
+
+## Rebase onto main (2026-08-07, post-#398)
+
+`main` moved ~141 commits ahead while this PR sat (~40 PRs landed same
+day). Rebased `issue-321/implementation` onto `origin/main`
+(`c71173b`, "Merge pull request #410 from
+tokenmaxxxer/issue-398/implementation").
+
+Conflicts, both mechanical additive collisions (main added
+`spec_index.check` / `duplicate_test_basenames_gate`, this branch added
+`requirement_registry` at the same insertion points):
+
+- `gates/ci.py`: `check()` — kept `spec_index.check(repo)` (main) and
+  `gates.requirement_registry(repo, {})` (this branch), both now called.
+- `gates/gates.py`: `ALL` dict — kept `duplicate_test_basenames` (main)
+  and `requirement_registry` (this branch) as separate keys.
+- `test_gates.py`: auto-merged clean, no markers.
+
+No resolution touched `docs/specs/requirements.md` or the
+`_parse_requirements`/`requirement_registry` function bodies themselves —
+only their registration points.
+
+**Re-run on the rebased tree** (per #390 — a green from the old base
+attests to a state that no longer exists):
+
+- `python3 -m pytest test_gates.py -k requirement_registry -v`: all 6 of
+  this change's tests pass — `t_requirement_registry_no_file_passes`,
+  `t_requirement_registry_live_check_passes`,
+  `t_requirement_registry_stale_check_blocks`,
+  `t_requirement_registry_unverifiable_passes`,
+  `t_requirement_registry_missing_field_blocks`,
+  `t_ci_check_wires_requirement_registry`.
+- `python3 -m pytest -q --ignore=gates`: **395 passed** (main's own
+  verification note states 389 on its own tree; the +6 here are this
+  change's `test_gates.py::t_requirement_registry_*` additions, which
+  `--ignore=gates` does not exclude since `test_gates.py` lives at repo
+  root, not under `gates/`).
+- `python3 -m pytest -q gates`: ran and **58 passed** on this tree —
+  contrary to the module-name-collision-blocks-collection note filed
+  under #398. Not investigated further (out of this issue's scope); flagging
+  the discrepancy rather than silently trusting either number.
+- `python3 gates/ci.py` end-to-end: still not run, same reason as the
+  original verification section (`--pr`/`--issue`/`gh` access not
+  available headless here) — unchanged by the rebase.
+
+No code changes beyond the two conflict resolutions above; no scope
+widened, no adjacent issues fixed.
