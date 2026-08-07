@@ -83,3 +83,50 @@ N/A — no open findings.
 None for this issue's phase 2. The deeper gap (process dying before
 `ensure_pushed()` runs) is explicitly out of scope; a future issue would
 cover the rejected sweep alternative if the operator wants it closed.
+
+## Rebase (2026-08-07)
+
+PR #348 conflicted with `main` after ~40 unrelated PRs landed. Rebased
+`issue-326/implementation` onto `origin/main` (`git rebase origin/main`).
+
+Two real conflicts in `spawn.py`, both from independent same-region
+additions, not overlapping logic:
+
+1. `main` added `_post_stall_comment` (issue #325) directly above where
+   this branch added `_post_stranded_push_comment`/`_STRANDED_PUSH_COMMENT_MARKER`
+   (issue #326) — same insertion point, two unrelated functions. Resolved
+   by keeping both functions, `_post_stall_comment` first (matches its
+   position on `main`), `_post_stranded_push_comment` after.
+2. `ensure_pushed()`'s two failure branches: `main` had independently
+   changed the bare `return`s into structured `{"status": ..., "reason": ...}`
+   dicts (issue #301 B2) on the same lines this branch changed to call
+   `_post_stranded_push_comment(...)` before returning. Resolved by doing
+   both — post the comment, then return the structured dict — since
+   neither change supersedes the other; dropping either would silently
+   regress #301 B2 (structured caller feedback) or #326 (this issue, the
+   operator-visible comment).
+
+`test_spawn.py` merged cleanly (no conflicts).
+
+### Re-run acceptance evidence, on the rebased tree
+
+- `python3 -m pytest test_spawn.py -k stranded -v` — 3 passed
+  (`EnsurePushedStrandedComment::test_ensure_pushed_posts_comment_on_pr_create_failure`,
+  `::test_ensure_pushed_posts_comment_on_push_failure`,
+  `::test_ensure_pushed_stranded_comment_is_idempotent`).
+- `python3 -m pytest test_spawn.py -q` — 266 passed.
+- `python3 -m pytest -q --ignore=gates` — 392 passed (main's own
+  verification note before this rebase reported 389; the +3 is this
+  branch's own new tests, consistent).
+- `python3 -m pytest -q gates` — 58 passed. This contradicts the
+  verification note handed to this session (`gates/` reported as unable
+  to collect due to a module-name collision, #398) — on this rebased
+  tree, `gates/` collects and passes both alone and inside a full
+  unfiltered `python3 -m pytest -q` run (450 passed, no `--ignore`
+  needed). Reporting the discrepancy as observed rather than the
+  expected failure; #398 may already be fixed on `main`, or the
+  collision may be environment-dependent and not reproducing here.
+
+No new tests were added and no additional scope was touched beyond the
+conflict resolution above — the rebase changed no behavior other than
+what the conflict markers show.
