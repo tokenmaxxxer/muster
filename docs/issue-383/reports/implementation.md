@@ -138,6 +138,48 @@ resolving the handbook conflict, since the merged
 `docs/specs/reconciled-index.md`'s recorded hash (`test_spec_index.py`
 enforces this).
 
+## Re-verification against current main (2026-08-07, PR #387 already merged)
+
+PR #387 (this issue's delivery) is already MERGED into `main` — confirmed
+via `gh pr list --head issue-383/implementation --state all`. `main` has
+moved ~58 commits further ahead since that merge (today's landing rate).
+Re-ran acceptance evidence against `origin/main` HEAD (`327f647`), in a
+disposable worktree, rather than trusting the original session's
+now-stale numbers per #390:
+
+- `git show origin/main:gates/closure_sweep.py | grep -c
+  has_record_evidence` -> 5 hits: the fix is present on `main`, not just
+  on this branch.
+- `python3 -m pytest test_gates.py -k closure_sweep -q` -> **8 passed**,
+  same count as the original delivery record.
+- `python3 -m pytest -q --ignore=gates` -> **413 passed, 3 failed**. All
+  3 failures are in `test_spawn.py`
+  (`OrchestratorGitToken::test_ensure_pushed_push_call_injects_token_too`,
+  `EnsurePushedResult::test_commits_ahead_but_dirty_tree_prefers_uncommitted_work`,
+  `EnsurePushedResult::test_push_rejected_by_remote_is_named_and_distinct`),
+  all tracing to the same root cause
+  (`spawn.py:1884 _post_stranded_push_comment`: `AttributeError: 'list'
+  object has no attribute 'get'`) — the #432 merge collision named in
+  this turn's instructions, unrelated to `closure_sweep` and not touched
+  by this issue's write set. None of the 3 failures are in
+  `test_gates.py` or reference `closure_sweep`.
+- Live `python3 gates/closure_sweep.py` against the real repo (network
+  call) did not complete inside the available window and was not force-
+  retried; the unit-test evidence above (8/8 closure_sweep tests
+  passing against `main`'s actual code) is the evidence of record for
+  this pass — the live run was already demonstrated once, in the
+  original delivery record above, with `--post` exercised end to end.
+
+Issue #383 remains OPEN. PR #387's body carries a plain `#383` reference,
+not `Closes #383` — this predates this session and is not something an
+already-merged PR can retroactively change (editing a merged PR's body
+does not trigger GitHub's auto-close). No record in this file or in
+PR #387 documents a closes-gate refusal for `Closes #383` specifically;
+what's on record is only the gh-guard denial of direct `gh issue close`
+(see "What did not work" above). Per this turn's instructions, closing
+#383 is the orchestrator's act, not this session's — reporting the
+refusal/non-closure here rather than editing the issue.
+
 ### Re-run acceptance evidence, on the rebased tree (real numbers)
 
 - `python3 gates/closure_sweep.py` -> `종결 일관성 스윕: 위반 없음`. This
