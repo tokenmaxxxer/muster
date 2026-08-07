@@ -115,6 +115,48 @@ for the hunter's own record.
 
 None.
 
+## Rebase onto main (post-landing, PR #314 unblock)
+
+Main advanced ~40 PRs past this branch's fork point (through
+`c71173b`, PR #410), leaving PR #314 `mergeStateStatus: DIRTY` /
+`CONFLICTING`. Ran `git fetch origin` then `git rebase origin/main`.
+
+- One real conflict, in `gates/test_closes_gate_ci.py`: both this
+  branch's phase-2 commit and main's independent history had appended
+  new test functions at end-of-file. Purely additive on both sides —
+  resolved by keeping both blocks concatenated (no logic edited, no
+  test dropped from either side). `gates/ci.py` merged clean
+  (`자동 병합: gates/ci.py`, no conflict markers).
+- Notably, main's history included `08b2808` (issue-398: rename
+  `gates/test_gates.py`, add duplicate-test-basename gate) — the fix
+  for the `gates/` module-name collision this task's brief said was
+  "in flight" (#398). It landed before this rebase, so the collision
+  this task expected to still block `gates/` collection was already
+  gone in the rebased tree.
+- Re-ran acceptance evidence against the rebased tree (not reused from
+  before the rebase, per #390):
+  - `python3 gates/test_closes_gate_ci.py` → **46 passed** (was 33/33
+    pre-rebase; the increase is main's own test growth in the same
+    file, now merged in, not a change to this issue's tests).
+  - `python3 gates/ci.py . --pr 307 --issue 304 --autodetect
+    --closes-only` against real, unmodified GitHub state → `게이트
+    통과` (exit 0) — unchanged from the pre-rebase run.
+  - `python3 -m pytest -q --ignore=gates` → **389 passed**, matching
+    main's reported baseline exactly.
+  - `python3 -m pytest -q gates` → **61 passed** — this collects and
+    passes cleanly on the rebased tree; the brief's premise that
+    `gates/` "still cannot collect" (#398) no longer holds here because
+    #398's fix (`08b2808`) is now part of this branch's own history via
+    the rebase.
+- No conflict, edit, or re-run touched anything outside this issue's
+  already-frozen write set (`gates/ci.py`, `gates/test_closes_gate_ci.py`,
+  `docs/issue-312/decisions/phase-is-an-issue-property.md`,
+  `docs/issue-312/reports/implementation.md`) — the rebase moved this
+  branch's existing commits onto a new base and merged one additive test
+  conflict; it did not add new files or new production code.
+- Pushed the rebased branch with `git push --force-with-lease` (commit
+  SHAs changed under rebase, so a fast-forward push was not possible).
+
 ## Open findings
 
 - The #313/#317 pure-bugfix-skip phase-determination gap (see
