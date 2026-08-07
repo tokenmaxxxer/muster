@@ -40,6 +40,7 @@ import flows
 import gates
 import pr_reference
 import spawn
+import spec_index
 
 # `issue-<n>/<role>` 브랜치 명명 규칙(role-handoff contract v3, gates.BRANCH_ROLE
 # 과 같은 관례)에서 이슈 번호와 role 세그먼트를 함께 뽑는다 — CI 트리거
@@ -397,6 +398,7 @@ def check(repo: Path, pr: int | None = None, issue: int | None = None,
     bad += gates.record_wellformed_in(repo)
     bad += gates.record_no_tool_residue_in(repo)
     bad += gates.record_fulfils_diff(repo, {})
+    bad += spec_index.check(repo)
 
     # ponytail: gates.deps() 와 같은 판정을 반복한다. gates.deps 가 라우터의
     # 디렉터리 배치(d/"work")를 전제해서 그대로 못 부른다. 라우터 은퇴 시
