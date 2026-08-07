@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """spawn.py 의 순수 함수들 — 세션을 띄우지 않고 검사한다."""
+import argparse
 import io
 import json
 import os
@@ -2612,6 +2613,82 @@ class Clean(unittest.TestCase):
             self.assertIn("실패", out)
             self.assertIn("지움", out)
 
+    def test_clean_issue_scopes_sweep_to_that_issue_only(self):
+        # #288 N1: clean --issue N accepted the flag but swept every
+        # workspace regardless. Pin: with issue 51 and 52 workspaces both
+        # eligible for removal, `--issue 51` removes only 51's and leaves
+        # 52's untouched, and 52 isn't even reported.
+        with tempfile.TemporaryDirectory() as td:
+            wb = Path(td) / "work"
+            wb.mkdir()
+            ws51 = wb / "myrepo-issue-51-coding"
+            ws52 = wb / "myrepo-issue-52-coding"
+            self._make_clean_repo(ws51, Path(td) / "remote-a.git")
+            self._make_clean_repo(ws52, Path(td) / "remote-b.git")
+
+            roster_path = Path(td) / "runs" / "active.json"
+            roster_path.parent.mkdir(parents=True)
+            roster_path.write_text(json.dumps({}))
+
+            old_roster = spawn.ROSTER
+            old_argv = sys.argv
+            old_environ = dict(os.environ)
+            spawn.ROSTER = roster_path
+            os.environ["MUSTER_WORK_DIR"] = str(wb)
+            sys.argv = ["spawn.py", "clean", "--issue", "51"]
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                spawn.main()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                sys.argv = old_argv
+                os.environ.clear()
+                os.environ.update(old_environ)
+
+            out = buf.getvalue()
+            self.assertFalse(ws51.exists())
+            self.assertTrue(ws52.exists())
+            self.assertNotIn(ws52.name, out)
+
+    def test_clean_issue_with_no_matching_workspace_removes_nothing(self):
+        # #288 N1 acceptance: clean --issue 424242 against workspaces that
+        # exist for other issues must report zero removed/kept, not sweep
+        # everything.
+        with tempfile.TemporaryDirectory() as td:
+            wb = Path(td) / "work"
+            wb.mkdir()
+            ws51 = wb / "myrepo-issue-51-coding"
+            self._make_clean_repo(ws51, Path(td) / "remote-a.git")
+
+            roster_path = Path(td) / "runs" / "active.json"
+            roster_path.parent.mkdir(parents=True)
+            roster_path.write_text(json.dumps({}))
+
+            old_roster = spawn.ROSTER
+            old_argv = sys.argv
+            old_environ = dict(os.environ)
+            spawn.ROSTER = roster_path
+            os.environ["MUSTER_WORK_DIR"] = str(wb)
+            sys.argv = ["spawn.py", "clean", "--issue", "424242"]
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                spawn.main()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                sys.argv = old_argv
+                os.environ.clear()
+                os.environ.update(old_environ)
+
+            out = buf.getvalue()
+            self.assertTrue(ws51.exists())
+            self.assertIn("지움 0, 남김 0", out)
+
 
 class Watchdog(unittest.TestCase):
     """이슈 #90 phase-2: observe-only 이상 신호 네 가지."""
@@ -4595,3 +4672,236 @@ class GitEnvTimeoutPromptVars(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DryRunCwdValidation(unittest.TestCase):
+    """#288 N2: --dry-run 은 -C 를 검증하지 않고 세션 설정 JSON을 찍어
+    존재하지 않는 경로도 "검증됨"처럼 보이게 만들었다."""
+
+    def test_dry_run_rejects_nonexistent_cwd(self):
+        old_argv = sys.argv
+        sys.argv = ["spawn.py", "coding", "task", "--dry-run",
+                    "-C", "/nonexistent/path/does-not-exist-288"]
+        buf = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = buf
+        try:
+            with self.assertRaises(SystemExit) as cm:
+                spawn.main()
+        finally:
+            sys.stdout = old_stdout
+            sys.argv = old_argv
+        self.assertNotEqual(cm.exception.code, 0)
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_dry_run_rejects_cwd_that_is_a_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "plainfile"
+            f.write_text("x")
+            old_argv = sys.argv
+            sys.argv = ["spawn.py", "coding", "task", "--dry-run", "-C", str(f)]
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    spawn.main()
+            finally:
+                sys.stdout = old_stdout
+                sys.argv = old_argv
+            self.assertNotEqual(cm.exception.code, 0)
+            self.assertEqual(buf.getvalue(), "")
+
+
+class IssueArgValidation(unittest.TestCase):
+    """#288 N3: --issue 는 argparse type=int 라 0/음수/거대정수도 통과했다."""
+
+    def test_positive_int_accepts_valid(self):
+        self.assertEqual(spawn.positive_int("51"), 51)
+
+    def test_positive_int_rejects_zero(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            spawn.positive_int("0")
+
+    def test_positive_int_rejects_negative(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            spawn.positive_int("-5")
+
+    def test_issue_zero_rejected_at_parse_time_before_any_logic(self):
+        old_argv = sys.argv
+        sys.argv = ["spawn.py", "watch", "--issue", "0"]
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            with self.assertRaises(SystemExit) as cm:
+                spawn.main()
+        finally:
+            sys.stderr = old_stderr
+            sys.argv = old_argv
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_issue_negative_rejected_at_parse_time(self):
+        old_argv = sys.argv
+        sys.argv = ["spawn.py", "watch", "--issue", "-5"]
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            with self.assertRaises(SystemExit) as cm:
+                spawn.main()
+        finally:
+            sys.stderr = old_stderr
+            sys.argv = old_argv
+        self.assertEqual(cm.exception.code, 2)
+
+
+class BoardNonNumericSubjectWarning(unittest.TestCase):
+    """#288 N4: board() 는 issue-NaN 같은 비숫자 issue-* 디렉터리를 아무
+    경고 없이 그냥 빼버렸다 — 서브젝트가 오케스트레이터 라우팅에서 조용히
+    사라졌다."""
+
+    def test_non_numeric_subject_dir_excluded_and_warned(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            docs = root / "docs"
+            good = docs / "issue-12" / "reports"
+            bad = docs / "issue-NaN" / "reports"
+            good.mkdir(parents=True)
+            bad.mkdir(parents=True)
+            role = spawn.ROLES[0]
+            (good / f"{role}.md").write_text("---\nloop_state: done\n---\nbody")
+            (bad / f"{role}.md").write_text("---\nloop_state: done\n---\nbody")
+
+            old_stderr = sys.stderr
+            sys.stderr = io.StringIO()
+            try:
+                found = spawn.board(root)
+                warned = sys.stderr.getvalue()
+            finally:
+                sys.stderr = old_stderr
+
+            self.assertIn("issue-12", found)
+            self.assertNotIn("issue-NaN", found)
+            self.assertIn("issue-NaN", warned)
+
+
+class WorkspaceReuseOriginMismatch(unittest.TestCase):
+    """#288 N5: 작업 경로에 우연히 다른 origin 을 가진 레포가 이미 있으면
+    재사용 분기로 들어가 fetch 실패를 네트워크 문제로 오보했다."""
+
+    def _init_repo(self, path: Path, origin_url: str) -> None:
+        path.mkdir(parents=True)
+        run = lambda *args: subprocess.run(
+            args, cwd=str(path), capture_output=True, text=True, check=True)
+        run("git", "init", "-q")
+        run("git", "config", "user.email", "t@example.com")
+        run("git", "config", "user.name", "t")
+        (path / "f.txt").write_text("x")
+        run("git", "add", "f.txt")
+        run("git", "commit", "-q", "-m", "init")
+        run("git", "remote", "add", "origin", origin_url)
+
+    def test_foreign_origin_at_work_path_is_refused_by_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            src_remote = Path(td) / "src-remote.git"
+            subprocess.run(["git", "init", "-q", "--bare", str(src_remote)], check=True)
+            src = Path(td) / "src"
+            self._init_repo(src, str(src_remote))
+            subprocess.run(["git", "-C", str(src), "push", "-q", "-u", "origin", "HEAD:main"],
+                           check=True)
+
+            work_base = Path(td) / "work"
+            work_base.mkdir()
+            repo_name = "src-remote"  # derived from src_remote's basename, like issue_workspace() does
+            issue = 999
+            role = "coding"
+            work = work_base / f"{repo_name}-issue-{issue}-{role}"
+            self._init_repo(work, "https://github.com/someone/unrelated.git")
+
+            old_environ = dict(os.environ)
+            os.environ["MUSTER_WORK_DIR"] = str(work_base)
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    spawn.issue_workspace(str(src), issue, role)
+            finally:
+                os.environ.clear()
+                os.environ.update(old_environ)
+
+            msg = str(cm.exception)
+            self.assertIn("origin 불일치", msg)
+            self.assertNotIn("fetch 실패", msg)
+            self.assertTrue((work / "f.txt").exists())
+
+    def test_ssh_vs_https_origin_form_is_not_treated_as_mismatch(self):
+        # warrant hunt finding: toggling MUSTER_KEEP_SSH between spawns of
+        # the same issue/role must not make the identity check (N5 fix)
+        # falsely refuse a legitimately matching workspace just because
+        # one side is ssh-form and the other https-form.
+        with tempfile.TemporaryDirectory() as td:
+            src = Path(td) / "src"
+            self._init_repo(src, "git@github.com:someorg/somerepo.git")
+
+            work_base = Path(td) / "work"
+            work_base.mkdir()
+            repo_name = "somerepo"
+            issue = 998
+            role = "coding"
+            work = work_base / f"{repo_name}-issue-{issue}-{role}"
+            self._init_repo(work, "https://github.com/someorg/somerepo.git")
+
+            old_environ = dict(os.environ)
+            os.environ["MUSTER_WORK_DIR"] = str(work_base)
+            os.environ.pop("MUSTER_KEEP_SSH", None)
+            try:
+                with mock.patch.object(spawn, "_fetch_or_halt") as fake_fetch:
+                    result = spawn.issue_workspace(str(src), issue, role)
+            finally:
+                os.environ.clear()
+                os.environ.update(old_environ)
+
+            self.assertEqual(result, str(work))
+            fake_fetch.assert_called_once()
+
+
+class AwaitBoundedMissingLog(unittest.TestCase):
+    """#288 corroboration item: log_path 가 존재하지 않으면 "stall: N초째
+    무변화"가 아니라 "cannot observe" 로 보고해야 한다 — clean 의 전역
+    스윕이 로그를 지운 세션을 가짜 stall 로 오보하던 실측 사건."""
+
+    def test_missing_log_reports_cannot_observe_not_stall(self):
+        with tempfile.TemporaryDirectory() as td:
+            events_path = Path(td) / "s.events.jsonl"
+            offset_path = Path(td) / "s.events.offset"
+            log_path = Path(td) / "does-not-exist.log"
+
+            buf = io.StringIO()
+            old_stderr = sys.stderr
+            sys.stderr = buf
+            try:
+                rc = spawn._await_bounded(events_path, offset_path, 0.001, log_path)
+            finally:
+                sys.stderr = old_stderr
+
+            out = buf.getvalue()
+            self.assertEqual(rc, 0)
+            self.assertIn("cannot observe", out)
+            self.assertNotIn("stall:", out)
+
+    def test_existing_unchanged_log_still_reports_stall(self):
+        with tempfile.TemporaryDirectory() as td:
+            events_path = Path(td) / "s.events.jsonl"
+            offset_path = Path(td) / "s.events.offset"
+            log_path = Path(td) / "present.log"
+            log_path.write_text("x")
+
+            buf = io.StringIO()
+            old_stderr = sys.stderr
+            sys.stderr = buf
+            try:
+                rc = spawn._await_bounded(events_path, offset_path, 0.001, log_path)
+            finally:
+                sys.stderr = old_stderr
+
+            out = buf.getvalue()
+            self.assertEqual(rc, 0)
+            self.assertIn("stall:", out)
+            self.assertNotIn("cannot observe", out)

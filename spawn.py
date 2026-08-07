@@ -1130,8 +1130,13 @@ def board(root: Path) -> dict[str, dict[str, dict[str, str]]]:
     if not docs.is_dir():
         return {}
     found = {}
-    for d in sorted(p for p in docs.iterdir()
-                    if p.is_dir() and re.match(r"^issue-[0-9]+$", p.name)):
+    for d in sorted(p for p in docs.iterdir() if p.is_dir()):
+        if not d.name.startswith("issue-"):
+            continue
+        if not re.match(r"^issue-[0-9]+$", d.name):
+            print(f"board: 숫자가 아닌 issue-* 디렉터리라 보드에서 뺀다: "
+                  f"{d.name}", file=sys.stderr)
+            continue
         rep = d / "reports"
         roles = {r: frontmatter(rep / f"{r}.md") for r in ROLES
                  if (rep / f"{r}.md").is_file()}
@@ -2023,6 +2028,12 @@ def _await_bounded(events_path: Path, offset_path: Path, stall_timeout_min: floa
             last_size = size
             last_change = time.monotonic()
         if time.monotonic() - last_change >= limit_s:
+            if not log_path.exists():
+                print(f"[watch] cannot observe: 세션 로그 파일이 없다 — "
+                      f"{log_path}. stall 이 아니라 관측 채널 자체가 사라진 "
+                      f"것이다 — clean 이력을 확인하거나 역할을 다시 스폰하라",
+                      file=sys.stderr)
+                return 0
             secs = int(time.monotonic() - last_change)
             print(f"[watch] stall: 세션 로그 {secs}초째 무변화 — 이벤트 없이 "
                   f"멈춘다. 다시 spawn.py watch 로 재무장하라", file=sys.stderr)
@@ -2438,6 +2449,15 @@ def spawn_cmd(settings_path: str, role: str, unattended: bool,
     return cmd, env
 
 
+def positive_int(s: str) -> int:
+    """argparse type=: `--issue` 는 1 이상만 유효하다 — 0/음수/거대정수는
+    존재할 수 없는 이슈 번호이므로 파싱 시점에 바로 거부한다(#288 N3)."""
+    v = int(s)
+    if v < 1:
+        raise argparse.ArgumentTypeError(f"양의 정수가 아니다: {s}")
+    return v
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("role", nargs="?", help="역할. 생략하면 상태만 보여준다")
@@ -2448,7 +2468,7 @@ def main() -> int:
                     help="대상 레포에 계약이 없어도 띄운다. 보드를 안 쓸 작업에만")
     ap.add_argument("--trust-repo-config", action="store_true",
                     help="대상 레포의 .claude/ 설정·훅을 신뢰한다. 읽어본 뒤에만")
-    ap.add_argument("--issue", type=int,
+    ap.add_argument("--issue", type=positive_int,
                     help="이 이슈 번호로 스폰한다: issue-<n>/<역할> 브랜치를 만들고 프롬프트에 명시")
     ap.add_argument("--unattended", action="store_true",
                     help="사람이 없는 실행. mint 는 안 되고, 휴먼 게이트는 선다")
@@ -2527,9 +2547,12 @@ def main() -> int:
                 os.chmod(parent, stat.S_IWRITE | stat.S_IEXEC | stat.S_IREAD)
             func(path)
 
+        scope = f"-issue-{a.issue}-" if a.issue is not None else None
         removed = kept = failed = 0
         for w in sorted(wb.glob("*")) if wb.is_dir() else []:
             if not (w / ".git").is_dir():
+                continue
+            if scope is not None and scope not in w.name:
                 continue
             e = live.get(w.resolve())
             if e is not None:
@@ -2614,6 +2637,9 @@ def main() -> int:
     # 전에 알아야 할 사실이지, 띄우고 나서 알 일이 아니다.
     require_no_repo_config(a.cwd, a.trust_repo_config)
     if a.dry_run:
+        cwd_path = Path(a.cwd)
+        if not cwd_path.is_dir():
+            sys.exit(f"-C 가 디렉터리가 아니다: {a.cwd}")
         out = role_settings(a.role)
         # MUSTER_ROLE_MODEL / role_model.txt (이슈#93): spawn_cmd 는 이
         # dry-run 경로를 안 타므로(세션을 안 띄우니까) --model 부착 여부가
@@ -2773,6 +2799,26 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
         _fetch_or_halt(str(src), "재사용 워크스페이스")
         return str(src)
     if (work / ".git").exists():
+        # 이 경로가 우리가 만든 워크스페이스가 아니라 우연히 같은 이름으로
+        # 미리 놓인 남의 레포일 수 있다(#288 N5) — origin 이 다르면 그건
+        # 네트워크 문제가 아니라 신원 불일치이므로 fetch 를 시도하기 전에
+        # 여기서 끊는다.
+        rw = subprocess.run(["git", "-C", str(work), "remote", "get-url", "origin"],
+                            capture_output=True, text=True)
+        work_origin = rw.stdout.strip()
+        def _norm(u):
+            # ssh/https 형태 차이는 신원이 아니다 — MUSTER_KEEP_SSH 가 두
+            # 스폰 사이에 토글되면 `origin`(위에서 이미 그 시점의 env로
+            # 정규화됨)과 예전에 클론된 work_origin 의 스킴이 다를 수
+            # 있으므로, 비교 직전에 둘 다 무조건 https 형태로 다시 맞춘다
+            # (실측: warrant hunt, MUSTER_KEEP_SSH 토글이 진짜 재사용을
+            # "다른 레포"로 오판).
+            u = re.sub(r"^(?:ssh://)?git@github\.com[:/](.+?)(?:\.git)?$",
+                       r"https://github.com/\1", u)
+            return re.sub(r"\.git$", "", u.rstrip("/"))
+        if _norm(work_origin) != _norm(origin):
+            sys.exit(f"작업 경로에 다른 레포가 있다 (origin 불일치): {work} "
+                     f"— 기대: {origin}, 실제: {work_origin or '(없음)'}")
         _fetch_or_halt(str(work), "재사용 워크스페이스")
         return str(work)
     work.parent.mkdir(parents=True, exist_ok=True)
