@@ -548,6 +548,68 @@ def record_fulfils_diff(d: Path, cfg: dict) -> list[str]:
     return bad
 
 
+_REQ_HEADING = re.compile(r"^##\s+(R\d+)\s*$")
+_REQ_FIELD = re.compile(r"^([a-z_]+):\s*(.*)$")
+_REQ_REQUIRED = ("quote", "source_issue", "check", "status")
+
+
+def _parse_requirements(text: str) -> tuple[list[dict[str, str]], list[str]]:
+    """`docs/specs/requirements.md` 를 파싱한다. 필수 필드 누락은 "검사할 게
+    없다"가 아니라 그 자체로 차단 사유다 (fail closed, issue #321)."""
+    entries: list[dict[str, str]] = []
+    bad: list[str] = []
+    current_id: str | None = None
+    current: dict[str, str] = {}
+
+    def flush() -> None:
+        if current_id is None:
+            return
+        missing = [f for f in _REQ_REQUIRED if f not in current]
+        if missing:
+            bad.append(f"요구사항 등록 파싱 불가: {current_id} — 필수 필드 누락 "
+                       f"({', '.join(missing)})")
+            return
+        entries.append({"id": current_id, **current})
+
+    for line in text.splitlines():
+        m = _REQ_HEADING.match(line)
+        if m:
+            flush()
+            current_id, current = m.group(1), {}
+            continue
+        m = _REQ_FIELD.match(line.strip())
+        if m and current_id is not None:
+            current[m.group(1)] = m.group(2).strip()
+    flush()
+    return entries, bad
+
+
+def requirement_registry(d: Path, cfg: dict) -> list[str]:
+    """`docs/specs/requirements.md` 의 각 항목이 가리키는 `check` 실행 가능
+    아티팩트가 HEAD 에 실제로 존재하는지 검사한다 (issue #321).
+
+    `check` 이 `UNVERIFIABLE: <reason>` 리터럴이면 경로 존재를 요구하지
+    않는다 — #310 이 이미 인정한, 기계적으로 검사 불가능한 규칙의 표시다.
+    레지스트리 파일이 없으면 "검사할 게 없다"로 통과시킨다 — 이 게이트
+    자신이 그 파일을 만드는 최초 커밋에서 아직 없을 수 있기 때문이다.
+    파싱 실패(필수 필드 누락)는 차단 사유다."""
+    root = d / "work" if (d / "work").exists() else d
+    reg = root / "docs" / "specs" / "requirements.md"
+    if not reg.exists():
+        return []
+    entries, bad = _parse_requirements(
+        reg.read_text(encoding="utf-8-sig", errors="replace"))
+    for e in entries:
+        check = e["check"]
+        if check.startswith("UNVERIFIABLE:"):
+            continue
+        path = check.split("::", 1)[0].strip()
+        if not path or not (root / path).exists():
+            bad.append(f"요구사항 체크 소실: {e['id']} (issue #{e['source_issue']}) "
+                       f"— check={check!r} 이 가리키는 경로가 HEAD 에 없다")
+    return bad
+
+
 BRANCH_ROLE = re.compile(r"^issue-[^/]+/([^/]+)$")
 # 항상 허용되는 레코드 경로 — 어떤 write_scope 선언·오버라이드도 이걸 못
 # 지운다 (issue-149 item 5: 기록 의무는 무조건 살아남는다).
@@ -713,7 +775,8 @@ ALL = {"writeset": writeset, "deps": deps,
        "record_no_tool_residue": record_no_tool_residue,
        "record_derived_counts": record_derived_counts,
        "record_fulfils_diff": record_fulfils_diff,
-       "duplicate_test_basenames": duplicate_test_basenames_gate}
+       "duplicate_test_basenames": duplicate_test_basenames_gate,
+       "requirement_registry": requirement_registry}
 
 
 def check(names: list[str], d: Path, cfg: dict) -> list[str]:

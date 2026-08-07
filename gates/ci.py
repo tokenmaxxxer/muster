@@ -426,6 +426,7 @@ def check(repo: Path, pr: int | None = None, issue: int | None = None,
     bad += gates.record_no_tool_residue_in(repo)
     bad += gates.record_fulfils_diff(repo, {})
     bad += spec_index.check(repo)
+    bad += gates.requirement_registry(repo, {})
 
     # ponytail: gates.deps() 와 같은 판정을 반복한다. gates.deps 가 라우터의
     # 디렉터리 배치(d/"work")를 전제해서 그대로 못 부른다. 라우터 은퇴 시
