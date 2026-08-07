@@ -6,7 +6,13 @@ code_under_review:
   - on-the-record/commands/run.md
   - docs/handbooks/operations.md
 loop_state: delivered
-open_findings: []
+open_findings:
+  - Issue #290's `## Acceptance` section (read live via `gh issue view
+    290` during the 2026-08-07 third rebase) is still four prose
+    bullets with no named executable artifact — no file path, command,
+    or test-ID for closes-gate (#310) to check against. Not renamed to
+    match, since no rewritten section was found to match against;
+    reported here for the orchestrator/human to reconcile.
 resolved_findings:
   - PR #295 review (2026-08-07): on-the-record-tests.yml ran `pytest -q`
     with no install step, so CI failed at "pytest: command not found"
@@ -61,6 +67,43 @@ resolved_findings:
     operations.md) all still exist unchanged on the rebased branch; no
     mismatch found between what this delivery claims and what it
     produces.
+  - Third rebase (2026-08-07): main advanced two more merged PRs (#421,
+    #343) since the second rebase. `git fetch origin` then `git rebase
+    origin/main` hit one conflict, again in
+    `docs/specs/reconciled-index.md` (same pattern as the second rebase
+    — the prior rebase's own regenerated-index commit went stale against
+    the new main tip). Resolved by taking main's side during the
+    conflict, then regenerating with `python3 gates/spec_index.py
+    --update` after the rebase completed and committing the result.
+    Re-ran `python3 -m pytest -q` (no `--ignore`, per current
+    instruction) on the rebased tree before committing the index
+    regeneration: 523 passed, 1 failed
+    (`test_gates.py::t_rulebook_version_is_recorded`, dirty-tree
+    self-detection firing against the uncommitted index diff — same
+    documented behavior as the second rebase, not a regression). After
+    committing, re-ran the full suite again: **524 passed, 0 failed**,
+    matching main's own stated 524-passed baseline exactly. Force-pushed
+    the rebased branch (`git push --force-with-lease`); PR #295 flipped
+    from `mergeable: CONFLICTING` to `mergeable: MERGEABLE`.
+    Read the issue's current `## Acceptance` section directly via `gh
+    issue view 290` rather than relying on memory: it is still four
+    prose bullets (`pytest -q` over the whole directory passes; a gate
+    stubbed to crash makes core's deny tests FAIL; a PR breaking a test
+    cannot merge green; a suite that cannot find its dependencies exits
+    non-zero) with no named executable artifact (no file path, no
+    command, no test-ID). This delivery's `code_under_review` list
+    already matches what actually exists on the branch (checked in the
+    prior rebase's entry above and re-confirmed unchanged here), so
+    there is nothing to rename to match a rewritten Acceptance section
+    — but flagging as a finding, not assumed silently: if closes-gate
+    (#310) expects the Acceptance section itself to name an executable
+    artifact and gates on that, this issue's Acceptance section as it
+    stands today does not do so, and no orchestrator rewrite of it was
+    found in the issue body or its one comment (`APPROVE
+    issue-290/implementation`). This is now the third rebase this branch
+    has needed since first opening PR #295 — each one driven by main
+    moving again mid-review, exactly the repeated-rebase cost #390
+    describes.
 ---
 
 # issue-290 / issue-294 — phase 2: CI + test-hygiene fix
