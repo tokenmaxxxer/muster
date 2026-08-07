@@ -78,6 +78,65 @@ class SpawnCmd(unittest.TestCase):
                 if v is not None:
                     os.environ[k] = v
 
+    def _core_checkout(self, td, plugin_names):
+        # marketplace.json + plugin.json 을 갖춘 core 체크아웃 모양을
+        # 흉내낸다 — 실제 tokenmaxxxer-core 와 같은 형태.
+        root = Path(td)
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps({
+            "name": "tokenmaxxxer-core",
+            "plugins": [{"name": n, "source": f"./{n}"} for n in plugin_names],
+        }))
+        for n in plugin_names:
+            d = root / n / ".claude-plugin"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "plugin.json").write_text(json.dumps({"name": n}))
+
+    def test_core_plugin_dirs_pins_five_plugin_set(self):
+        # 이슈#282: marketplace.json 이 5개(core, terse, freelunch, scout,
+        # warrant)를 선언하면 core_plugin_dirs() 는 하드코드 튜플이 아니라
+        # 그 5개 전부를 돌려줘야 한다 — warrant 가 빠지던 원래 버그의 회귀
+        # 방지.
+        names = ("core", "terse", "freelunch", "scout", "warrant")
+        saved = {k: os.environ.pop(k, None)
+                 for k in ("TOKENMAXXXER_CORE", "TOKENMAXXXER_RULEBOOKS")}
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                self._core_checkout(td, names)
+                os.environ["TOKENMAXXXER_CORE"] = td
+                dirs = spawn.core_plugin_dirs()
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+                else:
+                    os.environ.pop(k, None)
+        self.assertEqual({p.name for p in dirs}, set(names))
+
+    def test_core_plugin_dirs_halts_on_missing_plugin_dir(self):
+        # marketplace.json 이 선언한 플러그인의 디렉터리가 없으면
+        # core_plugin_dirs() 는 조용히 건너뛰지 않고 그 이름을 대며 halt
+        # 한다 — 공유 게이트 장치가 빠지는 걸 경고 없이 넘기지 않는다.
+        saved = {k: os.environ.pop(k, None)
+                 for k in ("TOKENMAXXXER_CORE", "TOKENMAXXXER_RULEBOOKS")}
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                self._core_checkout(td, ("core", "terse"))
+                root = Path(td)
+                mkt = json.loads((root / ".claude-plugin" / "marketplace.json").read_text())
+                mkt["plugins"].append({"name": "warrant", "source": "./warrant"})
+                (root / ".claude-plugin" / "marketplace.json").write_text(json.dumps(mkt))
+                os.environ["TOKENMAXXXER_CORE"] = td
+                with self.assertRaises(SystemExit) as cm:
+                    spawn.core_plugin_dirs()
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+                else:
+                    os.environ.pop(k, None)
+        self.assertIn("warrant", str(cm.exception))
+
     def test_core_root_prefers_managed_clone_over_sibling_directory(self):
         # 이슈#220: 형제 디렉터리(마켓플레이스 설치 부산물, ROOT.parent /
         # "tokenmaxxxer-core")가 관리 클론보다 먼저 매치되면 sha 비교 없이

@@ -2102,16 +2102,32 @@ def core_version() -> str:
 
 
 def core_plugin_dirs() -> list[Path]:
-    """core 마켓플레이스의 네 플러그인 전부 — core, terse, freelunch, scout.
+    """core 마켓플레이스가 선언한 플러그인 전부 — marketplace.json 이 정본이다.
 
     마켓플레이스 설치가 아니라 `--plugin-dir` 로 붙인다(실측 2026-07-27,
     CLI 2.1.220: 디렉터리로 넘긴 플러그인의 훅이 headless 에서 그대로
     발화한다). 설치를 거치지 않으므로 캐시·클론 갈라짐도 유령 등록 항목도
     이 경로에는 없다.
+
+    core 플러그인은 scope-gate·hunt-guard 같은 공유 강제 장치라 role 자체
+    확장(plugin_dirs())과 달리 하나라도 빠지면 조용히 넘길 수 없다 — 선언은
+    됐는데 디렉터리가 없으면 즉시 sys.exit (이슈 #282: 4개짜리 하드코드
+    튜플이 marketplace.json 이 다섯 번째로 늘린 warrant 를 계속 빠뜨렸는데
+    아무 신호도 없었다).
     """
     root = core_root()
-    return [root / n for n in ("core", "terse", "freelunch", "scout")
-            if (root / n / ".claude-plugin" / "plugin.json").is_file()]
+    plugins = json.loads(_mkt(root).read_text())["plugins"]
+    out = []
+    for p in plugins:
+        src = p.get("source") or f"./{p['name']}"
+        if not isinstance(src, str):
+            continue                      # {source: github, ...} 같은 원격 지정 — core 는 항상 로컬
+        sub = (root / src.lstrip("./")).resolve()
+        if not (sub / ".claude-plugin" / "plugin.json").is_file():
+            sys.exit(f"core 플러그인 '{p['name']}' 이 marketplace.json 에는 선언됐지만 "
+                      f"{sub / '.claude-plugin' / 'plugin.json'} 이 없다 — 조용히 건너뛰지 않는다.")
+        out.append(sub)
+    return out
 
 
 def drive(cwd: str, unattended: bool, limit: int = 12) -> int:
@@ -2885,6 +2901,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         settings = f.name
     try:
         print(f"[{role}] 플러그인 {len(plugins)}개, 룰북 {checkout_version(role, spec)}, "
+              f"core 플러그인 {', '.join(p.name for p in core_plugins)}, "
               f"core {core_version()}, 작업 디렉터리 {cwd}", file=sys.stderr)
         # 맡길 일은 stdin 으로 넘긴다. 인자로 주면 가변 인자 플래그가 삼키고,
         # 셸 보간을 거치면 신뢰할 수 없는 값의 $(…) 가 실행된다.
