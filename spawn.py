@@ -928,6 +928,43 @@ def require_no_repo_config(cwd: str, override: bool) -> None:
         f"  고정되어, 같은 내용인 동안은 다시 묻지 않는다.")
 
 
+def require_acceptance_gate(cwd: str, issue: int | None) -> None:
+    """issue #441: phase-2 세션은 이슈의 `## Acceptance` 가 실행가능한
+    산출물을 가리키지 않으면 아예 안 띄운다(`gates/acceptance_gate.py`,
+    issue #310) — 머지 시점이 아니라 세션 시작 전에 거절한다, #424 가 요구한
+    "잘못된 상태에서 나가는 배선" 모양 그대로.
+
+    phase 판정은 `gates/ci.py._approved_roles_on_issue` 와 같은 술어를
+    쓴다: 승인자 계정의 `APPROVE issue-<n>/<role>` 코멘트가 이슈에 하나라도
+    있으면 phase-2(issue #312, phase 는 role 이 아니라 이슈의 속성). phase-1
+    이슈는 Acceptance 가 아직 초안 단계이므로 건드리지 않는다.
+
+    `--issue` 없이 스폰하면(보드 밖 작업) 검사할 이슈가 없어 통과시킨다.
+    `gh` 조회 실패는 통과가 아니라 차단이다 — 검사 불가를 통과로 읽지
+    않는다는 게이트들의 공통 원칙(`acceptance_gate.py`/`ci.py` 동일).
+    """
+    if issue is None:
+        return
+    root = Path(cwd).resolve()
+    if not (root / MARKER).is_file():
+        return  # require_board 가 이미 --no-contract 없이는 여기까지 안 보낸다
+    sys.path.insert(0, str((Path(__file__).parent / "gates").resolve()))
+    import ci as _ci
+    import acceptance_gate as _acceptance_gate
+    approved_roles = _ci._approved_roles_on_issue(root, issue)
+    if not approved_roles:
+        return  # phase-1: Acceptance 가 아직 초안, 게이트 대상 아님
+    bad = _acceptance_gate.check(root, issue)
+    if not bad:
+        return
+    sys.exit(
+        f"이슈 #{issue} 는 phase-2 승인({', '.join(sorted(approved_roles))})을 "
+        f"받았지만 'Acceptance' 절이 실행가능한 산출물을 가리키지 않는다:\n"
+        + "\n".join(f"  - {b}" for b in bad)
+        + f"\n  세션을 안 띄운다 — 프로즈만 있는 Acceptance 로는 델리버리를 "
+        f"검증할 수 없다(issue #310, #441).")
+
+
 def _approvers(root: Path) -> set[str]:
     """`docs/specs/approvers.md` 한 줄에 하나씩 적힌 GitHub 로그인."""
     p = root / MARKER
@@ -2729,6 +2766,7 @@ def main() -> int:
     # 드라이런도 막는다 — 레포가 자기 훅을 들고 있으면 그건 세션을 띄우기
     # 전에 알아야 할 사실이지, 띄우고 나서 알 일이 아니다.
     require_no_repo_config(a.cwd, a.trust_repo_config)
+    require_acceptance_gate(a.cwd, a.issue)
     if a.dry_run:
         cwd_path = Path(a.cwd)
         if not cwd_path.is_dir():
