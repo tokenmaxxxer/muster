@@ -17,6 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import acceptance_gate
 import flows
 
 # phase-1 제안 PR은 `#<n>`만 있으면 된다 — 머지돼도 이슈를 닫으면 안 된다
@@ -99,6 +100,11 @@ def check(repo: Path, pr: int, issue: int, phase: str) -> list[str]:
             return [f"이슈 #{issue} 본문을 읽을 수 없다(`gh issue view` 실패) — "
                     f"검사 불가는 통과가 아니다."]
         plan = flows._plan_from_body(issue_body)
+        bad = check_body(issue, body, phase, plan)
+        closes = _CLOSES_REF.search(body)
+        if not bad and closes and int(closes.group(2)) == issue:
+            bad = bad + acceptance_gate.check_issue_body(issue, issue_body)
+        return bad
     return check_body(issue, body, phase, plan)
 
 
