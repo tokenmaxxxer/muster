@@ -95,6 +95,20 @@ def _mark_pulled(d: Path) -> None:
         pass
 
 
+def _migrate_legacy_ttl_marker(d: Path) -> None:
+    """이슈 #313: #297 은 새 마커를 쓸 곳만 `runs/ttl-markers/` 로
+    옮겼다 — pre-#297 코드가 클론 안에 이미 써 둔 `.muster-last-pull` 은
+    그대로 남아, 지우기 전까진 `git status --porcelain` 이 영영 비지
+    않는다(untracked, gitignore 안 됨). 그 결과 `checkout_version()` 의
+    dirty 접미사가 그 클론에 매 spawn 마다 상시로 붙는다. 매번 확인해서
+    지운다 — 있으면 지우고 없으면 조용히 넘어간다(그 자체로 멱등)."""
+    legacy = d / ".muster-last-pull"
+    try:
+        legacy.unlink()
+    except OSError:
+        pass
+
+
 MARKETPLACES = Path.home() / ".claude" / "plugins" / "marketplaces"
 KNOWN = MARKETPLACES.parent / "known_marketplaces.json"
 
@@ -264,6 +278,7 @@ def rulebook_checkout(role: str, spec: dict) -> Path:
         sys.exit(f"[{role}] 로컬 체크아웃도 repo 도 없다: roles/{role}.json")
     d = ROOT / "runs" / "rulebooks" / mkt
     if _mkt(d).exists():
+        _migrate_legacy_ttl_marker(d)
         if not _pull_is_fresh(d):
             _run_net(["git", "-C", str(d), "pull", "-q", "--ff-only"],
                      f"[{role}] 룰북 pull")
@@ -2124,6 +2139,7 @@ def core_root() -> Path:
     # 로컬 우선은 개발용 오버라이드일 뿐이다.
     d = ROOT / "runs" / "rulebooks" / "tokenmaxxxer-core"
     if (d / "core" / ".claude-plugin" / "plugin.json").is_file():
+        _migrate_legacy_ttl_marker(d)
         if not _pull_is_fresh(d):
             _run_net(["git", "-C", str(d), "pull", "-q", "--ff-only"], "[core] pull")
             _mark_pulled(d)
@@ -2172,6 +2188,7 @@ def core_version() -> str:
             return describe(p, label)
     d = ROOT / "runs" / "rulebooks" / "tokenmaxxxer-core"
     if (d / "core" / ".claude-plugin" / "plugin.json").is_file():
+        _migrate_legacy_ttl_marker(d)
         return describe(d, "on-the-record 클론")
     return "버전 불명 (core 체크아웃 없음)"
 
