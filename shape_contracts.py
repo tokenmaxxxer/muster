@@ -15,13 +15,72 @@ Two interfaces are covered, per the issue-335 proposal:
 - `assert_claude_stream_event_shape`: Claude Code CLI `stream-json`
   events, derived from what `spawn.py`'s parser actually reads
   (internal-consistency check only — see the proposal's Out of scope).
+
+A third, narrower kind (issue #435): a test-built `lambda` that stands in
+for one of *this repo's own* functions (e.g. tests monkeypatch
+`spawn._issue_comments`). The two interfaces above never covered this —
+they verify external payload shapes (`gh` JSON, Claude CLI events), not
+an internal function's own return-shape. `#287` changed
+`spawn._issue_comments`'s return from `list[dict]` to
+`tuple[list[dict], bool]`; the four production call sites were all
+updated by that same change, but stub lambdas built to replace the
+function during tests kept returning the old bare list — a divergence
+invisible to a call-site search because a stub is not a call site.
+`assert_stub_return_shape` closes that: it checks a stub's return value
+against the real function's `-> ...` annotation.
 """
 
 from __future__ import annotations
+import inspect
+import typing
 
 
 def _fail(path: str, msg: str) -> None:
     raise AssertionError(f"{path}: {msg}")
+
+
+def _check_shape(path: str, value, ann) -> None:
+    """One level of `value` against `ann`, then recurse into `tuple`/`list`
+    element types (warrant-hunter before-landing finding, issue #435:
+    checking only the outer container let a same-arity tuple/list of
+    arbitrary element types — e.g. `(5, "not-a-bool")` against
+    `tuple[list[dict], bool]` — pass as a "match")."""
+    origin = typing.get_origin(ann) or ann
+    if isinstance(origin, typing.TypeVar) or origin is typing.Any:
+        return
+    if not isinstance(origin, type):
+        return  # unsupported annotation shape (e.g. a bare TypeVar/Union) — skip, don't false-positive
+    if not isinstance(value, origin):
+        origin_name = getattr(origin, "__name__", str(origin))
+        _fail(path, f"got {type(value).__name__}, expected {origin_name} (from annotation {ann!r})")
+    args = typing.get_args(ann)
+    if not args:
+        return
+    if origin is tuple:
+        if len(args) != len(value):
+            _fail(path, f"tuple of length {len(value)}, expected length {len(args)} (from annotation {ann!r})")
+        for i, (elem, elem_ann) in enumerate(zip(value, args)):
+            _check_shape(f"{path}[{i}]", elem, elem_ann)
+    elif origin in (list, set, frozenset):
+        for i, elem in enumerate(value):
+            _check_shape(f"{path}[{i}]", elem, args[0])
+
+
+def assert_stub_return_shape(stub, real, *args, **kwargs) -> None:
+    """Call `stub(*args, **kwargs)` and check the result matches `real`'s
+    `-> ...` return annotation (a runtime type, e.g. `tuple[list, bool]`
+    or `list[dict]`), including `tuple`/`list`/`set` element types one
+    level of nesting deep. Raises `AssertionError` naming the mismatch.
+
+    `real` must carry a return annotation — this only checks stubs for
+    functions that declare one (`spawn._issue_comments` does).
+    """
+    ann = inspect.signature(real, eval_str=True).return_annotation
+    if ann is inspect.Signature.empty:
+        _fail(getattr(real, "__qualname__", repr(real)),
+              "has no return annotation to check a stub against")
+    result = stub(*args, **kwargs)
+    _check_shape(getattr(real, "__qualname__", repr(real)), result, ann)
 
 
 def assert_gh_paginate_slurp_shape(payload) -> None:
