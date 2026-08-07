@@ -85,42 +85,57 @@ out of scope here (proposal names only the 304/307 pair) and are the
 
 ## Open findings
 
-None.
+- The current issue #427 body (orchestrator-rewritten to name executable
+  artifacts per #310's closes-gate) lists as a bullet: "A test that fails
+  if the fixture reverts to a live fetch, so the dependency cannot
+  silently return." No such test exists on this branch. What exists is a
+  one-time manual check (this turn and the prior one): guarding
+  `subprocess.run` to raise on any `["gh", ...]` argv and re-running the
+  two target tests by hand — that proves the *current* code doesn't call
+  out, but nothing in the committed suite would fail if
+  `pr_reference._issue_view_body`/`_pr_view` stubs were later deleted
+  from the two 304/307 tests and the fixture reverted to hitting live
+  GitHub. Reporting this as a gap rather than reinterpreting the
+  artifact to match what was built.
 
 ## Next steps
 
-None — phase 2 complete for this proposal's scope. Push, verify remote,
-open PR with `Closes #427`.
+Phase-2 work as scoped by the approved proposal is otherwise complete.
+The open finding above (missing regression guard for "fixture reverts to
+live fetch") is outside this proposal's frozen write set — not
+implemented here, flagged for a follow-up decision rather than silently
+added mid-build.
 
 ## Open finding resolution path
 
 Not applicable — loop_state is terminal (`phase-2-complete`) with no open
 findings.
 
-## Test run (this turn, both suites, no ignore flag overall)
+## Test run (rebased tree, this turn)
 
+Branch rebased onto `origin/main` at `68900a3` (two more PRs — #421/#289
+and #343/#331 — landed since the prior rebase; this is the **third**
+time this branch has been rebased onto a moving main, which is itself an
+instance of the repeated-rebase cost #390 describes). Conflict in
+`gates/test_closes_gate_ci.py` (main's pre-#427 version of the 304/307
+test vs. this branch's stub+companion-test rewrite) resolved by taking
+this branch's version wholesale — main had not touched that hunk
+independently, so no logic merge was needed, only conflict-marker
+removal.
+
+- `python3 -m pytest -q` (repo root, no `--ignore`, single collection,
+  full suite, run against the rebased tree) — **525 passed**, 0 failed.
+  Main's own baseline (per the invoking instruction) is 524 passed with
+  no ignore flag; this branch adds exactly one net test
+  (`t_autodetect_304_307_shape_still_surfaces_real_acceptance_gate_finding`)
+  over that baseline, consistent with 524 + 1 = 525.
+- The 12 pre-existing `spawn._issue_comments` unpack-arity failures
+  recorded in the prior version of this record (attributed to #435) are
+  **gone** on the rebased tree — #435 (or an equivalent fix) landed on
+  main in the interim, superseding that entire "Pre-existing, unrelated
+  to #427" section above as stale history, not current state.
 - `python3 -m pytest -q gates/test_closes_gate_ci.py -k 304_307` — 2
-  passed (both the repaired original test and the new companion test).
-- Re-ran the same 2 tests with `subprocess.run` guarded to raise on any
-  `gh` CLI invocation — still 2 passed, demonstrating no live-network
-  call is reached.
-- `python3 -m pytest -q --ignore=gates` (repo root) — 418 passed.
-- `python3 -m pytest -q gates` — 65 passed, 12 failed. All 12 failures
-  pre-exist on `main` (verified via `git stash`/re-run before this
-  change): `t_phase_from_approval_*` (7), and
-  `t_autodetect_success_derives_issue_role_and_phase_from_approval`,
-  `t_autodetect_reachability_fix_blocks_closes_keyword_without_approval`,
-  `t_autodetect_closes_only_blocks_commit_message_keyword_with_clean_body`,
-  `t_autodetect_resolves_fork_pr_with_role_none`,
-  `t_autodetect_missing_approval_refusal_names_role_searched_and_approvals_present`
-  — same `spawn._issue_comments` unpack-arity drift described above,
-  attributed by the operator to #435 (in flight). Baseline (pre-change,
-  same command) was 13 failed, 63 passed — the one now-fixed failure is
-  the #427 target test.
-- Combined: 495 passed, 12 failed (all pre-existing/#435), across the
-  full suite with no ignore flag applied overall (root run + gates run,
-  per #398's known separate-collection limitation, noted in the
-  proposal's own "How you'll know it worked").
+  passed (both target tests, isolated).
 
 ## Doc placement (completed)
 
