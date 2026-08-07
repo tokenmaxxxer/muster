@@ -142,29 +142,41 @@ def _closes_ref_for_issue(body: str, issue: int):
     return None
 
 
-def _phase_from_approval(repo: Path, pr: int, issue: int, role: str) -> str:
-    """phase2 를 closing 키워드가 아니라 승인 이벤트로 판정한다 — 없으면
-    phase1(issue #271 요구사항 2, #245 관찰 F1 술어 결합 해소). contract
-    v3 s19 의 두 경로 그대로: 정확한 `APPROVE issue-<n>/<role>` 이슈
-    코멘트(single-account, 승인자 allowlist) 또는 differing-account PR
-    리뷰 Approve(two-account) — closing 키워드 유무는 이 판정에 전혀
-    관여하지 않는다. `flows._pr_approved`(issue #172, 상황판이 이미 같은
-    두 경로를 검증하는 코드, `flows.py:130`)를 그대로 재사용한다 —
-    새로 손으로 짜지 않는다. `spawn._approvers`/`spawn._issue_comments`
-    를 `gates/` 에서 쓰는 것은 `closure_sweep.py:21`의 기존 전례를
-    따른다. issue 번호로만 조회한다 — PR 번호로 `spawn._issue_comments`
-    를 다시 부르면 GitHub 가 `/issues/<n>/comments` 한 엔드포인트로
-    이슈·PR 대화 코멘트를 함께 서빙하는 성질 때문에 PR 자신의 대화
-    스레드에 달린 APPROVE 형태 코멘트까지 승인으로 계산돼 버린다 —
-    contract v3 s19 의 single-account 경로가 인정하는 건 이슈-레벨
-    코멘트뿐이다(issue #275 F3, #271 관찰이 남긴 fail-open 결함)."""
-    subject = f"issue-{issue}"
+def _approved_roles_on_issue(repo: Path, issue: int) -> set[str]:
+    """이슈-레벨 코멘트를 스캔해 `APPROVE issue-<n>/<role>`(승인자
+    allowlist 계정, 문자열 정확 일치)이 있는 모든 role 토큰 집합을
+    돌려준다 — role 은 상관없이 이 이슈에 대해 *어떤* 역할이 승인받았는지
+    (issue #312: phase 는 role 이 아니라 이슈의 속성). `flows._pr_approved`
+    (role 정확 일치, `flows.py:130`)는 상황판의 role-exact 계약을 그대로
+    지켜야 해서 재사용하지 않는다 — 여기서 독립된 스캔을 짠다(제안서
+    Out of scope: `_pr_approved`/`flows.py`는 이 이슈의 쓰기범위 밖)."""
     approvers = spawn._approvers(repo)
     comments = spawn._issue_comments(repo, issue)
+    prefix = f"APPROVE issue-{issue}/"
+    roles = set()
+    for c in comments:
+        body = (c.get("body") or "").strip()
+        if body.startswith(prefix) and c.get("login") in approvers:
+            roles.add(body[len(prefix):])
+    return roles
+
+
+def _phase_from_approval(repo: Path, pr: int, issue: int, role: str) -> str:
+    """phase2 를 closing 키워드가 아니라 승인 이벤트로 판정한다 — 없으면
+    phase1(issue #271 요구사항 2, #245 관찰 F1 술어 결합 해소). phase 는
+    이슈의 속성이다(issue #312): 이슈에 달린 `APPROVE issue-<n>/<any
+    role>` 코멘트가 하나라도 있으면(승인자 allowlist), 이 PR 이 어느
+    role 의 브랜치에서 왔든 phase2 — architect 가 제안하고 implementation
+    이 인도하는 cross-role 인계(#304/#307)가 그 예다. PR review 의
+    Approve 는 이 PR 자신에 대한 승인이라 role 모호성이 없으므로
+    (issue #271) 그대로 differing-account 규칙을 유지한다."""
+    approved_roles = _approved_roles_on_issue(repo, issue)
     reviews = _pr_reviews(repo, pr)
-    pr_dict = {"reviews": reviews or []}
-    approved = flows._pr_approved(pr_dict, comments, approvers, subject, role)
-    return "phase2" if approved else "phase1"
+    approvers = spawn._approvers(repo)
+    review_approved = any(
+        rv.get("state") == "APPROVED" and (rv.get("author") or {}).get("login") in approvers
+        for rv in (reviews or []))
+    return "phase2" if (approved_roles or review_approved) else "phase1"
 
 
 def _fetch_ref_file(repo: Path, pr: int, branch: str, path: str) -> str | None:
@@ -385,7 +397,20 @@ def check(repo: Path, pr: int | None = None, issue: int | None = None,
                 if body is not None and title is not None and commit_messages is not None:
                     surfaces = ([("본문", body), ("제목", title)]
                                 + [("커밋 메시지", m) for m in commit_messages])
-                    bad += _phase1_surface_mismatch(issue, surfaces)
+                    mismatch = _phase1_surface_mismatch(issue, surfaces)
+                    if mismatch:
+                        # 판정에 쓴 증거(찾아본 role, 이슈에 실제로 있는 승인)를
+                        # 결론에 딸려 보낸다 — issue #312 요구사항 2: 추론을
+                        # 전제로 말하지 않는다.
+                        branch = _pr_head_ref(repo, pr)
+                        detected = _issue_and_role_from_branch(branch) if branch else None
+                        if detected is not None:
+                            _, evidence_role = detected
+                            found = ", ".join(sorted(_approved_roles_on_issue(repo, issue))) or "없음"
+                            mismatch = mismatch + [
+                                f"이 PR 의 role({evidence_role})에 대한 승인 코멘트를 "
+                                f"못 찾았다 — 이슈 #{issue} 에 있는 승인: {found}"]
+                    bad += mismatch
     if closes_only:
         return bad
     if pr is not None:
