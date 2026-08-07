@@ -81,8 +81,12 @@ asserted.
      `blocked_on: "merge gate — PR #<n> open"`), `merged-unverified` (PR
      MERGED with Closes-ref, no `review` role record for the subject shows a
      `Present`-only verdict set post-merge), `merged-verified` (PR MERGED +
-     review record with no Absent/Incorrect verdicts, read via
-     `ledger.collect.parse`).
+     review record where every verdict is `Present` — i.e. `counts["Present"]
+     == total` in `ledger.collect.parse`'s output. `Surface` counts as
+     non-passing here exactly as it does in `ledger/collect.py`'s own
+     vocabulary (`VERDICTS = ("Present", "Surface", "Absent", "Incorrect")`)
+     — a record with any `Surface`/`Absent`/`Incorrect` verdict, or with zero
+     verdicts at all, is `merged-unverified`, not `merged-verified`).
    - Every non-`not-started` result also carries `problem_still_occurs:
      bool | None` — `True` unless state is `merged-verified`, `None` when it
      cannot be determined (e.g. `gh` call failed) — because "does the
