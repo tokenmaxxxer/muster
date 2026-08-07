@@ -31,8 +31,10 @@ jobs:
         # PR이 아니라 항상 main을 체크아웃한다 — gates/ci.py 자체가 PR diff에
         # 포함돼 있으면, PR이 그 스크립트를 고쳐 자기 자신을 통과시킬 수
         # 있다(신뢰 경계 문제). closes-only 모드는 PR의 파일 diff를 전혀 보지
-        # 않고 `gh pr view`/`gh issue view`로 메타데이터만 읽으므로, PR의 코드
-        # 변경분을 체크아웃할 필요 자체가 없다.
+        # 않고 `gh pr view`/`gh issue view`/`gh api .../contents`로 메타데이터와
+        # (phase-2 기록 한 건에 한해) 파일 내용을 읽으므로, PR의 코드 변경분을
+        # 체크아웃할 필요 자체가 없다(issue #369: phase-2 기록도 PR head 브랜치를
+        # `gh api`로 읽지, 로컬 워킹트리를 읽지 않는다).
         uses: actions/checkout@v4
         with:
           ref: main

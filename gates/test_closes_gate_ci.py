@@ -411,79 +411,113 @@ def t_autodetect_closes_only_blocks_commit_message_keyword_with_clean_body():
 
 
 def t_phase2_record_evidence_true_when_record_has_nonempty_loop_state():
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        repo = Path(td)
-        record = repo / "docs/issue-245/reports/implementation.md"
-        record.parent.mkdir(parents=True)
-        record.write_text("---\nloop_state: phase-2-complete\n---\nbody\n")
-        assert ci._phase2_record_evidence(repo, "issue-245/implementation", 245) is True
+    orig_fetch = ci._fetch_ref_file
+    ci._fetch_ref_file = lambda repo, pr, branch, path: "---\nloop_state: phase-2-complete\n---\nbody\n"
+    try:
+        assert ci._phase2_record_evidence(Path("."), 1, "issue-245/implementation", 245) is True
+    finally:
+        ci._fetch_ref_file = orig_fetch
 
 
 def t_phase2_record_evidence_false_when_record_missing():
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        repo = Path(td)
-        assert ci._phase2_record_evidence(repo, "issue-245/implementation", 245) is False
+    orig_fetch = ci._fetch_ref_file
+    ci._fetch_ref_file = lambda repo, pr, branch, path: None
+    try:
+        assert ci._phase2_record_evidence(Path("."), 1, "issue-245/implementation", 245) is False
+    finally:
+        ci._fetch_ref_file = orig_fetch
 
 
 def t_phase2_record_evidence_false_when_loop_state_empty():
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        repo = Path(td)
-        record = repo / "docs/issue-245/reports/implementation.md"
-        record.parent.mkdir(parents=True)
-        record.write_text("---\nloop_state: \n---\nbody\n")
-        assert ci._phase2_record_evidence(repo, "issue-245/implementation", 245) is False
+    orig_fetch = ci._fetch_ref_file
+    ci._fetch_ref_file = lambda repo, pr, branch, path: "---\nloop_state: \n---\nbody\n"
+    try:
+        assert ci._phase2_record_evidence(Path("."), 1, "issue-245/implementation", 245) is False
+    finally:
+        ci._fetch_ref_file = orig_fetch
 
 
 def t_phase2_record_evidence_false_when_branch_not_issue_role_shaped():
+    assert ci._phase2_record_evidence(Path("."), 1, "patch-1", 245) is False
+
+
+def t_phase2_record_evidence_does_not_read_local_filesystem():
+    # Pins issue #369: the evidence lookup must fetch the record via `gh
+    # api` on the PR's own ref, never via a local-tree Path read — a
+    # regression back to `record_path.exists()`/`read_text()` fails this.
+    import base64
+    import json
+    import subprocess
     import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        repo = Path(td)
-        assert ci._phase2_record_evidence(repo, "patch-1", 245) is False
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[:2] == ["gh", "api"], cmd
+        assert any("ref=issue-245/implementation" in part for part in cmd), cmd
+        payload = json.dumps({
+            "content": base64.b64encode(
+                b"---\nloop_state: phase-2-complete\n---\nbody\n").decode(),
+        })
+        return subprocess.CompletedProcess(cmd, 0, stdout=payload, stderr="")
+
+    orig_slug = spawn._repo_slug
+    spawn._repo_slug = lambda repo: "tokenmaxxxer/on-the-record"
+    orig_run = subprocess.run
+    subprocess.run = fake_run
+    orig_exists = Path.exists
+    Path.exists = lambda self: (_ for _ in ()).throw(
+        AssertionError(f"local filesystem read attempted: {self}")
+    ) if "docs/issue-245/reports" in str(self) else orig_exists(self)
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            assert ci._phase2_record_evidence(
+                repo, 1, "issue-245/implementation", 245) is True
+    finally:
+        spawn._repo_slug = orig_slug
+        subprocess.run = orig_run
+        Path.exists = orig_exists
 
 
 def t_ci_check_phase2_passes_via_record_evidence_without_body_edit():
-    # (a) — proposal item 4a: no Closes in body, but a record file with a
-    # non-empty loop_state exists — passes without a body edit.
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        repo = Path(td)
-        record = repo / "docs/issue-245/reports/implementation.md"
-        record.parent.mkdir(parents=True)
-        record.write_text("---\nloop_state: phase-2-complete\n---\nbody\n")
-        orig_body, orig_issue_body = pr_reference._pr_view, pr_reference._issue_view_body
-        orig_head_ref = ci._pr_head_ref
-        pr_reference._pr_view = lambda repo, pr: "delivered the feature, see #245"
-        pr_reference._issue_view_body = lambda repo, issue: ""
-        ci._pr_head_ref = lambda repo, pr: "issue-245/implementation"
-        try:
-            bad = ci.check(repo, pr=1, issue=245, phase="phase2", closes_only=True)
-        finally:
-            pr_reference._pr_view, pr_reference._issue_view_body = orig_body, orig_issue_body
-            ci._pr_head_ref = orig_head_ref
-        assert bad == [], bad
+    # (a) — proposal item 4a: no Closes in body, but a record fetched via
+    # `gh api` on the PR ref has a non-empty loop_state — passes without a
+    # body edit.
+    repo = Path(".")
+    orig_body, orig_issue_body = pr_reference._pr_view, pr_reference._issue_view_body
+    orig_head_ref = ci._pr_head_ref
+    orig_fetch = ci._fetch_ref_file
+    pr_reference._pr_view = lambda repo, pr: "delivered the feature, see #245"
+    pr_reference._issue_view_body = lambda repo, issue: ""
+    ci._pr_head_ref = lambda repo, pr: "issue-245/implementation"
+    ci._fetch_ref_file = lambda repo, pr, branch, path: "---\nloop_state: phase-2-complete\n---\nbody\n"
+    try:
+        bad = ci.check(repo, pr=1, issue=245, phase="phase2", closes_only=True)
+    finally:
+        pr_reference._pr_view, pr_reference._issue_view_body = orig_body, orig_issue_body
+        ci._pr_head_ref = orig_head_ref
+        ci._fetch_ref_file = orig_fetch
+    assert bad == [], bad
 
 
 def t_ci_check_phase2_blocks_and_names_both_options_when_neither_present():
-    # (b) — no Closes in body, no record file: still blocked, message names
-    # both the body-edit and record-evidence paths.
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        repo = Path(td)
-        orig_body, orig_issue_body = pr_reference._pr_view, pr_reference._issue_view_body
-        orig_head_ref = ci._pr_head_ref
-        pr_reference._pr_view = lambda repo, pr: "delivered the feature, see #245"
-        pr_reference._issue_view_body = lambda repo, issue: ""
-        ci._pr_head_ref = lambda repo, pr: "issue-245/implementation"
-        try:
-            bad = ci.check(repo, pr=1, issue=245, phase="phase2", closes_only=True)
-        finally:
-            pr_reference._pr_view, pr_reference._issue_view_body = orig_body, orig_issue_body
-            ci._pr_head_ref = orig_head_ref
-        assert len(bad) == 1, bad
-        assert "Closes #245" in bad[0] and "loop_state" in bad[0], bad
+    # (b) — no Closes in body, no record fetchable via `gh api`: still
+    # blocked, message names both the body-edit and record-evidence paths.
+    repo = Path(".")
+    orig_body, orig_issue_body = pr_reference._pr_view, pr_reference._issue_view_body
+    orig_head_ref = ci._pr_head_ref
+    orig_fetch = ci._fetch_ref_file
+    pr_reference._pr_view = lambda repo, pr: "delivered the feature, see #245"
+    pr_reference._issue_view_body = lambda repo, issue: ""
+    ci._pr_head_ref = lambda repo, pr: "issue-245/implementation"
+    ci._fetch_ref_file = lambda repo, pr, branch, path: None
+    try:
+        bad = ci.check(repo, pr=1, issue=245, phase="phase2", closes_only=True)
+    finally:
+        pr_reference._pr_view, pr_reference._issue_view_body = orig_body, orig_issue_body
+        ci._pr_head_ref = orig_head_ref
+        ci._fetch_ref_file = orig_fetch
+    assert len(bad) == 1, bad
+    assert "Closes #245" in bad[0] and "loop_state" in bad[0], bad
 
 
 def t_fork_issue_from_body_resolves_for_confirmed_cross_repo_pr():

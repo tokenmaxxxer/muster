@@ -803,6 +803,15 @@ with the closing keyword present, passing once it was removed.
 Activation history: `docs/issue-245/reports/implementation.md`
 ("Activation completed").
 
+The checkout step pins `ref: main` by design (trust boundary: PR code
+must never run gate logic against itself), so the phase-2
+record-evidence check (below) cannot read the record off the local
+checked-out tree — it fetches the record's content from the PR's own
+head branch via `gh api repos/<slug>/contents/<path> -f ref=<branch>`
+instead (issue #369). This is the only content read `--closes-only`
+mode makes beyond `gh pr view`/`gh issue view`/`gh api` metadata calls;
+decision: `docs/issue-369/decisions/record-evidence-via-gh-api-contents.md`.
+
 Phase is derived from a human approval event, not from closing-keyword
 presence (issue #271): a qualifying `APPROVE issue-<n>/<role>` issue
 comment from a `docs/specs/approvers.md` login (single-account mode), or
