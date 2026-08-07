@@ -182,3 +182,45 @@ and `test_spawn.py::test_git_lock_masquerade_is_classified_as_sandbox_refusal`
 both still exist and still pass (see `python3 -m pytest -q --ignore=gates`
 above). Still blocked on the issue author applying it — this role
 session cannot edit the issue itself.
+
+## Third re-verification (2026-08-07, rebase onto main@2395573, full suite no --ignore)
+
+Roughly 80 more PRs landed on `main` today; rebased
+`issue-289/implementation` onto `origin/main` again (rebase was
+conflict-free — `git rebase origin/main` applied cleanly, no manual
+resolution needed). Re-ran acceptance evidence against this rebased
+tree, not the original base:
+
+- `python3 -m pytest -q` (full suite, **no** `--ignore`, per current
+  instruction — `gates/` collision from #398 was not observed on this
+  run): **508 passed** (15.76s) — matches `main`'s reported 508.
+- `python3 test_spawn.py` (full unittest suite): 263 passed, `OK`.
+- `python3 -m pytest -q test_spec_index.py -k t_baseline_repo_passes`:
+  1 passed — this is the third acceptance-check artifact now named in
+  the issue body (spec-index hash), not present in earlier re-checks
+  above; it passes on this branch.
+
+The GitHub issue body was found rewritten (per the orchestrator, to
+name executable artifacts under #310's closes-gate). Read the current
+body directly rather than relying on memory of the earlier prose
+version. Its `## Acceptance` now names:
+
+- `test_spawn.py` (dotfile-exclusion criterion)
+- `test_spawn.py` (sandbox-denial-legibility criterion)
+- `test_spec_index.py::t_baseline_repo_passes` (spec-index hash
+  criterion)
+- one `unverifiable:` line (no session needs to delete a lock file)
+
+All three named executable artifacts exist in this branch and pass, as
+run above — `test_spawn.py::test_fresh_workspace_excludes_dotfile_set`,
+`test_spawn.py::test_git_lock_masquerade_is_classified_as_sandbox_refusal`,
+`test_spec_index.py::t_baseline_repo_passes`. No mismatch found between
+the artifacts the issue names and what this branch actually produces.
+
+Re-ran `gates.acceptance_gate.check_issue_body(289, <current body>)`
+directly against the live issue body fetched via `gh issue view 289`:
+returned `[]` (no violations) — the acceptance gate that blocked
+earlier re-checks now clears, because the issue body itself was
+rewritten to name these artifacts, not because anything on this branch
+changed. code_sha 6dc8768 (this commit, rebased onto
+`origin/main@2395573`).
