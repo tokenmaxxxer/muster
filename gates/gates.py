@@ -11,6 +11,7 @@ import fnmatch
 import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -406,6 +407,33 @@ def record_no_tool_residue(d: Path, cfg: dict) -> list[str]:
 
 
 _FULFILS_LINE = re.compile(r"^\s*[-*]?\s*fulfils:\s*(\S+)\s+(.*)$")
+# `count <derivation> <N>` — derivation 은 마지막 공백-분리 토큰(정수) 앞의
+# 나머지 전부다. glob/명령 둘 다 내부에 공백을 가질 수 있어(명령의 인자)
+# `_FULFILS_LINE`처럼 `\S+`로 자를 수 없다.
+_COUNT_CLAIM = re.compile(r"^(.*\S)\s+(-?\d+)$")
+
+
+def _count_derivation(work: Path, derivation: str) -> int | None:
+    """`count` claim 의 derivation 을 재실행해 정수를 낸다. 실행/파싱 불가면 None
+    (호출자가 fail closed 로 처리한다).
+
+    glob 메타문자(`*?[`)가 있으면 워크트리 기준 매치 개수. 없으면 셸 명령으로
+    본다 — `shlex.split` 로 토큰화해 `shell=True` 없이 실행한다(파이프 등 셸
+    문법은 지원하지 않는다 — no-footgun: 런타임 값으로 구성한 문자열을 셸에
+    넘기지 않는다). stdout 이 정수가 아니면 파생을 신뢰할 수 없어 None."""
+    if any(c in derivation for c in "*?["):
+        return len(list(work.glob(derivation)))
+    try:
+        argv = shlex.split(derivation)
+    except ValueError:
+        return None
+    if not argv:
+        return None
+    p = subprocess.run(argv, cwd=work, capture_output=True, text=True)
+    if p.returncode != 0:
+        return None
+    out = p.stdout.strip()
+    return int(out) if re.fullmatch(r"-?\d+", out) else None
 
 
 def record_fulfils_diff(d: Path, cfg: dict) -> list[str]:
@@ -456,9 +484,24 @@ def record_fulfils_diff(d: Path, cfg: dict) -> list[str]:
                 if not mv or (mv.group(1), mv.group(2)) not in renamed_pairs:
                     bad.append(f"fulfils 불일치: {loc} — 'move {rest}' claim 이 "
                                "커밋 diff 의 rename 쌍과 일치하지 않는다")
+            elif kind == "count":
+                cm = _COUNT_CLAIM.match(rest)
+                if not cm:
+                    bad.append(f"fulfils 파싱 불가: {loc} — 'count {rest}' claim 이 "
+                               "'<derivation> <N>' 형식이 아니다 (fail closed)")
+                    continue
+                derivation, n_str = cm.group(1), cm.group(2)
+                actual = _count_derivation(root, derivation)
+                if actual is None:
+                    bad.append(f"fulfils 불일치: {loc} — 'count {derivation}' "
+                               "파생을 재실행할 수 없다 (glob 매치 없음, 명령 실패, "
+                               "또는 stdout 이 정수가 아니다)")
+                elif actual != int(n_str):
+                    bad.append(f"fulfils 불일치: {loc} — 'count {derivation} "
+                               f"{n_str}' claim 이 재실행 결과({actual})와 다르다")
             else:
                 bad.append(f"fulfils 파싱 불가: {loc} — 알 수 없는 claim 종류 "
-                           f"{kind!r} (delete/create/move 만 허용, fail closed)")
+                           f"{kind!r} (delete/create/move/count 만 허용, fail closed)")
     return bad
 
 

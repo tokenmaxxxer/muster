@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: landed
 files:
   - gates/gates.py
   - gates/ci.py

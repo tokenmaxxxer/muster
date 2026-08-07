@@ -1073,6 +1073,63 @@ def t_fulfils_record_with_no_claims_untouched():
         assert gates.record_fulfils_diff(Path(td), {}) == []
 
 
+def t_fulfils_count_command_matches_passes():
+    # issue #332: 셸 명령 파생, stdout 이 claim 과 일치.
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             '---\nkind: x\n---\n\nfulfils: count python3 -c "print(2)" 2\n',
+                             ops=[])
+        assert gates.record_fulfils_diff(Path(td), {}) == []
+
+
+def t_fulfils_count_command_mismatch_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             '---\nkind: x\n---\n\nfulfils: count python3 -c "print(2)" 5\n',
+                             ops=[])
+        bad = gates.record_fulfils_diff(Path(td), {})
+        assert any("count python3" in b and "5" in b for b in bad), bad
+
+
+def t_fulfils_count_glob_matches_passes():
+    # derivation 이 glob/path 형태면 워크트리 매치 개수를 쓴다.
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\nfulfils: count artifacts/*.txt 2\n",
+                             pre_files={"artifacts/a.txt": "x", "artifacts/b.txt": "x"},
+                             ops=[])
+        assert gates.record_fulfils_diff(Path(td), {}) == []
+
+
+def t_fulfils_count_glob_mismatch_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\nfulfils: count artifacts/*.txt 5\n",
+                             pre_files={"artifacts/a.txt": "x", "artifacts/b.txt": "x"},
+                             ops=[])
+        bad = gates.record_fulfils_diff(Path(td), {})
+        assert any("count artifacts/*.txt 5" in b for b in bad), bad
+
+
+def t_fulfils_count_malformed_no_n_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\nfulfils: count artifacts/*.txt\n",
+                             ops=[])
+        bad = gates.record_fulfils_diff(Path(td), {})
+        assert any("파싱 불가" in b and "count" in b for b in bad), bad
+
+
+def t_fulfils_count_unresolvable_command_blocks():
+    # 파생 명령이 실패하거나 stdout 이 정수가 아니면 fail closed.
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             '---\nkind: x\n---\n\nfulfils: count python3 -c "print(\'x\')" 1\n',
+                             ops=[])
+        bad = gates.record_fulfils_diff(Path(td), {})
+        assert any("재실행할 수 없다" in b for b in bad), bad
+
+
 def t_ci_check_wires_record_fulfils_diff():
     # issue #222: record_fulfils_diff 가 ci.check() 에 실제로 배선돼 있는지
     # 검사한다 — "게이트가 등록만 되고 안 불린다"는 결함의 재발 방지 가드.
