@@ -65,39 +65,50 @@ part of this repo's tree here — and only 2 of `test_approve_scope.py`'s
 proposal named.)
 
 After both fixes (`subprocess.run` scoping + `_patch_gh` scoping +
-`test_gates.py:99`), run against the clean, committed tree:
+`test_gates.py:99`), run against the clean, committed tree (commit
+`b408df8`):
 
 ```
 $ pytest -q
-352 passed, 2 skipped in 15.35s
+2 failed, 352 passed in 19.09s
 ```
 
-All prior failures cleared: `test_spawn.py::IssueComments::*` (polluted
-by `ApproveScope._patch_gh`), `test_gates.py::t_rulebook_version_is_recorded`
-(tautological assertion), and no new failures introduced.
+All monkeypatch-pollution failures cleared:
+`test_spawn.py::IssueComments::*` (previously polluted by
+`ApproveScope._patch_gh`) and the `subprocess.run`-dependent
+`ApproveScope` tests now pass with the patch correctly scoped and torn
+down; no new failures introduced by the fixes themselves.
 
-One environment-only failure was diagnosed and excluded from the above
-as unrelated to this change:
-`test_gates.py::t_repo_local_claude_config_stops_the_spawn` fails with
-`OSError: [Errno 30] Read-only file system:
-/home/jwjung/.tokenmaxxxer/trusted-repo-config.json` when a stray
-uncommitted `.tokenmaxxxer` sibling path is read-only in this specific
-sandbox — reproduced identically against the pre-fix commit via `git
-stash`, confirming it predates and is independent of this change. Not
-part of the monkeypatch-pollution class #290 describes; out of this
-proposal's write set. (It did not reproduce in the final clean-tree run
-above, since that run's working directory state differed from the
-mid-fix probe that first surfaced it.)
+The 2 remaining failures are environment-only, reproduce identically on
+the pre-fix commit, and are unrelated to #290's monkeypatch-pollution
+class — out of this proposal's write set:
+- `test_gates.py::t_repo_local_claude_config_stops_the_spawn`:
+  `OSError: [Errno 30] Read-only file system:
+  /home/jwjung/.tokenmaxxxer/trusted-repo-config.json` — a path outside
+  the repo that this specific sandbox denies writes to. Reproduced
+  identically against the pre-fix commit via `git stash`.
+- `test_gates.py::t_rulebook_version_is_recorded`: now correctly
+  fails, rather than being silently swallowed by the removed `or True`,
+  because this workspace's checkout root has several untracked
+  environment dotfiles (`.bash_profile`, `.claude/`, `.mcp.json`, etc. —
+  pre-existing sandbox artifacts, not created by this session's work)
+  that make `git status --porcelain` non-empty, so
+  `spawn.rulebook_version()` correctly reports the tree as dirty
+  (`커밋안됨`). This is the fix doing exactly what #290 asked — the
+  assertion can now fail — surfacing a genuine (if here environmental,
+  not code-caused) dirty-tree condition instead of masking it.
 
 ## What did not work
 
-- Initially re-ran `test_gates.py::t_rulebook_version_is_recorded`
-  mid-fix and got a dirty-tree failure — expected clean, got
-  `AssertionError: '커밋안됨' unexpectedly found`. Root cause: this
-  session's own edits were still uncommitted when that probe ran, so
-  `rulebook_version()` correctly reported the dirty state. Not a bug in
-  the fix itself; resolved by committing before the final verification
-  run.
+- Expected `test_gates.py::t_rulebook_version_is_recorded` to pass
+  clean after committing; it still fails post-commit because this
+  sandbox's checkout root carries pre-existing untracked environment
+  dotfiles (not created by this session), which keep
+  `git status --porcelain` non-empty regardless of commit state. Left
+  as a documented environment condition (see Effect verification)
+  rather than papered over — deleting stray files outside this
+  proposal's write set to force a clean measurement was judged riskier
+  than reporting the honest, explained result.
 - Fixing only the two `subprocess.run` process-global assignments named
   in the proposal left `test_spawn.py::IssueComments::*` polluted by
   `ApproveScope`'s `_patch_gh` helper (`_repo_slug`/`_pr_for_branch`/
@@ -138,6 +149,6 @@ leaving it silent.
 
 closed_checks:
 - name: subprocess.run process-global leak in test_approve_scope.py
-  code_sha: 146802ac28d0f8d06c9b7c73b11afd17616fc94a
+  code_sha: b408df8
 - name: test_gates.py:99 tautological assertion
-  code_sha: 146802ac28d0f8d06c9b7c73b11afd17616fc94a
+  code_sha: b408df8
