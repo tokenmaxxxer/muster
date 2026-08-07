@@ -2,7 +2,7 @@
 code_under_review:
   - spawn.py
   - test_spawn.py
-loop_state: phase-2-complete
+loop_state: phase-2-complete-blocked-on-user-issue-edit
 ---
 
 # Phase 2 — implementation record (issue #326)
@@ -130,3 +130,75 @@ additions, not overlapping logic:
 No new tests were added and no additional scope was touched beyond the
 conflict resolution above — the rebase changed no behavior other than
 what the conflict markers show.
+
+## Re-rebase and re-verification (2026-08-07, second pass)
+
+`origin/main` had advanced 36 commits past this branch's base (3 local
+commits ahead vs. 36 on `origin/main`) since the prior rebase note above —
+per #390, a green run against a stale base attests to a state that no
+longer exists. Re-ran `git rebase origin/main`: clean, no conflicts this
+time.
+
+Re-ran verification on the freshly rebased tree:
+
+- `python3 -m pytest test_spawn.py -k stranded -q` — 3 passed (same three
+  tests named above).
+- `python3 -m pytest -q --ignore=gates` — 409 passed, 1 failed
+  (`test_spec_index.py::t_baseline_repo_passes` — `docs/specs/reconciled-index.md`
+  hash mismatch against current `protocol.md`/other spec files; unrelated
+  to this issue's `spawn.py`/`test_spawn.py` write set, caused by other
+  docs landing on `main` since the index was last regenerated).
+- `python3 -m pytest -q gates` — 68 passed, 1 failed
+  (`gates/test_closes_gate_ci.py::t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch`
+  — asserts issue #304 has an `## Acceptance` section; unrelated to this
+  issue). `gates/` collects and runs on this tree — the module-name
+  collision this session was told to expect (#398) is not reproducing
+  here, consistent with the prior rebase note's same observation.
+
+Both failures are outside this issue's write set (`spawn.py`,
+`test_spawn.py`) and pre-date this branch's changes; the acceptance
+tests named in the Acceptance-section proposal below (`EnsurePushedStrandedComment::*`)
+pass cleanly.
+
+## PART 1 — Acceptance-gate blocker: cannot edit issue #326
+
+The PR's `closes-gate` check fails because issue #326's `## Acceptance`
+section is prose-only (per #310). This session cannot fix that directly:
+`gh issue edit 326` was refused by this session's `gh-guard` hook —
+"issues are the user's requirement backlog, user-authored only (contract
+v3 s9) — no role touches them." No role-side workaround exists; this is
+a mechanical, not a judgment, block.
+
+Proposed replacement `## Acceptance` text (for the operator to paste into
+issue #326 directly — this session cannot apply it):
+
+```
+## Acceptance
+
+Per #310, prose does not discharge this. Acceptance must name an executable artifact that fails when this regresses.
+
+- `ensure_pushed()`'s two previously-silent dead-end returns (host `git push`
+  failure; `gh pr create` failure) must post an operator-visible, idempotent
+  comment on the subject issue instead of returning silently. Covered by:
+  `test_spawn.py::EnsurePushedStrandedComment::test_ensure_pushed_posts_comment_on_push_failure`,
+  `test_spawn.py::EnsurePushedStrandedComment::test_ensure_pushed_posts_comment_on_pr_create_failure`,
+  `test_spawn.py::EnsurePushedStrandedComment::test_ensure_pushed_stranded_comment_is_idempotent`.
+  gate: `python3 -m pytest test_spawn.py -k stranded`
+
+- unverifiable: the deeper gap — a session process dying or being killed
+  before `ensure_pushed()` is ever invoked (e.g. OOM, host kill, network
+  partition mid-turn) — has no in-process hook to post a comment from,
+  since the process that would post it is the one that died. Closing that
+  gap needs an external watchdog (a separate process or scheduled job that
+  notices a stalled/abandoned branch and posts on its behalf), which is
+  out of scope for this issue per the approved phase-1 proposal
+  (`docs/issue-326/proposals/ensure-pushed-stranded-comment.md`, Out of
+  scope) and is not mechanically checkable from inside `spawn.py`'s own
+  test suite.
+```
+
+This names a real, already-passing test path — not a path that merely
+exists to satisfy the matcher (the irony this task flagged explicitly).
+Until the operator applies this (or equivalent) text to issue #326, the
+`closes-gate` check on PR #348 stays red; that is outside this session's
+authority to fix.
