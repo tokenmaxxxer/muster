@@ -15,8 +15,8 @@ updating "Resolved ambiguities" if the edit touches a resolved point.
 
 | path | sha256 |
 | --- | --- |
-| `protocol.md` | `de8db1cbe6e95856ff36639e9d84ccd5606cce291f13303e11258db4f7f29e24` |
-| `protocol.ko.md` | `f539ac81d281df7c66933720d9c20cca107d32cde39fcc8b09dfaafeeb885ad7` |
+| `protocol.md` | `b3d92e9fa8e27ed34d027ffa961279c5b39c6cf7b865b00c67f74622c0ce3ee8` |
+| `protocol.ko.md` | `03ba195003285a20d0d1d7df5d914ef68f122672d39a7dba042fb5f6c184433a` |
 | `README.md` | `9b76bea1a2fae899bf7632c47139bbcd1ab2ba35ebc1d0eb29eb1338d7f6205a` |
 | `README.ko.md` | `dcf2c9d28a6c1058eb0950a5fc0a15c2883d95da081d65e0531cdac168873f16` |
 | `docs/specs/approvers.md` | `bbcb4e239a5aed872956a01acc04c9431027a1f2df483b53265f72577ba16ab9` |
@@ -24,7 +24,7 @@ updating "Resolved ambiguities" if the edit touches a resolved point.
 | `docs/handbooks/on-the-record.md` | `21dbff37005e7601c201fc626fb39cbac8c3055190b64867df3dfb6db7880fbe` |
 | `docs/handbooks/operations.md` | `7424add4f836f0d6ef1f22c7ccd839575bdc352927d6beaa40241dda99de296f` |
 | `docs/handbooks/setup.md` | `df9c710683663f260679d3629ce8733c7f0af60196dbfbaf6b92d8e2205f3e73` |
-| `on-the-record/commands/run.md` | `6fa8d3285877d0b850a4d51203693106b10515b7b78e43885fb513bf670983b0` |
+| `on-the-record/commands/run.md` | `eea7e54eec9b958562d68fe459b1a14350b5652de298bc191d7871fc1d98430b` |
 
 ## Resolved ambiguities
 
