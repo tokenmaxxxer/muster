@@ -214,3 +214,17 @@ stated skip, not a silent one.
   pytest test_spawn.py -q` → `235 passed`, closed.
 - guard-fixture-detects-leak (code_under_review as above): control test
   reproduced the leak and the fixture raised, closed.
+
+## PR body bootstrap (2026-08-07)
+
+PR #361's body was written at phase 1, correctly carrying no closing
+keyword, then the phase-1 → phase-2 approval flipped `closes-gate` to
+demand `Closes #360` — the #284 defect. Edited the body via `gh pr edit
+--body-file` to append `Closes #360`; `closes-gate` re-ran and passed. This
+edit is a one-time BOOTSTRAP, not the fix: landing #284 removes the need
+for it by accepting the phase-2 record file's existence as evidence of
+closing intent, and #284's own PR needs this same bootstrap because it
+cannot land under the rule it replaces. Recorded explicitly as a bootstrap,
+not as the accepted remedy, per #363 — an unlabelled body edit here would
+read to a future reader as evidence that editing bodies is the normal fix
+for this gate, which is the symptom-handling #363 rejects.
