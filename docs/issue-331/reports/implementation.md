@@ -120,3 +120,62 @@ closed_checks:
 None — no attempt was undone or replaced, and everything expected to
 hold (test wiring, CI-check cross-check shape, decision doc placement)
 held on the first pass.
+
+## Rebase re-verification (2026-08-07, main advanced ~141 commits)
+
+`git fetch origin && git rebase origin/main` (old base `c71173b`
+unchanged as the merge target — this branch's own 2 commits, `d167c48`
+phase-1 and `30e07a9` phase-2, replayed cleanly on top with 5 files
+carrying real conflicts, all additive on both sides (no line ever
+touched by both branches' *intent*, only by proximity):
+
+- `gates/ci.py` — main added `spec_index.check(repo)` to the bundle;
+  this branch added `record_checked_claims`/`_checked_ci_claims_bad`.
+  Kept both calls.
+- `gates/gates.py` — main added `record_derived_counts` and
+  `duplicate_test_basenames` to the `ALL` registry; this branch added
+  `record_checked_claims`. Kept all three registry entries.
+- `test_gates.py` — main added `t_spawn_has_no_concurrency_limit`; this
+  branch added the `_checked_claims_repo` fixture and its 10 tests.
+  Concatenated both function blocks.
+- `gates/test_closes_gate_ci.py` — main added
+  `t_phase2_record_evidence_true_when_record_has_nonempty_loop_state`
+  and neighboring tests; this branch added `_checked_ci_repo` and its 6
+  tests. Concatenated both blocks.
+- `docs/handbooks/operations.md` — main added a new "이슈-번들링 게이트"
+  section (issue #328) and a `#369` paragraph on `gh api` record
+  fetching; this branch added narrative paragraphs (Korean + English)
+  about the new non-`--closes-only` CI step. Kept all four additions,
+  ordered so each continues the section it was written under rather
+  than interleaving unrelated topics.
+
+After resolving, `python3 gates/spec_index.py --update` was required —
+merging into `operations.md` changed its content hash and
+`t_baseline_repo_passes` caught the stale `docs/specs/reconciled-index.md`
+entry immediately; regenerated and re-verified green.
+
+Re-ran, on the rebased tree (HEAD `30e07a9`, 0 commits behind
+`origin/main` at `c71173b`, working tree otherwise clean):
+
+- `python3 -m pytest -q --ignore=gates` — **399 passed** (main's own
+  baseline is 389; this branch's 10 new tests in `test_gates.py` account
+  for the delta). No `gates/` collection attempted here per the stated
+  module-name collision (issue #398).
+- `gates/` subtree: **collects and runs cleanly now** —
+  `python3 -m pytest -q gates` — 64 passed, no collection error. Issue
+  #398's fix landed on `main` before this rebase's base (`c71173b` is
+  itself the merge of `issue-398/implementation`, confirmed via `git
+  log`), so the collision this task was told to expect is already
+  resolved upstream — reported as observed, not assumed.
+- Combined (`python3 -m pytest -q`, gates included): **463 passed**
+  (399 + 64), no double-collection, no name clash.
+- This issue's own two touched test files individually:
+  `test_gates.py` — 100 passed; `gates/test_closes_gate_ci.py` — 49
+  passed (both include this rebase's carried-forward and merged tests
+  from main, not just this branch's 16).
+
+No code changes beyond conflict resolution and the one index
+regeneration — no scope was widened, no adjacent issue was touched.
+`docs/reports/2026-08-07-hunt-checked-claims-gate.md`'s prior findings
+are unaffected by the rebase (same file content on both sides of the
+merge, no conflict on it).
