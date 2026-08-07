@@ -148,6 +148,25 @@ def t_autodetect_respects_explicit_issue_and_phase():
     assert result == (999, "phase2"), result
 
 
+def t_phase_from_approval_empty_role_suffix_comment_is_phase1():
+    # warrant-hunter (before-landing, stance 3) 실측: "APPROVE issue-<n>/"
+    # (role 접미사가 빈 문자열)이 승인자 계정에서 오면 옛 코드는 빈
+    # 문자열을 role 토큰으로 집합에 넣었고, 빈 문자열은 파이썬에서
+    # truthy 집합 멤버라 `_phase_from_approval`이 실제로는 아무 role 도
+    # 승인되지 않았는데 phase2 를 돌려줬다 — 되돌릴 방법 없이 이슈
+    # 전체의 phase1 closing-키워드 게이트를 영구 무력화했다.
+    orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
+    spawn._approvers = lambda repo: {"jjongkwann"}
+    spawn._issue_comments = (
+        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-245/"}]
+        if n == 245 else [])
+    ci._pr_reviews = lambda repo, pr: []
+    try:
+        assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase1"
+    finally:
+        spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
+
+
 def t_phase_from_approval_no_signal_is_phase1():
     # 승인 이벤트가 전혀 없으면(코멘트도 리뷰도) phase1 — closing 키워드
     # 유무는 이 판정에 관여하지 않는다(issue #271 요구사항 2, #245 관찰 F1).
@@ -190,9 +209,11 @@ def t_phase_from_approval_non_approver_comment_is_phase1():
         spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
 
 
-def t_phase_from_approval_wrong_role_comment_is_phase1():
-    # role 세그먼트가 다르면(다른 역할을 향한 승인) 이 role 의 phase 판정엔
-    # 안 걸린다.
+def t_phase_from_approval_any_role_comment_qualifies_the_issue_is_phase2():
+    # issue #312: phase 는 role 이 아니라 이슈의 속성이다 — 다른 role 을
+    # 향한 승인(예: architecture)도 이 이슈 전체를 phase2 로 연다. 이게
+    # 뒤집힌 옛 판정("role 세그먼트가 다르면 phase1")이 정확히 #304/#307
+    # 인계를 영구 차단하던 결함이었다.
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
     spawn._approvers = lambda repo: {"jjongkwann"}
     spawn._issue_comments = (
@@ -200,7 +221,7 @@ def t_phase_from_approval_wrong_role_comment_is_phase1():
         if n == 245 else [])
     ci._pr_reviews = lambda repo, pr: []
     try:
-        assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase1"
+        assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase2"
     finally:
         spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
 
@@ -658,6 +679,77 @@ def t_autodetect_fails_closed_for_wrong_shaped_internal_branch_despite_resolvabl
         ci._pr_is_cross_repo, pr_reference._pr_view = orig_cross, orig_body
     assert isinstance(result, list), result
     assert any("추출할 수 없다" in b for b in result), result
+
+
+def t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch():
+    # issue #312 acceptance item 1 — exact #304/#307 재현: 이슈에는
+    # `APPROVE issue-304/architecture` 만 있고(architecture 역할이
+    # 제안했다), 인도 PR 은 `issue-304/implementation` 브랜치에서 `Closes
+    # #304`를 들고 온다. phase 는 이슈 속성이므로 phase2 로 판정되고,
+    # phase1 전용 closing-키워드 검사 분기 자체에 도달하지 않아 오탐이
+    # 없다 — 옛 판정(role 정확 일치)에서는 phase1 로 오판돼 이 Closes 줄을
+    # 지우라고 했을 시나리오.
+    orig_head_ref = ci._pr_head_ref
+    orig_body = pr_reference._pr_view
+    orig_issue_body = pr_reference._issue_view_body
+    orig_title, orig_commits = ci._pr_title, ci._pr_commit_messages
+    orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
+    ci._pr_head_ref = lambda repo, pr: "issue-304/implementation"
+    pr_reference._pr_view = lambda repo, pr: "delivers the feature.\n\nCloses #304"
+    pr_reference._issue_view_body = lambda repo, issue: "no plan checklist here"
+    ci._pr_title = lambda repo, pr: "issue-304: phase 2"
+    ci._pr_commit_messages = lambda repo, pr: []
+    spawn._approvers = lambda repo: {"jjongkwann"}
+    spawn._issue_comments = (
+        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-304/architecture"}]
+        if n == 304 else [])
+    ci._pr_reviews = lambda repo, pr: []
+    try:
+        detected = ci._autodetect_issue_phase(Path("."), 307, None, None)
+        assert detected == (304, "phase2"), detected
+        issue, phase = detected
+        bad = ci.check(Path("."), pr=307, issue=issue, phase=phase, closes_only=True)
+    finally:
+        ci._pr_head_ref = orig_head_ref
+        pr_reference._pr_view = orig_body
+        pr_reference._issue_view_body = orig_issue_body
+        ci._pr_title, ci._pr_commit_messages = orig_title, orig_commits
+        spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
+    assert not any("closing 키워드" in b for b in bad), bad
+    assert bad == [], bad
+
+
+def t_autodetect_missing_approval_refusal_names_role_searched_and_approvals_present():
+    # issue #312 acceptance item 2 — 진짜 미승인 케이스: 이슈에는
+    # architecture 만 승인돼 있는데, 이 PR 은 다른 이슈(승인 전무, issue
+    # #245)에 대해 phase1 로 남고 본문에 closing 키워드가 있다. 그 경우
+    # 리팩터 전에는 결론("phase-1 위반")만 말했다 — 이제는 어떤 role 을
+    # 찾아봤고 이슈에 실제로 어떤 승인이 있는지도 같이 말한다.
+    orig_head_ref = ci._pr_head_ref
+    orig_body = pr_reference._pr_view
+    orig_title, orig_commits = ci._pr_title, ci._pr_commit_messages
+    orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
+    ci._pr_head_ref = lambda repo, pr: "issue-245/implementation"
+    pr_reference._pr_view = lambda repo, pr: "Closes #245"
+    ci._pr_title = lambda repo, pr: "issue-245: phase 1"
+    ci._pr_commit_messages = lambda repo, pr: []
+    spawn._approvers = lambda repo: {"jjongkwann"}
+    spawn._issue_comments = (
+        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-245/architecture"}]
+        if n == 999 else [])
+    ci._pr_reviews = lambda repo, pr: []
+    try:
+        detected = ci._autodetect_issue_phase(Path("."), 1, None, None)
+        assert detected == (245, "phase1"), detected
+        issue, phase = detected
+        bad = ci.check(Path("."), pr=1, issue=issue, phase=phase, closes_only=True)
+    finally:
+        ci._pr_head_ref = orig_head_ref
+        pr_reference._pr_view = orig_body
+        ci._pr_title, ci._pr_commit_messages = orig_title, orig_commits
+        spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
+    assert any("role(implementation)" in b and "승인 코멘트를" in b and "이슈 #245 에 있는 승인: 없음" in b
+               for b in bad), bad
 
 
 if __name__ == "__main__":
