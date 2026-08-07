@@ -834,6 +834,14 @@ Rationale for both changes:
 python3 test_gates.py
 ```
 
+`pytest` 종료 코드는 스킵이 있어도 0이다 — 완료 주장이 기댈 수 있는 건 종료 코드뿐인데,
+스킵 섞인 실행이 그걸 깨끗한 통과와 구분 없이 준다(#334). 완료를 주장하기 전에는 아래로
+스킵 유무까지 확인한다:
+
+```bash
+python3 gates/skip_gate.py
+```
+
 ## Self-check
 
 ```bash
@@ -842,6 +850,14 @@ python3 test_gates.py
 
 `python3 -m pytest`도 `pytest.ini`(`python_functions = test_* t_*`) 덕분에
 `test_gates.py`의 `t_*` 케이스를 포함해 전체 스위트를 수집·실행한다.
+
+A pytest exit code stays 0 even when tests were skipped — a completion
+claim that keys off exit status alone can't tell "verified" from "never
+ran" (#334). Before claiming completion, also check for skips:
+
+```bash
+python3 gates/skip_gate.py
+```
 
 ## 미해결
 
