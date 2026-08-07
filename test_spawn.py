@@ -3688,6 +3688,147 @@ class SpawnOneIssueRoleClaim(unittest.TestCase):
             self.assertEqual(claim["pid"], os.getpid())
 
 
+class EnsurePushedStrandedComment(unittest.TestCase):
+    """이슈 #326: `ensure_pushed()`의 두 침묵 dead-end(호스트 push 실패,
+    PR 생성 실패)가 이제 이슈에 코멘트를 남기는지, 그리고 멱등한지."""
+
+    def _git(self, cwd, *a):
+        return subprocess.run(["git", "-C", str(cwd), *a],
+                              capture_output=True, text=True)
+
+    def _init_repo(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        self._git(path, "init", "-q")
+        self._git(path, "config", "user.email", "t@t.t")
+        self._git(path, "config", "user.name", "t")
+
+    def _make_work_with_commit(self, td, issue, role):
+        origin = Path(td) / "origin"
+        work = Path(td) / "work"
+        self._init_repo(origin)
+        (origin / "a.txt").write_text("x")
+        self._git(origin, "add", "a.txt")
+        self._git(origin, "commit", "-q", "-m", "init")
+        self._git(origin, "branch", "-m", "main")
+        r = subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self._git(work, "config", "user.email", "t@t.t")
+        self._git(work, "config", "user.name", "t")
+        br = f"issue-{issue}/{role}"
+        self._git(work, "checkout", "-q", "-b", br)
+        (work / "c.txt").write_text("wip")
+        self._git(work, "add", "c.txt")
+        self._git(work, "commit", "-q", "-m", "wip")
+        return work, br
+
+    def test_ensure_pushed_posts_comment_on_push_failure(self):
+        issue, role = 999910, "implementation"
+        with tempfile.TemporaryDirectory() as td:
+            work, br = self._make_work_with_commit(td, issue, role)
+            orig_slug = spawn._repo_slug
+            orig_comments = spawn._issue_comments
+            orig_run = spawn.subprocess.run
+            spawn._repo_slug = lambda root: "acme/repo"
+            spawn._issue_comments = lambda root, n: []
+            calls = []
+
+            def fake_run(cmd, *a, **k):
+                calls.append(cmd)
+                if cmd[:2] == ["git", "-C"] and "push" in cmd:
+                    return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="push rejected")
+                if cmd[:2] == ["git", "-C"]:
+                    return orig_run(cmd, *a, **k)
+                if cmd[0] == "gh":
+                    return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+                return orig_run(cmd, *a, **k)
+
+            spawn.subprocess.run = fake_run
+            try:
+                spawn.ensure_pushed(str(work), issue, role)
+            finally:
+                spawn._repo_slug = orig_slug
+                spawn._issue_comments = orig_comments
+                spawn.subprocess.run = orig_run
+
+            comment_calls = [c for c in calls if c[0] == "gh" and any("comments" in x for x in c)]
+            self.assertEqual(len(comment_calls), 1)
+            body = comment_calls[0][comment_calls[0].index("-f") + 1]
+            self.assertIn(br, body)
+            self.assertIn("push-failed", body)
+
+    def test_ensure_pushed_posts_comment_on_pr_create_failure(self):
+        issue, role = 999911, "implementation"
+        with tempfile.TemporaryDirectory() as td:
+            work, br = self._make_work_with_commit(td, issue, role)
+            orig_slug = spawn._repo_slug
+            orig_comments = spawn._issue_comments
+            orig_run = spawn.subprocess.run
+            spawn._repo_slug = lambda root: "acme/repo"
+            spawn._issue_comments = lambda root, n: []
+            calls = []
+
+            def fake_run(cmd, *a, **k):
+                calls.append(cmd)
+                if cmd[:2] == ["git", "-C"]:
+                    return orig_run(cmd, *a, **k)
+                if cmd[0] == "gh" and cmd[1:3] == ["pr", "list"]:
+                    return subprocess.CompletedProcess(cmd, 0, stdout="0", stderr="")
+                if cmd[0] == "gh" and cmd[1:3] == ["pr", "create"]:
+                    return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="pr create rejected")
+                if cmd[0] == "gh":
+                    return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+                return orig_run(cmd, *a, **k)
+
+            spawn.subprocess.run = fake_run
+            try:
+                spawn.ensure_pushed(str(work), issue, role)
+            finally:
+                spawn._repo_slug = orig_slug
+                spawn._issue_comments = orig_comments
+                spawn.subprocess.run = orig_run
+
+            comment_calls = [c for c in calls if c[0] == "gh" and any("comments" in x for x in c)]
+            self.assertEqual(len(comment_calls), 1)
+            body = comment_calls[0][comment_calls[0].index("-f") + 1]
+            self.assertIn(br, body)
+            self.assertIn("pr-create-failed", body)
+
+    def test_ensure_pushed_stranded_comment_is_idempotent(self):
+        issue, role = 999912, "implementation"
+        with tempfile.TemporaryDirectory() as td:
+            work, br = self._make_work_with_commit(td, issue, role)
+            orig_slug = spawn._repo_slug
+            orig_comments = spawn._issue_comments
+            orig_run = spawn.subprocess.run
+            spawn._repo_slug = lambda root: "acme/repo"
+            marker = spawn._STRANDED_PUSH_COMMENT_MARKER.format(key=f"{br}:push-failed")
+            spawn._issue_comments = lambda root, n: [{"login": "bot", "body": marker}]
+            calls = []
+
+            def fake_run(cmd, *a, **k):
+                calls.append(cmd)
+                if cmd[:2] == ["git", "-C"] and "push" in cmd:
+                    return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="push rejected")
+                if cmd[:2] == ["git", "-C"]:
+                    return orig_run(cmd, *a, **k)
+                if cmd[0] == "gh":
+                    return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+                return orig_run(cmd, *a, **k)
+
+            spawn.subprocess.run = fake_run
+            try:
+                spawn.ensure_pushed(str(work), issue, role)
+                spawn.ensure_pushed(str(work), issue, role)
+            finally:
+                spawn._repo_slug = orig_slug
+                spawn._issue_comments = orig_comments
+                spawn.subprocess.run = orig_run
+
+            comment_calls = [c for c in calls if c[0] == "gh" and any("comments" in x for x in c)]
+            self.assertEqual(len(comment_calls), 0)
+
+
 class PostCrashComment(unittest.TestCase):
     """이슈 #132: 상한-코멘트 멱등성 — 마커 문자열이 이미 있으면 재포스팅 안 함."""
 
