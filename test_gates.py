@@ -1202,6 +1202,21 @@ def t_ci_check_missing_phase_with_pr_and_issue_blocks():
         assert any("--phase" in b for b in bad), bad
 
 
+def t_spawn_has_no_concurrency_limit():
+    # issue #341: 라이브 오케스트레이터가 "슬롯 대기"를 지어냈다 —
+    # spawn.py 에는 동시 스폰을 제한하는 장치가 없다. 이 사실을 회귀
+    # 가드로 고정한다: 나중에 실제 concurrency limiter 가 조용히
+    # 들어오면 이 테스트가 diff 에서 눈에 띄게 깨진다/바뀐다.
+    src = Path("spawn.py").read_text(encoding="utf-8")
+    forbidden = re.compile(
+        r"\bSemaphore\b|\bLock\(|\bQueue\(|\bMAX_CONCURRENT\w*\b")
+    hits = forbidden.findall(src)
+    assert not hits, (
+        f"spawn.py now contains concurrency-limiting construct(s) {hits} — "
+        "if this is an intended new slot limit, update/remove this "
+        "regression test as part of that change, don't let it land silent")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("t_")]
     for t in tests:
