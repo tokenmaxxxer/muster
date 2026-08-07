@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import unittest.mock
@@ -4200,6 +4201,298 @@ class WatchFollow(unittest.TestCase):
             rc = spawn._watch(180, "implementation", 5.0, follow=True)
         self.assertEqual(rc, 0)
         self.assertEqual(len(calls), 3, calls)
+
+
+class AwaitBoundedTiming(unittest.TestCase):
+    """이슈 #285 P1: `_await_bounded()` 가 고정 2초 sleep 대신 escalating
+    poll 을 쓰는지 — session-start 가 거의 즉시 찍혀도 caller-return 이
+    2초 가까이 걸리면 회귀."""
+
+    def test_returns_quickly_after_early_event(self):
+        with tempfile.TemporaryDirectory() as td:
+            events_path = Path(td) / "events.jsonl"
+            offset_path = Path(td) / "offset"
+            log_path = Path(td) / "session.log"
+            log_path.write_text("")
+
+            def writer():
+                time.sleep(0.1)
+                spawn._append_event(events_path, "session-start", "spawned")
+
+            t = threading.Thread(target=writer)
+            t.start()
+            t0 = time.monotonic()
+            rc = spawn._await_bounded(events_path, offset_path, 5.0, log_path)
+            elapsed = time.monotonic() - t0
+            t.join()
+            self.assertEqual(rc, 0)
+            self.assertLess(elapsed, 1.5, f"caller-return took {elapsed:.3f}s")
+
+    def test_still_bounded_by_stall_timeout(self):
+        # 회귀 방지: escalating poll 이 stall 판정 자체를 늦추지 않는다 —
+        # 이슈 #114 계약(무한정 블록하지 않는다)은 그대로.
+        with tempfile.TemporaryDirectory() as td:
+            events_path = Path(td) / "events.jsonl"
+            offset_path = Path(td) / "offset"
+            log_path = Path(td) / "session.log"
+            log_path.write_text("")
+            t0 = time.monotonic()
+            stall_timeout_min = 0.03  # ~1.8s
+            rc = spawn._await_bounded(events_path, offset_path,
+                                      stall_timeout_min, log_path)
+            elapsed = time.monotonic() - t0
+            self.assertEqual(rc, 0)
+            self.assertGreaterEqual(elapsed, stall_timeout_min * 60 - 0.5)
+            self.assertLess(elapsed, stall_timeout_min * 60 + 2.5)
+
+
+class RulebookCheckoutMemo(unittest.TestCase):
+    """이슈 #285 P2/P4: `rulebook_checkout()` 은 한 프로세스 안에서
+    marketplace 당 최대 한 번만 `git pull` 을 실제로 부른다(in-process
+    memo), 그리고 TTL 창 안이면 새 프로세스에서도 pull 을 건너뛴다(디스크
+    마커)."""
+
+    def _counting_git_wrapper(self, fake_bin, call_count_file):
+        real_git = shutil.which("git")
+        wrapper = fake_bin / "git"
+        wrapper.write_text(
+            "#!/bin/sh\n"
+            f'if [ "$1" = "-C" ] && [ "$3" = "pull" ]; then echo pull >> {call_count_file}; fi\n'
+            f"exec {real_git} \"$@\"\n"
+        )
+        wrapper.chmod(0o755)
+
+    def setUp(self):
+        spawn._RULEBOOK_CACHE = {}
+        self._saved_ttl = os.environ.pop("MUSTER_RULEBOOK_TTL", None)
+
+    def tearDown(self):
+        spawn._RULEBOOK_CACHE = {}
+        os.environ.pop("MUSTER_RULEBOOK_TTL", None)
+        if self._saved_ttl is not None:
+            os.environ["MUSTER_RULEBOOK_TTL"] = self._saved_ttl
+
+    def test_pull_at_most_once_per_process_across_real_call_sites(self):
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = Path(td) / "root"
+            clone_dir = fake_root / "runs" / "rulebooks" / "acme-rules"
+            clone_dir.mkdir(parents=True)
+            (clone_dir / ".claude-plugin").mkdir()
+            (clone_dir / ".claude-plugin" / "marketplace.json").write_text(
+                json.dumps({"plugins": [{"name": "coding", "source": "./coding"}]}))
+            (clone_dir / "coding" / ".claude-plugin").mkdir(parents=True)
+            (clone_dir / "coding" / ".claude-plugin" / "plugin.json").write_text("{}")
+            subprocess.run(["git", "init", "-q", str(clone_dir)])
+            subprocess.run(["git", "-C", str(clone_dir), "commit", "-q",
+                           "--allow-empty", "-m", "init",
+                           "--author=t <t@t.t>"], capture_output=True)
+            subprocess.run(["git", "-C", str(clone_dir), "remote", "add",
+                           "origin", str(clone_dir)])
+
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            call_count_file = Path(td) / "pull-calls.txt"
+            self._counting_git_wrapper(fake_bin, call_count_file)
+
+            spec = {"marketplace": "acme-rules", "repo": "acme/acme-rules"}
+            saved_root = spawn.ROOT
+            old_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            spawn.ROOT = fake_root
+            try:
+                spawn.plugin_dirs("implementation", spec)     # call 1
+                spawn.checkout_version("implementation", spec)  # call 2
+                spawn.checkout_version("implementation", spec)  # call 3 (ledger)
+            finally:
+                spawn.ROOT = saved_root
+                os.environ["PATH"] = old_path
+
+            calls = call_count_file.read_text().splitlines() if call_count_file.exists() else []
+            self.assertEqual(len(calls), 1, calls)
+
+    def test_ttl_marker_skips_pull_on_fresh_marker(self):
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = Path(td) / "root"
+            clone_dir = fake_root / "runs" / "rulebooks" / "acme-rules"
+            clone_dir.mkdir(parents=True)
+            (clone_dir / ".claude-plugin").mkdir()
+            (clone_dir / ".claude-plugin" / "marketplace.json").write_text("{}")
+            (clone_dir / ".muster-last-pull").write_text(str(time.time()))
+
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            call_count_file = Path(td) / "pull-calls.txt"
+            self._counting_git_wrapper(fake_bin, call_count_file)
+
+            spec = {"marketplace": "acme-rules", "repo": "acme/acme-rules"}
+            saved_root = spawn.ROOT
+            old_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            spawn.ROOT = fake_root
+            try:
+                spawn.rulebook_checkout("implementation", spec)
+            finally:
+                spawn.ROOT = saved_root
+                os.environ["PATH"] = old_path
+
+            self.assertFalse(call_count_file.exists(), "TTL 창 안인데 pull 이 불렸다")
+
+    def test_muster_rulebook_ttl_zero_forces_pull(self):
+        os.environ["MUSTER_RULEBOOK_TTL"] = "0"
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = Path(td) / "root"
+            clone_dir = fake_root / "runs" / "rulebooks" / "acme-rules"
+            clone_dir.mkdir(parents=True)
+            (clone_dir / ".claude-plugin").mkdir()
+            (clone_dir / ".claude-plugin" / "marketplace.json").write_text("{}")
+            (clone_dir / ".muster-last-pull").write_text(str(time.time()))
+            subprocess.run(["git", "init", "-q", str(clone_dir)])
+
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            call_count_file = Path(td) / "pull-calls.txt"
+            self._counting_git_wrapper(fake_bin, call_count_file)
+
+            spec = {"marketplace": "acme-rules", "repo": "acme/acme-rules"}
+            saved_root = spawn.ROOT
+            old_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            spawn.ROOT = fake_root
+            try:
+                spawn.rulebook_checkout("implementation", spec)
+            finally:
+                spawn.ROOT = saved_root
+                os.environ["PATH"] = old_path
+
+            calls = call_count_file.read_text().splitlines() if call_count_file.exists() else []
+            self.assertEqual(len(calls), 1, calls)
+
+
+class FetchDedupe(unittest.TestCase):
+    """이슈 #285 P3: 같은 work_dir 에 대한 두 번째 `_fetch_or_halt()` 호출은
+    (같은 프로세스 안이면) 네트워크로 나가지 않는다 — 단, halt 판정은
+    첫 호출의 결과를 그대로 물려받아야 한다(성공만 fresh 로 기록)."""
+
+    def _git(self, cwd, *a):
+        return subprocess.run(["git", "-C", str(cwd), *a], capture_output=True, text=True)
+
+    def setUp(self):
+        spawn._FETCHED_THIS_SPAWN = {}
+
+    def tearDown(self):
+        spawn._FETCHED_THIS_SPAWN = {}
+
+    def test_second_fetch_of_same_dir_is_skipped(self):
+        with tempfile.TemporaryDirectory() as td:
+            origin = Path(td) / "origin"
+            work = Path(td) / "work"
+            origin.mkdir()
+            self._git(origin, "init", "-q")
+            self._git(origin, "config", "user.email", "t@t.t")
+            self._git(origin, "config", "user.name", "t")
+            (origin / "a.txt").write_text("x")
+            self._git(origin, "add", "a.txt")
+            self._git(origin, "commit", "-q", "-m", "init")
+            subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                           capture_output=True)
+
+            fake_bin = Path(td) / "fakebin"
+            fake_bin.mkdir()
+            call_count_file = Path(td) / "fetch-calls.txt"
+            real_git = shutil.which("git")
+            wrapper = fake_bin / "git"
+            wrapper.write_text(
+                "#!/bin/sh\n"
+                f'if [ "$1" = "-C" ] && [ "$3" = "fetch" ]; then echo f >> {call_count_file}; fi\n'
+                f"exec {real_git} \"$@\"\n"
+            )
+            wrapper.chmod(0o755)
+            old_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
+            try:
+                spawn._fetch_or_halt(str(work), "first")
+                spawn._fetch_or_halt(str(work), "second")
+            finally:
+                os.environ["PATH"] = old_path
+
+            calls = call_count_file.read_text().splitlines() if call_count_file.exists() else []
+            self.assertEqual(len(calls), 1, calls)
+
+    def test_after_callback_still_runs_on_dedupe_skip(self):
+        with tempfile.TemporaryDirectory() as td:
+            origin = Path(td) / "origin"
+            work = Path(td) / "work"
+            origin.mkdir()
+            self._git(origin, "init", "-q")
+            self._git(origin, "config", "user.email", "t@t.t")
+            self._git(origin, "config", "user.name", "t")
+            (origin / "a.txt").write_text("x")
+            self._git(origin, "add", "a.txt")
+            self._git(origin, "commit", "-q", "-m", "init")
+            subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                           capture_output=True)
+            spawn._fetch_or_halt(str(work), "first")
+            called = []
+            spawn._fetch_or_halt(str(work), "second", after=lambda: called.append(1))
+            self.assertEqual(called, [1])
+
+
+class NetworkSubprocessTimeout(unittest.TestCase):
+    """이슈 #285 P5: 네트워크 subprocess 가 `timeout=` 을 넘기면 조용히
+    걸리는 대신 이름 있는 에러로 종료한다."""
+
+    def test_run_net_exits_with_named_error_on_timeout(self):
+        def fake_run(*a, **k):
+            raise subprocess.TimeoutExpired(cmd=a[0] if a else "git", timeout=k.get("timeout"))
+
+        with mock.patch.object(subprocess, "run", fake_run):
+            with self.assertRaises(SystemExit) as ctx:
+                spawn._run_net(["git", "fetch"], "테스트 라벨", timeout=1)
+        self.assertIn("테스트 라벨", str(ctx.exception))
+        self.assertIn("시간초과", str(ctx.exception))
+
+    def test_fetch_or_halt_times_out_within_bound_not_hang(self):
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "work"
+            work.mkdir()
+            spawn._FETCHED_THIS_SPAWN = {}
+
+            def fake_run(*a, **k):
+                raise subprocess.TimeoutExpired(cmd=a[0] if a else "git", timeout=k.get("timeout"))
+
+            t0 = time.monotonic()
+            with mock.patch.object(subprocess, "run", fake_run):
+                with self.assertRaises(SystemExit):
+                    spawn._fetch_or_halt(str(work), "네트워크 fetch")
+            elapsed = time.monotonic() - t0
+            self.assertLess(elapsed, 5, "TimeoutExpired 이 fail-closed 로 즉시 표면화해야 한다")
+
+
+class GitEnvTimeoutPromptVars(unittest.TestCase):
+    """이슈 #285 P5: `_git_env()` 의 dict 분기에만
+    GIT_TERMINAL_PROMPT=0/GIT_ASKPASS=true 를 얹는다 — None 폴백은 그대로."""
+
+    def setUp(self):
+        spawn._GH_TOKEN_CACHE = None
+        self._saved_agent = os.environ.pop("MUSTER_AGENT_GH_TOKEN", None)
+
+    def tearDown(self):
+        spawn._GH_TOKEN_CACHE = None
+        os.environ.pop("MUSTER_AGENT_GH_TOKEN", None)
+        if self._saved_agent is not None:
+            os.environ["MUSTER_AGENT_GH_TOKEN"] = self._saved_agent
+
+    def test_token_present_branch_carries_prompt_suppression(self):
+        os.environ["MUSTER_AGENT_GH_TOKEN"] = "tok"
+        env = spawn._git_env()
+        self.assertIsNotNone(env)
+        self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+        self.assertEqual(env["GIT_ASKPASS"], "true")
+
+    def test_no_token_fallback_stays_none(self):
+        with mock.patch.object(spawn, "_resolve_gh_token", lambda: ""):
+            env = spawn._git_env()
+        self.assertIsNone(env)
 
 
 if __name__ == "__main__":
