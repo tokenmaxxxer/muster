@@ -69,7 +69,14 @@ heuristic is chosen instead of silence.
      `_changed_records`-style filtering, generalized off `RECORD_PATH` to a sibling
      `PROPOSAL_PATH` regex).
    - Requires a `## Generator` heading. Missing heading → blocking message.
-   - Requires, within that section, a line matching `generator:\s*(fixed|deferred)`. Missing or
+   - Requires, within that section, a **whole line** matching
+     `^\s*generator:\s*(fixed|deferred)\s*$` (anchored per-line via `re.MULTILINE`, not a bare
+     `re.search` substring match) — an after-proposal warrant hunt on this proposal (stance:
+     bypass-the-gate) reproduced that an unanchored version matches the string `generator:
+     fixed` anywhere in the section's prose, including inside a sentence that explicitly denies
+     it ("It would be dishonest to write generator: fixed right now"). Anchoring to a standalone
+     line closes that specific bypass; it does not make the claim harder to lie about on its own
+     line, which is already conceded in "How you'll know it worked" below. Missing or
      unparseable → blocking message (fail closed, not "no claim to check" — mirrors
      `record_fulfils_diff`'s handling of an unparseable `fulfils:` line, `gates.py:454-460`).
    - When `deferred`, requires an issue reference matching `#\d+` elsewhere in the same section.
