@@ -135,6 +135,7 @@ PACKAGE_CACHE_DIRS = [
     ("NPM_CONFIG_CACHE", "~/.npm"),
     ("PIP_CACHE_DIR", "~/.cache/pip"),
     (None, "~/.cargo/registry"),
+    (None, "~/.cargo/git"),
     ("MAVEN_REPO", "~/.m2/repository"),
     ("PLAYWRIGHT_BROWSERS_PATH", "~/.cache/ms-playwright"),
 ]
@@ -3222,6 +3223,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                 "XDG_CACHE_HOME": os.path.join(wcache, "xdg"),
                 "npm_config_cache": os.path.join(wcache, "npm"),
                 "PIP_CACHE_DIR": os.path.join(wcache, "pip"),
+                "CARGO_HOME": os.path.join(wcache, "cargo"),
             })
             proxy = go_proxy_layer(s)
             if proxy:
