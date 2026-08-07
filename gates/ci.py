@@ -151,7 +151,10 @@ def _approved_roles_on_issue(repo: Path, issue: int) -> set[str]:
     지켜야 해서 재사용하지 않는다 — 여기서 독립된 스캔을 짠다(제안서
     Out of scope: `_pr_approved`/`flows.py`는 이 이슈의 쓰기범위 밖)."""
     approvers = spawn._approvers(repo)
-    comments = spawn._issue_comments(repo, issue)
+    comments, _ok = spawn._issue_comments(repo, issue)
+    # `_ok` 는 여기서 방향을 안 바꾼다 — gh 호출이 실패해도 comments 는
+    # 안전하게 빈 리스트고, 아래는 그걸 "승인 없음"으로 읽어 phase1 로
+    # fail-closed 한다(제안의 Constraints: 기존 방향 유지).
     prefix = f"APPROVE issue-{issue}/"
     roles = set()
     for c in comments:

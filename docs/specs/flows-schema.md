@@ -16,7 +16,8 @@ data-contract reference for the `flows` verb output; it does not describe
   "flows": [ ... ],
   "sessions": [ ... ],
   "ledger": [ ... ],
-  "hygiene": { ... }
+  "hygiene": { ... },
+  "errors": { ... }
 }
 ```
 
@@ -30,6 +31,7 @@ data-contract reference for the `flows` verb output; it does not describe
 | `sessions` | array | see §2.3 |
 | `ledger` | array | see §2.4 |
 | `hygiene` | object | see §2.5 |
+| `errors` | object | additive (issue #287) — see §2.6. Always present; empty/false fields when nothing failed |
 
 ## 2. Section schemas
 
@@ -182,13 +184,25 @@ adjacent top-level-ish field next to the `ledger` array), not inside
 any `ledger[]` entry. See the worked example in §6 for exact
 placement.
 
+`unattributed` additionally carries `ledger_skipped` (additive, issue
+#287 S3): the count of `runs/ledger.jsonl` lines that failed to parse as
+JSON on this read and were dropped from both `ledger[]` and
+`unattributed.sessions`/`cost_usd_total`. `0` when nothing was skipped —
+present unconditionally, not only when non-zero, so a consumer can trust
+its absence never means "unknown":
+
+```json
+"unattributed": { "sessions": 1, "cost_usd_total": 0.42, "ledger_skipped": 0 }
+```
+
 ### 2.5 `hygiene`
 
 Single object, not an array.
 
 ```json
 {
-  "closure_sweep": [ /* find_violations() output structure, reused verbatim */ ],
+  "closure_sweep": [ /* find_violations() violations, reused verbatim */ ],
+  "closure_sweep_skips": [ /* find_violations() skip records, issue #287 S1 */ ],
   "unapproved_open_prs": [
     { "issue": 172, "pr": 201, "role": "implementation", "opened_at": "2026-07-30T09:12:00Z" }
   ]
@@ -197,8 +211,30 @@ Single object, not an array.
 
 | field | type | notes |
 |---|---|---|
-| `closure_sweep` | array | verbatim output of `gates.closure_sweep.find_violations()` — structure owned by that module, passed through unchanged |
+| `closure_sweep` | array | verbatim `violations` half of `gates.closure_sweep.find_violations()`'s `(violations, skips)` return — structure owned by that module, passed through unchanged |
+| `closure_sweep_skips` | array | additive (issue #287 S1) — verbatim `skips` half of the same call: subjects/roles `find_violations()` could not check because a `gh` call failed, each a `{"subject", "role"?, "pr"?, "reason"}` record. Non-empty here means `closure_sweep` above is a **partial** result, not a complete "no violations" — a consumer must not read an empty `closure_sweep` together with a non-empty `closure_sweep_skips` as "clean" |
 | `unapproved_open_prs` | array of `{issue, pr, role, opened_at}` | open PRs past phase 1 (`loop_state` already `scope-approved` or later) with neither a matching `APPROVE issue-<n>/<role>` comment from an approvers.md account nor a PR review Approve from a different approvers.md account |
+
+### 2.6 `errors`
+
+Additive (issue #287 S2). Reports which `gh` lookups underlying this
+payload failed, so an empty `decision_queue`/`flows`/`hygiene` cannot be
+misread as "checked, nothing pending" when it actually means "could not
+check".
+
+```json
+{
+  "pr_list": false,
+  "issue_list": false,
+  "comments": []
+}
+```
+
+| field | type | notes |
+|---|---|---|
+| `pr_list` | boolean | `true` when the repo-wide open-PR list call (`gh pr list`) failed — `decision_queue`, `flows[].prs`, and `hygiene.unapproved_open_prs` are then built from an empty/stale PR set, not a verified-empty one |
+| `issue_list` | boolean | `true` when the repo-wide issue list call (`gh issue list`) failed — `flows[]`'s issue-state/plan data is then built from an empty/stale issue set, not a verified-empty one |
+| `comments` | array of integers | issue/PR numbers whose comment lookup (`gh api .../comments`) failed while computing `decision_queue`/`unapproved_open_prs` approval status — those numbers' approval status defaults to "not approved", which may be wrong rather than confirmed |
 
 ## 3. Versioning policy
 

@@ -42,40 +42,44 @@ def _stage_for(loop_state: str | None,
     return (loop_state or "(none)"), False
 
 
-def _pr_list_all(root: Path) -> list[dict]:
+def _pr_list_all(root: Path) -> tuple[list[dict], bool]:
     """Repo-wide open-PR list, one call — replaces an O(subjects x roles)
     `_pr_for_branch` loop for `flows` (issue #172 §3: rate-limit design).
 
     `--limit 1000` matches the sibling `_issue_list_all()` idiom below —
     without it `gh pr list` defaults to 30 and silently drops PRs past
-    that on the status board (issue #224)."""
+    that on the status board (issue #224).
+
+    `(list, ok)` — `ok=False` means the `gh` call itself failed; callers
+    must not read the accompanying empty list as "no open PRs" (issue
+    #287 S2)."""
     r = subprocess.run(["gh", "pr", "list", "--state", "open", "--json",
                         "number,headRefName,createdAt,body,reviews",
                         "--limit", "1000"],
                        cwd=root, capture_output=True, text=True)
     if r.returncode != 0:
-        return []
+        return [], False
     try:
         data = json.loads(r.stdout)
     except ValueError:
-        return []
-    return data if isinstance(data, list) else []
+        return [], False
+    return (data if isinstance(data, list) else []), True
 
 
-def _issue_list_all(root: Path) -> list[dict]:
+def _issue_list_all(root: Path) -> tuple[list[dict], bool]:
     """레포 전체 이슈 목록, 한 번의 호출 — `flows[].plan`과 closure_sweep 의
     이슈-상태 프리페치(issue #189)에 함께 쓴다. `_pr_list_all`과 같은
-    에러 처리 모양(비정상 종료·JSON 디코드 실패 시 빈 리스트)."""
+    에러 처리 모양(비정상 종료·JSON 디코드 실패 시 `(list, ok)`, issue #287 S2)."""
     r = subprocess.run(["gh", "issue", "list", "--state", "all", "--json",
                         "number,state,body", "--limit", "1000"],
                        cwd=root, capture_output=True, text=True)
     if r.returncode != 0:
-        return []
+        return [], False
     try:
         data = json.loads(r.stdout)
     except ValueError:
-        return []
-    return data if isinstance(data, list) else []
+        return [], False
+    return (data if isinstance(data, list) else []), True
 
 
 _PLAN_STEP_RE = re.compile(r"^-\s\[([ xX])\]\s+step\s+(\d+)\s+(.+)$")
@@ -143,11 +147,15 @@ def _pr_approved(pr: dict, comments: list[dict], approvers: set[str],
     return False
 
 
-def _ledger_read() -> list[dict]:
+def _ledger_read() -> tuple[list[dict], int]:
+    """`(entries, skipped_count)` — a corrupt/half-written JSON line is
+    counted, not silently dropped (issue #287 S3): the dropped line can be
+    the very one recording a failure."""
     p = spawn.ROOT / "runs" / "ledger.jsonl"
     if not p.is_file():
-        return []
+        return [], 0
     out = []
+    skipped = 0
     for line in p.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -155,8 +163,9 @@ def _ledger_read() -> list[dict]:
         try:
             out.append(json.loads(line))
         except ValueError:
+            skipped += 1
             continue
-    return out
+    return out, skipped
 
 
 def _ledger_issue(entry: dict) -> int | None:
@@ -260,8 +269,8 @@ def flows_payload(root: Path) -> dict:
     b = spawn.board(root)
     approvers = spawn._approvers(root)
     repo_slug = spawn._repo_slug(root)
-    prs = _pr_list_all(root)
-    issues = _issue_list_all(root)
+    prs, pr_list_ok = _pr_list_all(root)
+    issues, issue_list_ok = _issue_list_all(root)
     issue_state_by_n: dict[int, str] = {}
     plan_by_issue: dict[int, list | None] = {}
     for iss in issues:
@@ -291,14 +300,21 @@ def flows_payload(root: Path) -> dict:
         prs_by_subject.setdefault(subject_key, set()).add(pr["number"])
 
     comments_cache: dict[int, list[dict]] = {}
+    comments_failed: set[int] = set()
 
     def comments_for(subject: str, pr_number: int) -> list[dict]:
         issue_n = int(subject.split("-", 1)[1])
         if issue_n not in comments_cache:
-            comments_cache[issue_n] = spawn._issue_comments(root, issue_n)
+            entries, ok = spawn._issue_comments(root, issue_n)
+            comments_cache[issue_n] = entries
+            if not ok:
+                comments_failed.add(issue_n)
         out = list(comments_cache[issue_n])
         if pr_number and pr_number not in comments_cache:
-            comments_cache[pr_number] = spawn._issue_comments(root, pr_number)
+            entries, ok = spawn._issue_comments(root, pr_number)
+            comments_cache[pr_number] = entries
+            if not ok:
+                comments_failed.add(pr_number)
         if pr_number:
             out += comments_cache[pr_number]
         return out
@@ -357,7 +373,8 @@ def flows_payload(root: Path) -> dict:
     roster = spawn._roster_load()
     sessions = []
     repo_name = repo_slug.split("/")[-1] if repo_slug else None
-    ledger_entries = [e for e in _ledger_read() if _entry_repo_name(e) == repo_name]
+    ledger_all, ledger_skipped = _ledger_read()
+    ledger_entries = [e for e in ledger_all if _entry_repo_name(e) == repo_name]
     for key, e in sorted(roster.items()):
         alive = spawn._alive(e.get("pid", 0))
         elapsed_min = (int(time.time()) - e.get("ts", 0)) // 60
@@ -390,8 +407,10 @@ def flows_payload(root: Path) -> dict:
         agg["outcomes"][outcome] = agg["outcomes"].get(outcome, 0) + 1
 
     import closure_sweep
-    violations = closure_sweep.find_violations(root, subjects=b,
-                                               issue_states=issue_state_by_n)
+    violations, closure_sweep_skips = closure_sweep.find_violations(
+        root, subjects=b, issue_states=issue_state_by_n)
+
+    unattributed["ledger_skipped"] = ledger_skipped
 
     return {
         "schema_version": FLOWS_SCHEMA_VERSION,
@@ -404,7 +423,13 @@ def flows_payload(root: Path) -> dict:
         "unattributed": unattributed,
         "hygiene": {
             "closure_sweep": violations,
+            "closure_sweep_skips": closure_sweep_skips,
             "unapproved_open_prs": unapproved_open_prs,
+        },
+        "errors": {
+            "pr_list": not pr_list_ok,
+            "issue_list": not issue_list_ok,
+            "comments": sorted(comments_failed),
         },
     }
 
@@ -445,5 +470,19 @@ def flows(cwd: str, as_json: bool) -> int:
     h = payload["hygiene"]
     print(f"\nhygiene: closure_sweep {len(h['closure_sweep'])}건, "
           f"승인 흔적 없는 열린 PR {len(h['unapproved_open_prs'])}건")
+    if h.get("closure_sweep_skips"):
+        print(f"  closure_sweep 확인 불가: {len(h['closure_sweep_skips'])}건")
+    if payload["unattributed"].get("ledger_skipped"):
+        print(f"  ledger 손상 라인 건너뜀: {payload['unattributed']['ledger_skipped']}건")
+    errors = payload.get("errors") or {}
+    if errors.get("pr_list") or errors.get("issue_list") or errors.get("comments"):
+        parts = []
+        if errors.get("pr_list"):
+            parts.append("PR 목록 조회 실패")
+        if errors.get("issue_list"):
+            parts.append("이슈 목록 조회 실패")
+        if errors.get("comments"):
+            parts.append(f"코멘트 조회 실패 {len(errors['comments'])}건")
+        print(f"  확인 불가: {', '.join(parts)}")
     return 0
 

@@ -5,6 +5,12 @@ deliverable-guard, board-gate) live in `tests/run-orchestrate-tests.sh`
 (filename kept from the plugin's former `orchestrate` name) and point at
 `on-the-record/hooks/`. Run it directly: `bash tests/run-orchestrate-tests.sh`.
 
+`deliverable-guard.sh` fails closed (deny, exit 2) on stdin it cannot
+verify — empty stdin, non-JSON stdin, a non-dict JSON payload, or a
+payload missing `file_path`/`notebook_path` — not just on the trap-caught
+crash paths (issue #287 S4). It also denies writes under a `tests/`
+path segment, not only `test/` (issue #287 S5).
+
 ## 오케스트레이션 모델
 
 역할을 소집한다 — 그 역할의 룰북만 깔린 샌드박스 세션 하나를 띄운다.

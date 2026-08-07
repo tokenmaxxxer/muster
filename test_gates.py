@@ -900,9 +900,10 @@ def t_find_violations_uses_prefetched_issue_state_skips_issue_view():
     spawn._pr_for_branch = lambda root, branch: None
     try:
         subjects = {"issue-135": {"implementation": {}}}
-        violations = closure_sweep.find_violations(
+        violations, skips = closure_sweep.find_violations(
             Path("."), subjects=subjects, issue_states={135: "OPEN"})
         assert violations == [], violations
+        assert skips == [], skips
     finally:
         closure_sweep._issue_view = original_issue_view
         spawn._pr_for_branch = original_pr_for_branch
@@ -917,7 +918,7 @@ def t_find_violations_without_issue_states_still_calls_issue_view():
 
     def fake_issue_view(root, issue):
         calls.append(issue)
-        return "OPEN"
+        return "OPEN", True
 
     closure_sweep._issue_view = fake_issue_view
     spawn._pr_for_branch = lambda root, branch: None
