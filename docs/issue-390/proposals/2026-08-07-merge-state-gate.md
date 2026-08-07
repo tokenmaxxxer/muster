@@ -72,6 +72,19 @@ ref GitHub itself uses to compute mergeability) instead of the PR head or a
 already network-free per their own docstrings) against that merged tree.
 The job fails the required check when any script exits non-zero.
 
+Per the sibling `plan-aware-closes-gate.yml`'s own documented caveat
+(`.github/workflows/plan-aware-closes-gate.yml:4-8`): a workflow reporting a
+check status is not the same as that check blocking a merge — it must also
+be registered as a required status check under branch protection (Settings
+> Branches), or it reports and blocks nothing. This proposal names that
+registration step explicitly as part of "what will be done," not left
+implicit — landing this workflow without registering it reproduces the
+exact "green attests, nothing enforces" shape #390 is about, one layer up.
+The registration step itself is a repo-settings change outside this
+proposal's write set (not a file edit); it is called out here so it is not
+silently skipped, per warrant hunt stance 0 (after-proposal, this proposal,
+2026-08-07) — `docs/reports/2026-08-07-hunt-issue-390-merge-state-gate.md`.
+
 This re-establishes the attestation at the state the PR would actually land
 in, not the state it was authored against — directly targeting the
 stale-base shape. Coverage, stated per #390's requirement:
