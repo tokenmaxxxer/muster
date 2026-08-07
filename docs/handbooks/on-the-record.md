@@ -24,7 +24,7 @@ spawn.py      상태를 읽고, 역할 환경으로 세션을 띄운다
               (--issue <n> 가 브랜치를 만들고 프롬프트를 고정한다)
 on-the-record/  그걸 대화에서 부르는 플러그인 (/on-the-record:run)
 gates/        결정론 검사. 세션이 끝나면 spawn.py 가 부른다. LLM 0회
-ledger/       성적표
+ledger/       runs/ledger.jsonl 를 읽는 집계기 (저장소 자체는 runs/)
 ```
 
 ## Orchestration model
@@ -48,7 +48,7 @@ spawn.py      reads state, brings up a session in a role's environment
               (--issue <n> creates the branch and anchors the prompt)
 on-the-record/  the plugin that drives the loop from a conversation (/on-the-record:run)
 gates/        deterministic checks, run by spawn.py after a session. Zero LLM calls
-ledger/       the scorecard
+ledger/       aggregator over runs/ledger.jsonl (the storage itself is runs/)
 ```
 
 ## 역할
