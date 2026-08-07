@@ -159,3 +159,26 @@ session may bypass or route around.
   `python3 test_spawn.py` 235 passed OK — code_sha
   fa496e71eed2dd23e2b5a774a868eeccdd8d77db (rebased onto
   `origin/main@0f3151a`).
+- check: second re-verification (2026-08-07, ~60 more PRs landed on
+  `main` since the previous rebase, up to #429) — rebased onto
+  `origin/main@23d90ea`. `python3 -m pytest -q --ignore=gates`: 407
+  passed (19.18s). `python3 -m pytest -q gates` (informational): 68
+  passed, the same pre-existing unrelated failure as before
+  (`t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch`,
+  issue #304's fixture missing `## Acceptance`) — untouched, out of
+  this issue's write set. `python3 gates/acceptance_gate.py 289`: still
+  exits 1 (issue #289's own `## Acceptance` section is still prose-only
+  on GitHub) — expected, since applying the rewrite below requires the
+  issue author; a role session's `gh issue edit 289` is refused by
+  `gh-guard.sh` (contract v3 s9). code_sha ab7b132 (this commit).
+
+## Acceptance-gate rewrite, validated (2026-08-07 re-check)
+
+The rewrite proposed in the previous section was re-validated against
+`gates.acceptance_gate.check_issue_body()` on this run: empty violation
+list (`[]`). It is unchanged from what a prior pass proposed and still
+matches the delivered artifacts — `test_spawn.py::test_fresh_workspace_excludes_dotfile_set`
+and `test_spawn.py::test_git_lock_masquerade_is_classified_as_sandbox_refusal`
+both still exist and still pass (see `python3 -m pytest -q --ignore=gates`
+above). Still blocked on the issue author applying it — this role
+session cannot edit the issue itself.
