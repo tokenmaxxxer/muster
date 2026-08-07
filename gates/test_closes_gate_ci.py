@@ -42,6 +42,28 @@ def t_phase1_mismatch_passes_plain_reference():
     assert ci._phase1_mismatch("see #245 for context", 245) == []
 
 
+def t_phase1_mismatch_detects_full_closing_keyword_set():
+    # issue #280 — GitHub 의 9개 closing 키워드 변형 전부(대소문자 무관)를
+    # 잡아야 한다. 좁은 3키워드 목록(close/fixes/resolves 만)은 "Fixed
+    # #19" 같은 흔한 커밋 영어를 승인 없이 통과시켰다.
+    keywords = [
+        "close", "closes", "closed",
+        "fix", "fixes", "fixed",
+        "resolve", "resolves", "resolved",
+    ]
+    for kw in keywords:
+        for variant in (kw, kw.capitalize(), kw.upper()):
+            bad = ci._phase1_mismatch(f"{variant} #245", 245)
+            assert bad and "closing 키워드" in bad[0], (variant, bad)
+
+
+def t_phase1_mismatch_ignores_near_miss_words():
+    # 단어 경계(\b) 회귀 가드: "unclosed", "prefixes" 처럼 키워드를 포함하는
+    # 더 긴 단어는 매치하면 안 된다.
+    assert ci._phase1_mismatch("unclosed #245 for now", 245) == []
+    assert ci._phase1_mismatch("prefixes #245 with x", 245) == []
+
+
 def t_phase1_mismatch_ignores_other_issue_closes():
     # PR #257이 "Closes #999"를 담아도 이슈 245 검사엔 안 걸린다 — 이 검사는
     # *이* 이슈를 향한 closing 키워드만 본다(다른 이슈를 향한 것은 그 이슈의

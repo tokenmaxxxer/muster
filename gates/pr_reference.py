@@ -22,7 +22,7 @@ import flows
 # phase-1 제안 PR은 `#<n>`만 있으면 된다 — 머지돼도 이슈를 닫으면 안 된다
 # (Closes 는 자동 종료를 유발한다). phase-2 인도 PR만 Closes/Fixes/Resolves 를 요구한다.
 _PLAIN_REF = re.compile(r"(?<!\w)#(\d+)")
-_CLOSES_REF = re.compile(r"(?i)\b(closes|fixes|resolves)\s+#(\d+)")
+_CLOSES_REF = re.compile(r"(?i)\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)")
 
 
 def check_body(issue: int, body: str, phase: str,
