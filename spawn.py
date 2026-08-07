@@ -36,6 +36,58 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 USER_SETTINGS = Path.home() / ".claude" / "settings.json"
 
+NETWORK_TIMEOUT = 60   # fetch/pull/push
+CLONE_TIMEOUT = 180    # clone — bigger initial transfer
+
+
+def _run_net(args: list[str], label: str, timeout: float = NETWORK_TIMEOUT,
+             **kwargs) -> subprocess.CompletedProcess:
+    """`timeout=`을 강제하는 네트워크 subprocess 호출. `TimeoutExpired`가
+    그냥 새 나가면 오케스트레이터가 무기한 걸린다(이슈 #285 P5) — 대신
+    `_fetch_or_halt`(spawn.py:2577)와 같은 모양의 이름 있는 에러로
+    fail-closed."""
+    kwargs.setdefault("capture_output", True)
+    kwargs.setdefault("text", True)
+    try:
+        return subprocess.run(args, timeout=timeout, **kwargs)
+    except subprocess.TimeoutExpired:
+        sys.exit(f"{label}: 시간초과({int(timeout)}s) — 네트워크를 확인하라")
+
+
+def _rulebook_ttl_min() -> float:
+    v = os.environ.get("MUSTER_RULEBOOK_TTL")
+    if v is None:
+        return 15.0
+    try:
+        return float(v)
+    except ValueError:
+        return 15.0
+
+
+def _ttl_marker(d: Path) -> Path:
+    return d / ".muster-last-pull"
+
+
+def _pull_is_fresh(d: Path) -> bool:
+    """TTL 창 안이면 True — 이번엔 `git pull` 을 건너뛴다(이슈 #285 P4).
+    `MUSTER_RULEBOOK_TTL=0` 이면 항상 False(매번 pull, 오늘의 동작)."""
+    ttl_min = _rulebook_ttl_min()
+    if ttl_min <= 0:
+        return False
+    m = _ttl_marker(d)
+    try:
+        age_s = time.time() - m.stat().st_mtime
+    except OSError:
+        return False
+    return age_s < ttl_min * 60
+
+
+def _mark_pulled(d: Path) -> None:
+    try:
+        _ttl_marker(d).write_text(str(time.time()))
+    except OSError:
+        pass
+
 
 MARKETPLACES = Path.home() / ".claude" / "plugins" / "marketplaces"
 KNOWN = MARKETPLACES.parent / "known_marketplaces.json"
@@ -174,6 +226,9 @@ def rulebook_dir(spec: dict) -> Path | None:
     return clone if _mkt(clone).exists() else None
 
 
+_RULEBOOK_CACHE: dict[str, Path] = {}
+
+
 def rulebook_checkout(role: str, spec: dict) -> Path:
     """세션에 **실제로 붙일** 룰북 체크아웃. 로컬이 있으면 그것, 없으면
     on-the-record 가 자기 밑에 클론해 둔다.
@@ -193,20 +248,30 @@ def rulebook_checkout(role: str, spec: dict) -> Path:
     if p and _mkt(Path(p)).exists():
         return Path(p)
 
+    mkt = spec["marketplace"]
+    cached = _RULEBOOK_CACHE.get(mkt)
+    if cached is not None:
+        return cached
+
     repo = spec.get("repo")
     if not repo:
         sys.exit(f"[{role}] 로컬 체크아웃도 repo 도 없다: roles/{role}.json")
-    d = ROOT / "runs" / "rulebooks" / spec["marketplace"]
+    d = ROOT / "runs" / "rulebooks" / mkt
     if _mkt(d).exists():
-        subprocess.run(["git", "-C", str(d), "pull", "-q", "--ff-only"],
-                       capture_output=True)
+        if not _pull_is_fresh(d):
+            _run_net(["git", "-C", str(d), "pull", "-q", "--ff-only"],
+                     f"[{role}] 룰북 pull")
+            _mark_pulled(d)
+        _RULEBOOK_CACHE[mkt] = d
         return d
     d.parent.mkdir(parents=True, exist_ok=True)
     print(f"[{role}] 룰북을 받는 중: {repo}", file=sys.stderr)
-    r = subprocess.run(["git", "clone", "-q", f"https://github.com/{repo}.git", str(d)],
-                       capture_output=True, text=True)
+    r = _run_net(["git", "clone", "-q", f"https://github.com/{repo}.git", str(d)],
+                f"[{role}] 룰북 clone", timeout=CLONE_TIMEOUT)
     if not _mkt(d).exists():
         sys.exit(f"[{role}] 룰북을 받지 못했다: {repo}\n  {r.stderr.strip()[:200]}")
+    _mark_pulled(d)
+    _RULEBOOK_CACHE[mkt] = d
     return d
 
 
@@ -1887,6 +1952,7 @@ def _await_bounded(events_path: Path, offset_path: Path, stall_timeout_min: floa
     except OSError:
         last_size = 0
     last_change = time.monotonic()
+    poll_s = 0.05
     while True:
         if events_path.exists():
             lines = events_path.read_text(encoding="utf-8").splitlines()
@@ -1915,7 +1981,8 @@ def _await_bounded(events_path: Path, offset_path: Path, stall_timeout_min: floa
             print(f"[watch] stall: 세션 로그 {secs}초째 무변화 — 이벤트 없이 "
                   f"멈춘다. 다시 spawn.py watch 로 재무장하라", file=sys.stderr)
             return 0
-        time.sleep(2)
+        time.sleep(poll_s)
+        poll_s = min(poll_s * 2, 2.0)
 
 
 WATCH_CRASH_RC = 2  # `--follow`가 session-end 없이 pid 사망을 감지했을 때
@@ -2051,15 +2118,17 @@ def core_root() -> Path:
     # 로컬 우선은 개발용 오버라이드일 뿐이다.
     d = ROOT / "runs" / "rulebooks" / "tokenmaxxxer-core"
     if (d / "core" / ".claude-plugin" / "plugin.json").is_file():
-        subprocess.run(["git", "-C", str(d), "pull", "-q", "--ff-only"],
-                       capture_output=True)
+        if not _pull_is_fresh(d):
+            _run_net(["git", "-C", str(d), "pull", "-q", "--ff-only"], "[core] pull")
+            _mark_pulled(d)
         return d
     try:
         d.parent.mkdir(parents=True, exist_ok=True)
         print("[core] tokenmaxxxer-core 를 받는 중", file=sys.stderr)
-        subprocess.run(["git", "clone", "-q",
-                        "https://github.com/tokenmaxxxer/tokenmaxxxer-core.git",
-                        str(d)], capture_output=True, text=True)
+        _run_net(["git", "clone", "-q",
+                 "https://github.com/tokenmaxxxer/tokenmaxxxer-core.git",
+                 str(d)], "[core] clone", timeout=CLONE_TIMEOUT)
+        _mark_pulled(d)
     except OSError:
         pass
     if (d / "core" / ".claude-plugin" / "plugin.json").is_file():
@@ -2553,7 +2622,13 @@ def _git_env() -> dict[str, str] | None:
     물려받게 한다 — 빈 문자열로 덮어써서 사용자의 다른 자격증명 경로
     (ssh-agent, osxkeychain)를 막지 않는다."""
     token = _resolve_gh_token()
-    return {**os.environ, "GH_TOKEN": token} if token else None
+    if not token:
+        return None
+    return {**os.environ, "GH_TOKEN": token,
+            "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "true"}
+
+
+_FETCHED_THIS_SPAWN: dict[str, float] = {}
 
 
 def _fetch_or_halt(work_dir: str, label: str, after=None) -> None:
@@ -2568,13 +2643,25 @@ def _fetch_or_halt(work_dir: str, label: str, after=None) -> None:
     반드시 시도돼야 하는 부수 효과가 있어서다. 순서를 반대로 하면(halt
     먼저) fetch 가 실패할 때마다 그 부수 효과가 영영 안 돌 수 있다 — 신규
     clone 경로 한정으로, `.git`은 이미 생겨 재사용 분기로 넘어가 버려 다시
-    시도할 기회 자체가 없다(hunt 발견, composition-regression stance)."""
-    r = subprocess.run(["git", "-C", work_dir, "fetch", "-q", "origin"],
-                       capture_output=True, text=True, env=_git_env())
+    시도할 기회 자체가 없다(hunt 발견, composition-regression stance).
+
+    같은 프로세스 안에서 같은 work_dir 을 이미 fetch 했으면 다시 네트워크로
+    나가지 않는다(이슈 #285 P3 — `issue_workspace()` 다음의
+    `checkout_issue_branch()` 가 수 초 뒤 같은 경로를 또 fetch 하던 것).
+    최초 fetch 가 실패하면 이 함수가 바로 sys.exit 하므로 성공한 fetch만
+    "fresh" 로 기록된다 — 두 번째 호출자가 halt 를 건너뛰는 일은 없다."""
+    key = str(Path(work_dir).resolve())
+    if key in _FETCHED_THIS_SPAWN:
+        if after is not None:
+            after()
+        return
+    r = _run_net(["git", "-C", work_dir, "fetch", "-q", "origin"], label,
+                env=_git_env())
     if after is not None:
         after()
     if r.returncode != 0 or "failed to store" in r.stderr:
         sys.exit(f"{label}: fetch 실패 — {r.stderr.strip()[:200]}")
+    _FETCHED_THIS_SPAWN[key] = time.monotonic()
 
 
 def issue_workspace(cwd: str, issue: int, role: str) -> str:
@@ -2625,8 +2712,8 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
         _fetch_or_halt(str(work), "재사용 워크스페이스")
         return str(work)
     work.parent.mkdir(parents=True, exist_ok=True)
-    c = subprocess.run(["git", "clone", "-q", str(src), str(work)],
-                       capture_output=True, text=True)
+    c = _run_net(["git", "clone", "-q", str(src), str(work)], "작업 클론",
+                timeout=CLONE_TIMEOUT)
     if c.returncode != 0:
         sys.exit(f"작업 클론을 만들지 못했다: {c.stderr.strip()[:200]}")
     subprocess.run(["git", "-C", str(work), "remote", "set-url", "origin",
@@ -2699,8 +2786,8 @@ def ensure_pushed(work: str, issue: int, role: str) -> None:
         # 막힐 수 있다 — 이 함수 자체가 "샌드박스 egress 가 막히면 호스트
         # 에서 대신 push 한다"는 백업 경로인데, 그 백업 경로 자신이
         # 무인증으로 막히면 산출물이 로컬 커밋으로만 남는다.
-        return subprocess.run(["git", "-C", work, *a], capture_output=True,
-                              text=True, env=_git_env())
+        return _run_net(["git", "-C", work, *a], f"[{role}] 호스트 git",
+                        env=_git_env())
     if git("rev-parse", "--verify", "-q", br).returncode != 0:
         return
     ahead = git("rev-list", "--count", f"origin/{br}..{br}")
