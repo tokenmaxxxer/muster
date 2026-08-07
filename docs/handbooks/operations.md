@@ -751,6 +751,14 @@ head 브랜치명(`issue-<n>/<role>`)에서 뽑는다 — 추출 실패는
 fail-closed(차단). 근거는
 `docs/issue-245/decisions/2026-08-04-closes-gate-wiring-tradeoffs.md`.
 
+병렬 role 세션 간 write-set 충돌은 아직 위 CI 게이트에 안 물려 있다(issue #323) —
+`scripts/check-write-set-conflicts.sh`를 병합 전에 손으로 돌려서 확인한다. 방법론
+전체는 `docs/specs/parallel-conflict-methodology.md` 참고.
+
+Parallel role-session write-set conflicts are not yet wired into the CI gate above
+(issue #323) — run `scripts/check-write-set-conflicts.sh` by hand before merging. Full
+methodology: `docs/specs/parallel-conflict-methodology.md`.
+
 **2026-08-04 부로 실제로 막는다** — main 브랜치 보호 규칙에 `closes-gate`가
 필수 상태 체크로 등록돼 있고(`required_status_checks.contexts:
 ["closes-gate"]`) `enforce_admins`도 켜져 있다 — `gh api
