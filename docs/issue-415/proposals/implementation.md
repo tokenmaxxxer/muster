@@ -92,6 +92,18 @@ ceiling #358 already established for its own checker. A false absence
 claim that includes a scope statement, correct or not, will not be flagged
 by this mechanism; only a bare, unscoped capability claim is caught.
 
+A further gap, surfaced by the after-proposal warrant hunt (stance:
+bypass, `docs/reports/2026-08-07-hunt-issue-415-implementation.md`): the
+phrase list in item 1 is fixed and closed, so an unscoped absence claim
+phrased with a synonym or contraction outside that list ("isn't
+implemented", "there's no fallback for it") never reaches the
+scope-adjacency check at all — it passes silently, not because it is
+scoped, but because the checker never recognized it as an absence claim in
+the first place. This is not a bug to fix before landing; it is a second,
+narrower boundary on the same ceiling already stated above, and phase 2's
+record must state it in those terms rather than implying the phrase list
+is exhaustive.
+
 ## What will be done
 
 1. `gates/repo_scope.py` — `check_repo_scope(text: str) -> list[Violation]`.
