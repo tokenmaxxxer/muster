@@ -796,6 +796,36 @@ class PackageRegistryAccess(unittest.TestCase):
                 else:
                     os.environ["GOMODCACHE"] = saved
 
+    def test_cargo_git_cache_dir_present_is_mounted(self):
+        """이슈 #406: ~/.cargo/registry 형제 항목 ~/.cargo/git 도 존재하면
+        읽기 전용으로 마운트된다."""
+        with tempfile.TemporaryDirectory() as td:
+            real_expanduser = os.path.expanduser
+
+            def fake_expanduser(p):
+                if p == "~/.cargo/git":
+                    return td
+                return real_expanduser(p)
+
+            with mock.patch("spawn.os.path.expanduser", side_effect=fake_expanduser):
+                out = spawn.role_settings("implementation")
+            allow_read = out["sandbox"]["filesystem"].get("allowRead", [])
+            self.assertIn(td, allow_read)
+
+    def test_cargo_git_cache_dir_absent_is_skipped_without_error(self):
+        missing = "/nonexistent/path/for/muster-issue-406-test"
+        real_expanduser = os.path.expanduser
+
+        def fake_expanduser(p):
+            if p == "~/.cargo/git":
+                return missing
+            return real_expanduser(p)
+
+        with mock.patch("spawn.os.path.expanduser", side_effect=fake_expanduser):
+            out = spawn.role_settings("implementation")  # should not raise
+        allow_read = out["sandbox"]["filesystem"].get("allowRead", [])
+        self.assertNotIn(missing, allow_read)
+
 
 class SandboxDefaultOpenAccess(unittest.TestCase):
     """이슈 #72: 나머지 기본값 제한적인 샌드박스 스위치를 전부 연다. sandbox.enabled
@@ -1539,6 +1569,60 @@ class Ledger(unittest.TestCase):
             self.assertEqual(len(entries), 1, entries)
             self.assertEqual(entries[0]["log"], roster_entry["log"])
             self.assertTrue(Path(entries[0]["log"]).exists())
+
+    def test_toolchain_cache_env_redirected_into_workspace(self):
+        """이슈 #406: cargo git 의존성이 홈 밖 쓰기로 승인 프롬프트에
+        막히지 않도록, GOCACHE 등과 같은 자리에서 CARGO_HOME 도
+        워크스페이스(.muster-cache) 안으로 재지정된다."""
+        import subprocess as sp
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "issue-9-eo"
+            work.mkdir()
+            run = lambda *a: sp.run(a, cwd=str(work), capture_output=True,
+                                    text=True, check=True)
+            run("git", "init", "-q")
+            run("git", "config", "user.email", "t@example.com")
+            run("git", "config", "user.name", "t")
+            (work / "f.txt").write_text("x")
+            run("git", "add", "f.txt")
+            run("git", "commit", "-q", "-m", "init")
+
+            roster = Path(td) / "active.json"
+            old_roster = spawn.ROSTER
+            spawn.ROSTER = roster
+
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                with mock.patch.object(spawn, "issue_workspace",
+                                       lambda cwd, issue, role: str(work)), \
+                     mock.patch.object(spawn, "checkout_issue_branch",
+                                       lambda cwd, issue, role: "b"), \
+                     mock.patch.object(spawn, "spawn_cmd",
+                                       lambda *a, **k: (["cat"], {})), \
+                     mock.patch.object(spawn, "ensure_pushed",
+                                       lambda *a, **k: None), \
+                     mock.patch.object(spawn, "roster_register",
+                                       lambda *a, **k: None), \
+                     mock.patch.object(spawn, "ledger_write",
+                                       lambda entry: None), \
+                     mock.patch.object(spawn.subprocess, "Popen",
+                                       wraps=sp.Popen) as spied:
+                    spawn._spawn_one(str(work), "execution-observation", "task\n",
+                                     unattended=True, issue=9)
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+
+            env_calls = [c.kwargs["env"] for c in spied.call_args_list
+                         if "env" in c.kwargs]
+            self.assertTrue(env_calls, spied.call_args_list)
+            env = env_calls[0]
+            self.assertEqual(env.get("CARGO_HOME"),
+                             os.path.join(str(work), ".muster-cache", "cargo"))
 
 
 class OwnershipReport(unittest.TestCase):
