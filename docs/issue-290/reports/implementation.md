@@ -38,6 +38,29 @@ resolved_findings:
     real issue #304 lacking an `## Acceptance` section) — #398's claim
     that the `gates/` subtree cannot collect does not reproduce here; it
     collects and runs, just with one pre-existing unrelated failure.
+  - Second rebase, ~80-PR conflict (2026-08-07): branch was 38 commits
+    behind main. `git rebase origin/main` hit one conflict, in
+    `docs/specs/reconciled-index.md`, on the commit that had itself
+    regenerated that index during the prior (#390) rebase — its recorded
+    hashes were now stale against the new main tip, so the commit was
+    skipped (`git rebase --skip`) rather than merged, since a fresh
+    `spec_index.py --update` after rebase supersedes it entirely. Ran
+    `python3 -m pytest -q` (no `--ignore`, per current instruction) on
+    the rebased tree: 1 failure —
+    `test_spec_index.py::t_baseline_repo_passes`, index hash drift from
+    files main changed since the skipped commit. Ran
+    `python3 gates/spec_index.py --update`, committed the regenerated
+    `docs/specs/reconciled-index.md` (commit `3431c2d`), re-ran the full
+    suite: `t_gates.py::t_rulebook_version_is_recorded` failed once
+    against the *uncommitted* diff (dirty-tree self-detection working as
+    designed), then passed clean once that diff was committed. Final
+    measured result, full directory, no ignore flags, rebased +
+    committed tree: **508 passed, 0 failed** — matches main's own stated
+    508-passed baseline. Artifacts named in this record's
+    `code_under_review` (the CI workflow, both test files, run.md,
+    operations.md) all still exist unchanged on the rebased branch; no
+    mismatch found between what this delivery claims and what it
+    produces.
 ---
 
 # issue-290 / issue-294 — phase 2: CI + test-hygiene fix
