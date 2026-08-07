@@ -65,17 +65,28 @@ feedback comment followed the approval.
 - a passing `statusCheckRollup` entry is accepted, failing/missing/pending is denied — checked: gates/test_closes_gate_ci.py::t_checked_ci_claims_passing_rollup_accepted — result: pass
 - an unreadable rollup fails closed (denial, not silent pass) — checked: gates/test_closes_gate_ci.py::t_checked_ci_claims_unreadable_rollup_fails_closed — result: pass
 - the new CI job step actually runs `gates/ci.py` in non-`--closes-only` mode — checked: .github/workflows/plan-aware-closes-gate.yml — result: unverifiable: this repo's own CI cannot execute a GitHub Actions workflow from inside this session; the workflow YAML change is visible in the diff and follows the existing `--closes-only` step's established pattern, but whether it actually fires green on this PR is only observable from GitHub's Checks tab once the PR is open, not from a local run.
-- full suites still pass with no regression — checked: test_gates.py — result: pass
-- full suites still pass with no regression — checked: gates/test_closes_gate_ci.py — result: pass
+
+## Suite run notes
+
+(Moved out of `## Acceptance verification` — a bare filename with no
+`::test_name` is read by `_checked_ci_claims_bad` as a CI-check-name
+claim and cross-checked against `statusCheckRollup`, which this
+repo does not register a check under; that false-positive was caught
+by the before-landing hunt during the 2026-08-07 re-verification pass
+below and fixed by removing the two bare-filename bullets, since each
+individual test they summarized is already its own `::`-qualified line
+above.)
 
 `python3 test_gates.py` (156 tests) and `python3 gates/test_closes_gate_ci.py`
 (36 tests) both ran to completion with every test passing, including the
-16 new ones above. `test_gates.py` has one *pre-existing, unrelated*
-failure outside this write set (`t_repo_local_claude_config_stops_the_spawn`,
-`OSError: Read-only file system` on a path outside the repo — reproduced
-identically on `main`/pre-change HEAD by stashing this session's diff and
-re-running, so it is a sandbox filesystem constraint of this session, not
-a regression this change introduced).
+16 new ones above, at the original pre-rebase base. `test_gates.py` has one
+*pre-existing, unrelated* failure outside this write set
+(`t_repo_local_claude_config_stops_the_spawn`, `OSError: Read-only file
+system` on a path outside the repo — reproduced identically on
+`main`/pre-change HEAD by stashing this session's diff and re-running, so
+it is a sandbox filesystem constraint of this session, not a regression
+this change introduced). Superseded by the current numbers in the
+rebase-re-verification section below.
 
 ## Reach beyond this PR's own acceptance criteria (per #330)
 
@@ -193,3 +204,102 @@ merge, no conflict on it).
 gates` — 64 passed, no collection error (reported as clean at that base).
 `origin/main` has since advanced past that base, so these numbers
 describe a tree that no longer exists; the section above is current.
+
+## Rebase re-verification (2026-08-07, third pass — unblocking #331's own PR per operator instruction)
+
+`origin/main` advanced 5 commits past the second-pass base (`0f3151a`) to
+`23d90ea`. `git fetch origin main && git rebase origin/main` — clean,
+**no conflicts** this time (the second pass's 4-file conflict set did not
+recur; the 5 new upstream commits touched unrelated issue-424/-428 trees).
+
+Re-ran on the rebased tree (HEAD `23d90ea`, 0 commits behind
+`origin/main`, working tree otherwise clean):
+
+- `python3 gates/spec_index.py .` — **pass**, all spec docs match their
+  recorded hash (no regeneration needed this pass).
+- `python3 -m pytest -q --ignore=gates` (this task's instructed command,
+  per #398 — main's `gates/` subtree cannot collect through the
+  hand-rolled `test_gates.py.__main__` runner) — **417 passed**, 0 failed.
+- `python3 -m pytest -q gates/` (pytest itself collects `gates/` fine in
+  this environment; ran it anyway to report what could not be covered by
+  the instructed command) — **74 passed, 1 failed**:
+  `t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch`
+  fails because it fetches live issue #304's real body via `gh` and
+  asserts a `## Acceptance` section is present; issue #304 currently has
+  none. Reproduced identically against a clean `origin/main` checkout
+  with none of this branch's commits present, so it is pre-existing and
+  unrelated to this delivery — reported, not fixed (outside this write
+  set; the live issue body is not something this branch's diff touches).
+- Combined: 417 + 74 = 491 passed, 1 pre-existing failure outside this
+  write set.
+- `python3 gates/ci.py . --pr 343 --autodetect` (the exact command CI
+  runs) surfaced two real defects in this record itself, both fixed in
+  this same pass: (1) two `## Acceptance verification` bullets named a
+  bare filename (no `::test_name`), which `_checked_ci_claims_bad` reads
+  as a CI-check-name claim and cross-checks against `statusCheckRollup`
+  — no such check is registered under those names, so both were flagged
+  as failing; removed as redundant (each test they summarized already
+  has its own `::`-qualified bullet). (2) the free-prose paragraph
+  trailing the bullet list was still inside the `## Acceptance
+  verification` section and every non-blank line in that section must
+  match the `checked:`/`result:` grammar — moved under a new `##  Suite
+  run notes` heading so it falls outside the section. After both fixes,
+  `gates/ci.py`'s only remaining output is `write_scope` warnings for
+  this session's untracked dotfiles/IDE config (`.claude/`, `.idea/`,
+  `.bashrc`, etc.) — none of those paths are staged or committed on this
+  branch (confirmed via `git status`/`git diff --stat`), so they are
+  session-local sandbox noise, not part of this delivery's diff.
+
+No code changes beyond conflict-free rebase, the spec-index check, and
+the two record-formatting fixes above — no scope was widened.
+
+## Issue #331's own Acceptance section — could not update (role boundary)
+
+This task also asked to rewrite issue #331's own `## Acceptance` section
+so each criterion names an executable artifact. `gh issue edit 331` was
+attempted and refused by this repo's `gh-guard.sh` PreToolUse hook:
+"issues are the user's requirement backlog, user-authored only (contract
+v3 s9) — no role touches them." That is a mechanical, role-level
+boundary (two-account model), not a permission this session can route
+around. A ready-to-paste rewrite — each criterion tied to a real,
+verified artifact from this delivery (`gates/gates.py::record_checked_claims`,
+the specific `test_gates.py`/`gates/test_closes_gate_ci.py` node IDs
+above, and an `unverifiable:`-marked line for the one criterion — whether
+the CI step actually fires green — that cannot be checked from inside a
+session) is on disk at
+`/tmp/claude-1000/-home-jwjung--tokenmaxxxer-work-on-the-record-issue-331-implementation/7874ef22-2e76-4962-88b3-3f7077480cd9/scratchpad/issue331_body.txt`
+for the operator (or another human-authored path) to apply with
+`gh issue edit 331 --body-file <path>`.
+
+## Structural finding: the CI step this delivery added cannot pass on this delivery's own diff
+
+Re-running the exact command CI runs (`python3 gates/ci.py . --pr 343
+--autodetect`) after the two record fixes above still blocks, with:
+`보호 경로 변경: .github/workflows/plan-aware-closes-gate.yml`,
+`gates/ci.py`, `gates/gates.py`, `gates/test_closes_gate_ci.py`.
+`gates.writeset()` (pre-existing, not written by this delivery) blocks
+*any* changed path under the protected dirs/files list — `gates/`,
+`.github/`, etc. — unconditionally, with no bypass mechanism, whenever
+the non-`--closes-only` bundle runs. This delivery's own "Reach beyond
+acceptance criteria" work (see above) wired that non-`--closes-only`
+bundle into the required `plan-aware-closes-gate.yml` CI job for the
+first time — before this PR, that bundle never actually ran in CI, so
+this blanket block was latent and never observed. The practical effect:
+this PR touches exactly the paths (`gates/*`, `.github/workflows/*`)
+that trigger the block, so the CI step this PR itself adds cannot pass
+on this PR's own diff — and neither can any future PR that touches
+`gates/` or `.github/`, which is most of what `implementation` sessions
+for gate-related issues do.
+
+This is a real defect discovered during this session's re-verification,
+not a defect this session introduced (the `writeset()` function and its
+unconditional protected-path block both pre-date this delivery). It is
+outside this session's frozen write set and outside this turn's
+authorized scope (rewrite issue Acceptance / don't fake artifacts /
+rerun evidence — not "redesign the protected-path gate"), so it is not
+fixed here — reported for the operator to route as its own issue.
+`docs/reports/2026-08-07-hunt-checked-claims-gate.md`'s before-landing
+hunt (stance: "assume the gate just touched is bypassable") did not
+catch this because it probed `record_checked_claims` itself, not the
+pre-existing `writeset()` check the CI-wiring change exposed as a side
+effect.
