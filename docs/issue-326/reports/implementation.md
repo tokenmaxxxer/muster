@@ -202,3 +202,35 @@ exists to satisfy the matcher (the irony this task flagged explicitly).
 Until the operator applies this (or equivalent) text to issue #326, the
 `closes-gate` check on PR #348 stays red; that is outside this session's
 authority to fix.
+
+## Third pass (2026-08-07): re-attempted issue edit, re-rebased, re-verified
+
+This turn was asked to (1) apply the Acceptance rewrite to issue #326
+directly, (2) verify the named artifact is real, (3) re-run acceptance
+evidence against current `main`. Attempted `gh issue edit 326` with the
+same replacement text drafted in PART 1 above; `gh-guard.sh` refused it
+again, identical reason (contract v3 s9, issues are user-authored only,
+no role touches them). This is the same mechanical block as before, not
+a new finding — confirms it is not session-specific.
+
+Re-rebased: `origin/main` had advanced 5 commits past this branch's base
+(`23d90ea`, PR #429 merged). `git rebase origin/main` — clean, no
+conflicts.
+
+Re-ran verification on the freshly rebased tree:
+
+- `python3 -m pytest test_spawn.py -k stranded -q` — 3 passed (same
+  three `EnsurePushedStrandedComment` tests named throughout this record).
+- `python3 -m pytest -q --ignore=gates` — 409 passed, 1 failed
+  (`test_spec_index.py::t_baseline_repo_passes` — same pre-existing
+  `docs/specs/reconciled-index.md` hash-mismatch failure noted in the
+  prior rebase pass; unrelated to this issue's `spawn.py`/`test_spawn.py`
+  write set).
+- `gates/` was not run this pass per this turn's own instruction (its
+  module-name collision, #398, is asserted un-collectable on `main`);
+  only `--ignore=gates` was executed, as directed.
+
+Both the acceptance-gate blocker (PART 1) and the `test_spec_index.py`
+failure remain outside this session's authority/write set. The
+Acceptance-section rewrite proposed in PART 1 is unchanged and still
+awaits the operator pasting it into issue #326.
