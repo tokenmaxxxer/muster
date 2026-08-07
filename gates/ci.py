@@ -171,27 +171,38 @@ def _fetch_ref_file(repo: Path, pr: int, branch: str, path: str) -> str | None:
     읽는다 — 로컬 워킹트리를 전혀 안 보고, PR 코드를 체크아웃/실행하지도
     않는다(issue #369). `_pr_commit_messages`(gates/ci.py:100-104)와 같은
     `gh api repos/<slug>/...` 패턴 재사용 — 새 신뢰 모양을 만들지 않는다.
-    파일 없음(404) 이나 API 실패는 None."""
+
+    issue #388: `-f`를 주면 `gh api`가 요청 메서드를 POST로 바꿔버려
+    (명시적 `-X GET`이 없으면) 모든 조회가 404였다 — 이제 `-X GET`을
+    명시한다.
+
+    파일 없음(404)과 API 실패(그 외 비정상 종료)를 구분해 돌려준다:
+    404는 `(None, None)`, 그 외 실패는 `(None, r.stderr)` — 호출부가
+    "기록이 없다"와 "API가 막혔다"를 다르게 다룰 수 있게(issue #388
+    item 3, PR #370 리뷰에서 지적됐던 결함)."""
     import base64
     import json
     import subprocess
     slug = spawn._repo_slug(repo)
     if not slug:
-        return None
+        return None, "repo slug를 알 수 없다"
     r = subprocess.run(
-        ["gh", "api", f"repos/{slug}/contents/{path}", "-f", f"ref={branch}"],
+        ["gh", "api", "-X", "GET", f"repos/{slug}/contents/{path}",
+         "-f", f"ref={branch}"],
         cwd=repo, capture_output=True, text=True)
     if r.returncode != 0:
-        return None
+        if "404" in r.stderr or "Not Found" in r.stderr:
+            return None, None
+        return None, r.stderr.strip()
     try:
         data = json.loads(r.stdout)
         content = data.get("content", "")
     except (ValueError, AttributeError):
-        return None
+        return None, r.stdout.strip()
     try:
-        return base64.b64decode(content).decode("utf-8-sig", errors="replace")
+        return base64.b64decode(content).decode("utf-8-sig", errors="replace"), None
     except (ValueError, TypeError):
-        return None
+        return None, "base64 디코드 실패"
 
 
 def _phase2_record_evidence(repo: Path, pr: int, branch: str, issue: int) -> bool:
@@ -212,7 +223,7 @@ def _phase2_record_evidence(repo: Path, pr: int, branch: str, issue: int) -> boo
     if detected is None:
         return False
     _, role = detected
-    text = _fetch_ref_file(repo, pr, branch, f"docs/issue-{issue}/reports/{role}.md")
+    text, _err = _fetch_ref_file(repo, pr, branch, f"docs/issue-{issue}/reports/{role}.md")
     if text is None:
         return False
     fm = gates.record_frontmatter(text)

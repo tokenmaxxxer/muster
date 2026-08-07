@@ -412,7 +412,7 @@ def t_autodetect_closes_only_blocks_commit_message_keyword_with_clean_body():
 
 def t_phase2_record_evidence_true_when_record_has_nonempty_loop_state():
     orig_fetch = ci._fetch_ref_file
-    ci._fetch_ref_file = lambda repo, pr, branch, path: "---\nloop_state: phase-2-complete\n---\nbody\n"
+    ci._fetch_ref_file = lambda repo, pr, branch, path: ("---\nloop_state: phase-2-complete\n---\nbody\n", None)
     try:
         assert ci._phase2_record_evidence(Path("."), 1, "issue-245/implementation", 245) is True
     finally:
@@ -421,7 +421,7 @@ def t_phase2_record_evidence_true_when_record_has_nonempty_loop_state():
 
 def t_phase2_record_evidence_false_when_record_missing():
     orig_fetch = ci._fetch_ref_file
-    ci._fetch_ref_file = lambda repo, pr, branch, path: None
+    ci._fetch_ref_file = lambda repo, pr, branch, path: (None, None)
     try:
         assert ci._phase2_record_evidence(Path("."), 1, "issue-245/implementation", 245) is False
     finally:
@@ -430,7 +430,7 @@ def t_phase2_record_evidence_false_when_record_missing():
 
 def t_phase2_record_evidence_false_when_loop_state_empty():
     orig_fetch = ci._fetch_ref_file
-    ci._fetch_ref_file = lambda repo, pr, branch, path: "---\nloop_state: \n---\nbody\n"
+    ci._fetch_ref_file = lambda repo, pr, branch, path: ("---\nloop_state: \n---\nbody\n", None)
     try:
         assert ci._phase2_record_evidence(Path("."), 1, "issue-245/implementation", 245) is False
     finally:
@@ -478,6 +478,76 @@ def t_phase2_record_evidence_does_not_read_local_filesystem():
         Path.exists = orig_exists
 
 
+def t_fetch_ref_file_issues_gh_api_with_dash_x_get():
+    # Pins issue #388: `gh api ... -f ref=<branch>` with no explicit `-X
+    # GET` silently switches the request to POST, so every lookup 404s.
+    # This drives the *real* `_fetch_ref_file` (not a mock of itself) and
+    # asserts the exact argv `subprocess.run` receives — a mock of
+    # `subprocess.run` alone would accept any argv, including the broken
+    # one; asserting the argv is what makes this test able to fail on the
+    # defect. Does not cover: whether `gh` itself, given a well-formed
+    # argv, actually performs a GET (that is `gh`'s own contract, out of
+    # this test's reach) — only that this code issues the argv that
+    # requests one.
+    import base64
+    import json
+    import subprocess
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        payload = json.dumps({
+            "content": base64.b64encode(b"hello").decode(),
+        })
+        return subprocess.CompletedProcess(cmd, 0, stdout=payload, stderr="")
+
+    orig_slug = spawn._repo_slug
+    spawn._repo_slug = lambda repo: "tokenmaxxxer/on-the-record"
+    orig_run = subprocess.run
+    subprocess.run = fake_run
+    try:
+        text, err = ci._fetch_ref_file(
+            Path("."), 1, "issue-245/implementation", "docs/issue-245/reports/implementation.md")
+    finally:
+        spawn._repo_slug = orig_slug
+        subprocess.run = orig_run
+
+    assert text == "hello" and err is None, (text, err)
+    cmd = captured["cmd"]
+    assert cmd[:2] == ["gh", "api"], cmd
+    assert "-X" in cmd and cmd[cmd.index("-X") + 1] == "GET", (
+        "gh api call is missing an explicit -X GET — without it, `gh api` "
+        f"switches to POST as soon as -f is present, and every lookup 404s: {cmd}")
+
+
+def t_fetch_ref_file_distinguishes_404_from_api_failure():
+    # issue #388 item 3 (PR #370 review point): file-absent and
+    # API-failed must not collapse into the same None.
+    import subprocess
+
+    orig_slug = spawn._repo_slug
+    spawn._repo_slug = lambda repo: "tokenmaxxxer/on-the-record"
+    orig_run = subprocess.run
+
+    subprocess.run = lambda cmd, **kwargs: subprocess.CompletedProcess(
+        cmd, 1, stdout="", stderr='{"message":"Not Found","status":"404"}')
+    try:
+        text, err = ci._fetch_ref_file(Path("."), 1, "issue-245/implementation", "missing.md")
+    finally:
+        subprocess.run = orig_run
+    assert text is None and err is None, (text, err)
+
+    subprocess.run = lambda cmd, **kwargs: subprocess.CompletedProcess(
+        cmd, 1, stdout="", stderr="gh: authentication required")
+    try:
+        text, err = ci._fetch_ref_file(Path("."), 1, "issue-245/implementation", "some.md")
+    finally:
+        subprocess.run = orig_run
+        spawn._repo_slug = orig_slug
+    assert text is None and err == "gh: authentication required", (text, err)
+
+
 def t_ci_check_phase2_passes_via_record_evidence_without_body_edit():
     # (a) — proposal item 4a: no Closes in body, but a record fetched via
     # `gh api` on the PR ref has a non-empty loop_state — passes without a
@@ -489,7 +559,7 @@ def t_ci_check_phase2_passes_via_record_evidence_without_body_edit():
     pr_reference._pr_view = lambda repo, pr: "delivered the feature, see #245"
     pr_reference._issue_view_body = lambda repo, issue: ""
     ci._pr_head_ref = lambda repo, pr: "issue-245/implementation"
-    ci._fetch_ref_file = lambda repo, pr, branch, path: "---\nloop_state: phase-2-complete\n---\nbody\n"
+    ci._fetch_ref_file = lambda repo, pr, branch, path: ("---\nloop_state: phase-2-complete\n---\nbody\n", None)
     try:
         bad = ci.check(repo, pr=1, issue=245, phase="phase2", closes_only=True)
     finally:
@@ -509,7 +579,7 @@ def t_ci_check_phase2_blocks_and_names_both_options_when_neither_present():
     pr_reference._pr_view = lambda repo, pr: "delivered the feature, see #245"
     pr_reference._issue_view_body = lambda repo, issue: ""
     ci._pr_head_ref = lambda repo, pr: "issue-245/implementation"
-    ci._fetch_ref_file = lambda repo, pr, branch, path: None
+    ci._fetch_ref_file = lambda repo, pr, branch, path: (None, None)
     try:
         bad = ci.check(repo, pr=1, issue=245, phase="phase2", closes_only=True)
     finally:
