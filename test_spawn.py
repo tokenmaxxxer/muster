@@ -4401,6 +4401,71 @@ class RulebookCheckoutMemo(unittest.TestCase):
                 spawn.ROOT = saved_root
 
 
+class LegacyTtlMarkerMigration(unittest.TestCase):
+    """이슈 #313: #297 이전 코드가 클론 안에 써 둔 `.muster-last-pull` 은
+    #297 이후에도 디스크에 남아, 지우기 전까진 `checkout_version()` 의
+    dirty 접미사가 그 클론에 상시로 붙는다. `rulebook_checkout()` 이
+    관리 클론을 다시 쓸 때마다 그 레거시 마커를 지워야 한다."""
+
+    def setUp(self):
+        spawn._RULEBOOK_CACHE = {}
+
+    def tearDown(self):
+        spawn._RULEBOOK_CACHE = {}
+
+    def _fake_clone(self, td):
+        fake_root = Path(td) / "root"
+        clone_dir = fake_root / "runs" / "rulebooks" / "acme-rules"
+        clone_dir.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(clone_dir)], check=True)
+        (clone_dir / ".claude-plugin").mkdir()
+        (clone_dir / ".claude-plugin" / "marketplace.json").write_text("{}")
+        subprocess.run(["git", "-C", str(clone_dir), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(clone_dir), "commit", "-q",
+                       "-m", "init",
+                       "--author=t <t@t.t>"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(clone_dir), "remote", "add",
+                       "origin", str(clone_dir)], check=True)
+        return fake_root, clone_dir
+
+    def test_stale_in_clone_marker_no_longer_reports_dirty(self):
+        with tempfile.TemporaryDirectory() as td:
+            fake_root, clone_dir = self._fake_clone(td)
+            # pre-#297 코드가 남긴 in-clone 마커 — untracked, gitignore 안 됨.
+            (clone_dir / ".muster-last-pull").write_text(str(time.time()))
+
+            spec = {"marketplace": "acme-rules", "repo": "acme/acme-rules"}
+            saved_root = spawn.ROOT
+            os.environ["MUSTER_RULEBOOK_TTL"] = "0"  # 매번 pull, 마이그레이션 경로를 확실히 탄다
+            spawn.ROOT = fake_root
+            try:
+                version = spawn.checkout_version("implementation", spec)
+            finally:
+                spawn.ROOT = saved_root
+                os.environ.pop("MUSTER_RULEBOOK_TTL", None)
+
+            self.assertNotIn("커밋 안 된 변경 있음", version, version)
+            self.assertFalse((clone_dir / ".muster-last-pull").exists())
+
+    def test_genuine_uncommitted_change_still_reports_dirty(self):
+        with tempfile.TemporaryDirectory() as td:
+            fake_root, clone_dir = self._fake_clone(td)
+            (clone_dir / ".muster-last-pull").write_text(str(time.time()))
+            (clone_dir / "real-edit.txt").write_text("uncommitted")
+
+            spec = {"marketplace": "acme-rules", "repo": "acme/acme-rules"}
+            saved_root = spawn.ROOT
+            os.environ["MUSTER_RULEBOOK_TTL"] = "0"
+            spawn.ROOT = fake_root
+            try:
+                version = spawn.checkout_version("implementation", spec)
+            finally:
+                spawn.ROOT = saved_root
+                os.environ.pop("MUSTER_RULEBOOK_TTL", None)
+
+            self.assertIn("커밋 안 된 변경 있음", version, version)
+
+
 class FetchDedupe(unittest.TestCase):
     """이슈 #285 P3: 같은 work_dir 에 대한 두 번째 `_fetch_or_halt()` 호출은
     (같은 프로세스 안이면) 네트워크로 나가지 않는다 — 단, halt 판정은
