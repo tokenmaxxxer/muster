@@ -1230,6 +1230,76 @@ def t_ci_check_wires_record_fulfils_diff():
         assert any("delete docs/foo.md" in b for b in bad), bad
 
 
+def _requirements_repo(td: str, registry_text: str, extra_files: dict = None) -> Path:
+    work = Path(td) / "work"
+    (work / "docs" / "specs").mkdir(parents=True)
+    (work / "docs" / "specs" / "requirements.md").write_text(registry_text)
+    for path, content in (extra_files or {}).items():
+        p = work / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+    return work
+
+
+def t_requirement_registry_no_file_passes():
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td) / "work"
+        work.mkdir()
+        assert gates.requirement_registry(Path(td), {}) == []
+
+
+def t_requirement_registry_live_check_passes():
+    with tempfile.TemporaryDirectory() as td:
+        work = _requirements_repo(
+            td,
+            "## R001\nquote: 요구사항\nsource_issue: 321\n"
+            "check: docs/specs/live.py::whatever\nstatus: enforced\n",
+            extra_files={"docs/specs/live.py": "x"})
+        assert gates.requirement_registry(work, {}) == []
+
+
+def t_requirement_registry_stale_check_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        work = _requirements_repo(
+            td,
+            "## R001\nquote: 요구사항\nsource_issue: 321\n"
+            "check: docs/specs/deleted.py::whatever\nstatus: enforced\n")
+        bad = gates.requirement_registry(work, {})
+        assert any("R001" in b and "321" in b for b in bad), bad
+
+
+def t_requirement_registry_unverifiable_passes():
+    with tempfile.TemporaryDirectory() as td:
+        work = _requirements_repo(
+            td,
+            "## R002\nquote: 요구사항\nsource_issue: 321\n"
+            "check: UNVERIFIABLE: no mechanical check possible\n"
+            "status: open\n")
+        assert gates.requirement_registry(work, {}) == []
+
+
+def t_requirement_registry_missing_field_blocks():
+    with tempfile.TemporaryDirectory() as td:
+        work = _requirements_repo(
+            td, "## R003\nquote: 요구사항\nsource_issue: 321\nstatus: open\n")
+        bad = gates.requirement_registry(work, {})
+        assert any("R003" in b and "check" in b for b in bad), bad
+
+
+def t_ci_check_wires_requirement_registry():
+    # issue #321: requirement_registry 가 ci.check() 에 실제로 배선돼 있는지
+    # 검사한다 — "게이트가 등록만 되고 안 불린다"는 결함의 재발 방지 가드.
+    with tempfile.TemporaryDirectory() as td:
+        work = _fulfils_repo(td, "issue-9", "coding",
+                             "---\nkind: x\n---\n\n본문\n", ops=[])
+        (work / "docs" / "specs").mkdir(parents=True)
+        (work / "docs" / "specs" / "requirements.md").write_text(
+            "## R001\nquote: 요구사항\nsource_issue: 321\n"
+            "check: docs/specs/nope.py::x\nstatus: enforced\n")
+        bad = ci.check(work)
+        assert any("R001" in b for b in bad), bad
+
+
 def t_ci_check_missing_phase_with_pr_and_issue_blocks():
     # issue-228 인접 결함: --pr/--issue 는 주고 --phase 를 생략하면, 변경 전
     # ci.check()는 조용히 phase1 로 떨어져 이 이슈가 고치는 phase-2 차단
