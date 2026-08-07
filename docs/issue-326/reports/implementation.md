@@ -234,3 +234,42 @@ Both the acceptance-gate blocker (PART 1) and the `test_spec_index.py`
 failure remain outside this session's authority/write set. The
 Acceptance-section rewrite proposed in PART 1 is unchanged and still
 awaits the operator pasting it into issue #326.
+
+## Fourth pass (2026-08-07): re-attempted issue edit, re-rebased, re-verified
+
+This turn was asked to unblock #326's `closes-gate` (PR #348) by
+rewriting the issue's `## Acceptance` section so each criterion names an
+executable artifact, then re-run acceptance evidence against current
+`main`. Re-attempted `gh issue edit 326` with the exact replacement text
+drafted in PART 1 (unchanged — it already names the real, passing
+`EnsurePushedStrandedComment::*` tests as the gate, and marks the
+watchdog gap `unverifiable:` with a reason, per this turn's own
+instruction not to name a path that doesn't exist). `gh-guard.sh`
+refused it again, identical reason (contract v3 s9, issues are
+user-authored only, no role touches them) — third confirmation this is a
+standing mechanical block, not session state. The proposed text in PART 1
+is the deliverable for the operator to paste in; this session has no
+path to apply it directly.
+
+Rebased: `origin/main` had advanced 2 commits past this branch's base.
+`git rebase origin/main` — clean, no conflicts.
+
+Re-ran verification on the freshly rebased tree:
+
+- `python3 -m pytest test_spawn.py -k stranded -q` — 3 passed (same
+  three `EnsurePushedStrandedComment` tests named throughout this
+  record) — this is the artifact PART 1's proposed Acceptance text
+  names as the gate.
+- `python3 -m pytest -q --ignore=gates` — 409 passed, 1 failed
+  (`test_spec_index.py::t_baseline_repo_passes` — same pre-existing
+  `docs/specs/reconciled-index.md` hash-mismatch against `protocol.md`,
+  unrelated to this issue's write set).
+- `python3 -m pytest -q gates` — 68 passed, 1 failed
+  (`gates/test_closes_gate_ci.py::t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch`
+  — asserts issue #304 has an `## Acceptance` section; unrelated to
+  issue #326).
+
+Both failures are outside this issue's write set (`spawn.py`,
+`test_spawn.py`) and pre-date this branch's changes. #326's own
+acceptance artifact (`EnsurePushedStrandedComment::*`, 3/3) passes
+cleanly on current `main`.
