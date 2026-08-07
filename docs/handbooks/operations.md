@@ -891,6 +891,15 @@ Rationale for both changes:
 python3 test_gates.py
 ```
 
+전체 스위트를 돌릴 때는 `--ignore=gates` 를 붙이지 않는다(issue #435):
+`gates/` 서브트리 수집 불가 결함(#398)이 고쳐진 뒤로는 그 플래그가
+`gates/` 를 통째로 건너뛰는 결과만 낳는다 — 습관으로 붙이면 그 서브트리가
+깨져도 하루 종일 보이지 않는다.
+
+```bash
+python3 -m pytest -q
+```
+
 `pytest` 종료 코드는 스킵이 있어도 0이다 — 완료 주장이 기댈 수 있는 건 종료 코드뿐인데,
 스킵 섞인 실행이 그걸 깨끗한 통과와 구분 없이 준다(#334). 완료를 주장하기 전에는 아래로
 스킵 유무까지 확인한다:
@@ -907,6 +916,11 @@ python3 test_gates.py
 
 `python3 -m pytest`도 `pytest.ini`(`python_functions = test_* t_*`) 덕분에
 `test_gates.py`의 `t_*` 케이스를 포함해 전체 스위트를 수집·실행한다.
+
+Do not run the full suite with `--ignore=gates` (issue #435): that flag
+predates the fix for #398 (`gates/` subtree failed to collect at all);
+once `gates/` collects cleanly, the flag only hides that subtree if it
+breaks again. Run `python3 -m pytest -q` with no ignore flag.
 
 A pytest exit code stays 0 even when tests were skipped — a completion
 claim that keys off exit status alone can't tell "verified" from "never

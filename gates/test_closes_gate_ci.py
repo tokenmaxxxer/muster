@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import ci
 import pr_reference
 import spawn
+import shape_contracts
 
 
 def t_issue_and_role_from_branch_matches_convention():
@@ -158,8 +159,8 @@ def t_phase_from_approval_empty_role_suffix_comment_is_phase1():
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
     spawn._approvers = lambda repo: {"jjongkwann"}
     spawn._issue_comments = (
-        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-245/"}]
-        if n == 245 else [])
+        lambda repo, n: ([{"login": "jjongkwann", "body": "APPROVE issue-245/"}], True)
+        if n == 245 else ([], True))
     ci._pr_reviews = lambda repo, pr: []
     try:
         assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase1"
@@ -172,7 +173,7 @@ def t_phase_from_approval_no_signal_is_phase1():
     # 유무는 이 판정에 관여하지 않는다(issue #271 요구사항 2, #245 관찰 F1).
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
     spawn._approvers = lambda repo: {"jjongkwann"}
-    spawn._issue_comments = lambda repo, n: []
+    spawn._issue_comments = lambda repo, n: ([], True)
     ci._pr_reviews = lambda repo, pr: []
     try:
         assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase1"
@@ -186,8 +187,8 @@ def t_phase_from_approval_qualifying_issue_comment_is_phase2():
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
     spawn._approvers = lambda repo: {"jjongkwann"}
     spawn._issue_comments = (
-        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-245/implementation"}]
-        if n == 245 else [])
+        lambda repo, n: ([{"login": "jjongkwann", "body": "APPROVE issue-245/implementation"}], True)
+        if n == 245 else ([], True))
     ci._pr_reviews = lambda repo, pr: []
     try:
         assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase2"
@@ -200,8 +201,8 @@ def t_phase_from_approval_non_approver_comment_is_phase1():
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
     spawn._approvers = lambda repo: {"jjongkwann"}
     spawn._issue_comments = (
-        lambda repo, n: [{"login": "not-an-approver", "body": "APPROVE issue-245/implementation"}]
-        if n == 245 else [])
+        lambda repo, n: ([{"login": "not-an-approver", "body": "APPROVE issue-245/implementation"}], True)
+        if n == 245 else ([], True))
     ci._pr_reviews = lambda repo, pr: []
     try:
         assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase1"
@@ -217,8 +218,8 @@ def t_phase_from_approval_any_role_comment_qualifies_the_issue_is_phase2():
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
     spawn._approvers = lambda repo: {"jjongkwann"}
     spawn._issue_comments = (
-        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-245/execution-observation"}]
-        if n == 245 else [])
+        lambda repo, n: ([{"login": "jjongkwann", "body": "APPROVE issue-245/execution-observation"}], True)
+        if n == 245 else ([], True))
     ci._pr_reviews = lambda repo, pr: []
     try:
         assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase2"
@@ -231,7 +232,7 @@ def t_phase_from_approval_pr_review_approve_from_differing_account_is_phase2():
     # 없이도 phase2 (contract v3 s19).
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
     spawn._approvers = lambda repo: {"jjongkwann"}
-    spawn._issue_comments = lambda repo, n: []
+    spawn._issue_comments = lambda repo, n: ([], True)
     ci._pr_reviews = lambda repo, pr: [{"state": "APPROVED", "author": {"login": "jjongkwann"}}]
     try:
         assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase2"
@@ -252,8 +253,8 @@ def t_phase_from_approval_pr_thread_comment_is_not_issue_level_is_phase1():
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
     spawn._approvers = lambda repo: {"jjongkwann"}
     spawn._issue_comments = (
-        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-245/implementation"}]
-        if n == 1 else [])
+        lambda repo, n: ([{"login": "jjongkwann", "body": "APPROVE issue-245/implementation"}], True)
+        if n == 1 else ([], True))
     ci._pr_reviews = lambda repo, pr: []
     try:
         assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase1"
@@ -268,7 +269,7 @@ def t_autodetect_success_derives_issue_role_and_phase_from_approval():
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
     ci._pr_head_ref = lambda repo, pr: "issue-245/implementation"
     spawn._approvers = lambda repo: {"jjongkwann"}
-    spawn._issue_comments = lambda repo, n: []
+    spawn._issue_comments = lambda repo, n: ([], True)
     ci._pr_reviews = lambda repo, pr: []
     try:
         result = ci._autodetect_issue_phase(Path("."), 1, None, None)
@@ -369,7 +370,7 @@ def t_autodetect_reachability_fix_blocks_closes_keyword_without_approval():
     ci._pr_title = lambda repo, pr: "issue-245: phase 1"
     ci._pr_commit_messages = lambda repo, pr: []
     spawn._approvers = lambda repo: {"jjongkwann"}
-    spawn._issue_comments = lambda repo, n: []
+    spawn._issue_comments = lambda repo, n: ([], True)
     ci._pr_reviews = lambda repo, pr: []
     try:
         detected = ci._autodetect_issue_phase(Path("."), 1, None, None)
@@ -416,7 +417,7 @@ def t_autodetect_closes_only_blocks_commit_message_keyword_with_clean_body():
     ci._pr_title = lambda repo, pr: "issue-245: phase 1 proposal"
     ci._pr_commit_messages = lambda repo, pr: ["proposal work", "Closes #245"]
     spawn._approvers = lambda repo: {"jjongkwann"}
-    spawn._issue_comments = lambda repo, n: []
+    spawn._issue_comments = lambda repo, n: ([], True)
     ci._pr_reviews = lambda repo, pr: []
     try:
         detected = ci._autodetect_issue_phase(Path("."), 1, None, None)
@@ -634,7 +635,7 @@ def t_autodetect_resolves_fork_pr_with_role_none():
     ci._pr_is_cross_repo = lambda repo, pr: True
     pr_reference._pr_view = lambda repo, pr: "Fixes bug, see #330"
     spawn._approvers = lambda repo: {"jjongkwann"}
-    spawn._issue_comments = lambda repo, n: []
+    spawn._issue_comments = lambda repo, n: ([], True)
     ci._pr_reviews = lambda repo, pr: []
     try:
         result = ci._autodetect_issue_phase(Path("."), 1, None, None)
@@ -696,13 +697,15 @@ def t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch():
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
     ci._pr_head_ref = lambda repo, pr: "issue-304/implementation"
     pr_reference._pr_view = lambda repo, pr: "delivers the feature.\n\nCloses #304"
-    pr_reference._issue_view_body = lambda repo, issue: "no plan checklist here"
+    pr_reference._issue_view_body = (
+        lambda repo, issue: "no plan checklist here\n\n## Acceptance\n"
+        "check: `gates/test_closes_gate_ci.py`\n")
     ci._pr_title = lambda repo, pr: "issue-304: phase 2"
     ci._pr_commit_messages = lambda repo, pr: []
     spawn._approvers = lambda repo: {"jjongkwann"}
     spawn._issue_comments = (
-        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-304/architecture"}]
-        if n == 304 else [])
+        lambda repo, n: ([{"login": "jjongkwann", "body": "APPROVE issue-304/architecture"}], True)
+        if n == 304 else ([], True))
     ci._pr_reviews = lambda repo, pr: []
     try:
         detected = ci._autodetect_issue_phase(Path("."), 307, None, None)
@@ -735,8 +738,8 @@ def t_autodetect_missing_approval_refusal_names_role_searched_and_approvals_pres
     ci._pr_commit_messages = lambda repo, pr: []
     spawn._approvers = lambda repo: {"jjongkwann"}
     spawn._issue_comments = (
-        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-245/architecture"}]
-        if n == 999 else [])
+        lambda repo, n: ([{"login": "jjongkwann", "body": "APPROVE issue-245/architecture"}], True)
+        if n == 999 else ([], True))
     ci._pr_reviews = lambda repo, pr: []
     try:
         detected = ci._autodetect_issue_phase(Path("."), 1, None, None)
@@ -750,6 +753,26 @@ def t_autodetect_missing_approval_refusal_names_role_searched_and_approvals_pres
         spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
     assert any("role(implementation)" in b and "승인 코멘트를" in b and "이슈 #245 에 있는 승인: 없음" in b
                for b in bad), bad
+
+
+def t_issue_comments_stub_shape_contract_catches_old_pre_287_shape():
+    # issue #435 scope 2: 이 스위트의 13건 전부가 `spawn._issue_comments`를
+    # 흉내내는 스텁이 #287 이전 반환 형태(`list[dict]`)를 여전히 흉내내던
+    # 것 하나로 깨졌었다 — 스텁은 호출부가 아니라 대역이라 호출부 전수
+    # 검색으로는 안 잡힌다(#419에 새 유형으로 기록). 아래는 그 갈라짐을
+    # 실제로 빨갛게 만드는 검사(`shape_contracts.assert_stub_return_shape`)가
+    # 존재함을 증명한다: 옛 형태 스텁에서 실제로 터지고, 새 형태
+    # 스텁에서는 통과한다.
+    old_shape_stub = lambda repo, n: [{"login": "x", "body": "y"}]
+    try:
+        shape_contracts.assert_stub_return_shape(old_shape_stub, spawn._issue_comments, Path("."), 1)
+    except AssertionError as e:
+        assert "list" in str(e) and "tuple" in str(e), e
+    else:
+        raise AssertionError("old pre-#287 shape stub should have failed the shape contract")
+
+    new_shape_stub = lambda repo, n: ([{"login": "x", "body": "y"}], True)
+    shape_contracts.assert_stub_return_shape(new_shape_stub, spawn._issue_comments, Path("."), 1)
 
 
 if __name__ == "__main__":
