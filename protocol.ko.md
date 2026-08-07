@@ -166,6 +166,15 @@ on-the-record 자체 마켓플레이스(`.claude-plugin/marketplace.json`)에도
 `~/.claude/settings.json` 이나 `$PATH` 의 실행파일을 고쳐 **다음 실행에서 자기
 권한을 넓힐 수 있다**. 끄지 않는다.
 
+**지우지 말고 진단한다**: `.git/config` 에 대한 샌드박스 거부 쓰기는 git 자신의
+`cannot lock config file .git/config: File exists` 로 나타날 수 있다 — 문구만
+으로는 실제 잠금 경합과 구분되지 않는다(실측: 이슈 #289, 실 세션 셋). 이 문구를
+본 세션은 무엇이든 지우기 전에 샌드박스 *밖*에서 잠금 파일 존재 여부를
+확인하거나 `on-the-record` 에 물어야 하고, `*.lock` 파일을 첫 대응으로 `rm`
+해서는 안 된다 — 진짜 동시 잠금이라면 그 반사행동이 `.git/config` 를 깨뜨린다.
+아래 `allowUnsandboxedCommands = False` 와 같은 불변식이다: 경계 거부는 우회할
+신호가 아니라 진단할 신호다.
+
 ## 5. 승인 — GitHub 행위
 
 승인은 GitHub 행위다: PR 의 `APPROVED` 리뷰, 또는 정확히

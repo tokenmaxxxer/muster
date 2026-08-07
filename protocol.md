@@ -214,6 +214,16 @@ lets a command inside the sandbox edit `~/.claude/settings.json` or an
 executable on `$PATH` and **widen its own permissions on the next run.** Leave
 it on.
 
+**Diagnose, don't delete**: a sandbox-denied write to `.git/config` can
+surface as git's own `cannot lock config file .git/config: File exists` —
+indistinguishable from real lock contention by wording alone (measured:
+issue #289, three live sessions). A session that sees this should check for
+the lock file from *outside* the sandbox (or ask `on-the-record`) before
+removing anything, and should never `rm` a `*.lock` file as a first
+response — against a genuine concurrent lock that reflex corrupts
+`.git/config`. Same invariant as `allowUnsandboxedCommands = False` below:
+a boundary denial is a signal to diagnose, not to route around.
+
 ## 5. Approval — a GitHub act
 
 Approval is a GitHub act: an `APPROVED` PR review, or a comment that is
