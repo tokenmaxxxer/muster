@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
+import acceptance_gate
 import ci
 import gates
 import pr_reference
@@ -699,11 +700,56 @@ def t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch():
     orig_issue_body = pr_reference._issue_view_body
     orig_title, orig_commits = ci._pr_title, ci._pr_commit_messages
     orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
+    orig_check_issue_body = acceptance_gate.check_issue_body
     ci._pr_head_ref = lambda repo, pr: "issue-304/implementation"
     pr_reference._pr_view = lambda repo, pr: "delivers the feature.\n\nCloses #304"
     pr_reference._issue_view_body = (
         lambda repo, issue: "no plan checklist here\n\n## Acceptance\n"
         "check: `gates/test_closes_gate_ci.py`\n")
+    ci._pr_title = lambda repo, pr: "issue-304: phase 2"
+    ci._pr_commit_messages = lambda repo, pr: []
+    spawn._approvers = lambda repo: {"jjongkwann"}
+    spawn._issue_comments = (
+        lambda repo, n: ([{"login": "jjongkwann", "body": "APPROVE issue-304/architecture"}], True)
+        if n == 304 else ([], True))
+    ci._pr_reviews = lambda repo, pr: []
+    # issue #427 — this fixture pins only the #312 phase/mismatch shape; it
+    # is not a realistic issue #304 body, so any later body-content gate
+    # (e.g. #310's acceptance-gate) must not be exercised through it. Stub
+    # the pure boundary function directly (gates/acceptance_gate.py:34) so
+    # this isolation holds regardless of what pr_reference.check calls next.
+    acceptance_gate.check_issue_body = lambda issue, body: []
+    try:
+        detected = ci._autodetect_issue_phase(Path("."), 307, None, None)
+        assert detected == (304, "phase2"), detected
+        issue, phase = detected
+        bad = ci.check(Path("."), pr=307, issue=issue, phase=phase, closes_only=True)
+    finally:
+        ci._pr_head_ref = orig_head_ref
+        pr_reference._pr_view = orig_body
+        pr_reference._issue_view_body = orig_issue_body
+        ci._pr_title, ci._pr_commit_messages = orig_title, orig_commits
+        spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
+        acceptance_gate.check_issue_body = orig_check_issue_body
+    assert not any("closing 키워드" in b for b in bad), bad
+    assert bad == [], bad
+
+
+def t_autodetect_304_307_shape_still_surfaces_real_acceptance_gate_finding():
+    # issue #427 — companion/inverse pin: same #304/#307 shape, but leaves
+    # acceptance_gate.check_issue_body UN-stubbed and gives the issue body
+    # a genuine missing-`## Acceptance` shape, so the real gate wiring is
+    # exercised. If the stub above is ever silently deleted or
+    # pr_reference.check stops calling acceptance_gate at all, this test
+    # still catches that acceptance_gate has gone unreachable.
+    orig_head_ref = ci._pr_head_ref
+    orig_body = pr_reference._pr_view
+    orig_issue_body = pr_reference._issue_view_body
+    orig_title, orig_commits = ci._pr_title, ci._pr_commit_messages
+    orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
+    ci._pr_head_ref = lambda repo, pr: "issue-304/implementation"
+    pr_reference._pr_view = lambda repo, pr: "delivers the feature.\n\nCloses #304"
+    pr_reference._issue_view_body = lambda repo, issue: "no acceptance section here at all"
     ci._pr_title = lambda repo, pr: "issue-304: phase 2"
     ci._pr_commit_messages = lambda repo, pr: []
     spawn._approvers = lambda repo: {"jjongkwann"}
@@ -722,8 +768,7 @@ def t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch():
         pr_reference._issue_view_body = orig_issue_body
         ci._pr_title, ci._pr_commit_messages = orig_title, orig_commits
         spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
-    assert not any("closing 키워드" in b for b in bad), bad
-    assert bad == [], bad
+    assert any("Acceptance" in b for b in bad), bad
 
 
 def t_autodetect_missing_approval_refusal_names_role_searched_and_approvals_present():
