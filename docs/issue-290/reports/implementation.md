@@ -4,8 +4,21 @@ code_under_review:
   - test_approve_scope.py
   - test_gates.py
   - on-the-record/commands/run.md
+  - docs/handbooks/operations.md
 loop_state: delivered
 open_findings: []
+resolved_findings:
+  - PR #295 review (2026-08-07): on-the-record-tests.yml ran `pytest -q`
+    with no install step, so CI failed at "pytest: command not found"
+    (exit 127) without ever exercising the suite. Fixed by adding a
+    `pip install pytest` step, then (discovered on the resulting CI
+    run) a `git config --global` identity step, needed because the
+    runner has no default git identity and one test performs a real
+    `git commit`. Confirmed green on GitHub Actions run 31147608397
+    (commit c03c7ae): 355 passed, 0 failed. Record's effect-verification
+    numbers corrected from a sandbox-local "2 failed, 352 passed" (an
+    artifact of this session's sandbox, not the branch) to the actual
+    CI-measured 355 passed / 0 failed.
 ---
 
 # issue-290 / issue-294 — phase 2: CI + test-hygiene fix
@@ -66,7 +79,7 @@ proposal named.)
 
 After both fixes (`subprocess.run` scoping + `_patch_gh` scoping +
 `test_gates.py:99`), run against the clean, committed tree (commit
-`b408df8`):
+`b408df8`) inside this session's sandbox:
 
 ```
 $ pytest -q
@@ -79,27 +92,56 @@ All monkeypatch-pollution failures cleared:
 `ApproveScope` tests now pass with the patch correctly scoped and torn
 down; no new failures introduced by the fixes themselves.
 
-The 2 remaining failures are environment-only, reproduce identically on
-the pre-fix commit, and are unrelated to #290's monkeypatch-pollution
-class — out of this proposal's write set:
+The 2 remaining failures reproduced *in this sandbox* are environment
+artifacts specific to this workspace, not to the branch's code — a
+review of PR #295 (2026-08-07) caught that this needed correcting
+after CI was wired up and actually run, since a "2 failed" number
+recorded without distinguishing sandbox-local artifacts from real
+branch state reads as a code defect that isn't one:
 - `test_gates.py::t_repo_local_claude_config_stops_the_spawn`:
   `OSError: [Errno 30] Read-only file system:
   /home/jwjung/.tokenmaxxxer/trusted-repo-config.json` — a path outside
-  the repo that this specific sandbox denies writes to. Reproduced
-  identically against the pre-fix commit via `git stash`.
-- `test_gates.py::t_rulebook_version_is_recorded`: now correctly
-  fails, rather than being silently swallowed by the removed `or True`,
-  because this workspace's checkout root has several untracked
-  environment dotfiles (`.bash_profile`, `.claude/`, `.mcp.json`, etc. —
-  pre-existing sandbox artifacts, not created by this session's work)
-  that make `git status --porcelain` non-empty, so
-  `spawn.rulebook_version()` correctly reports the tree as dirty
-  (`커밋안됨`). This is the fix doing exactly what #290 asked — the
-  assertion can now fail — surfacing a genuine (if here environmental,
-  not code-caused) dirty-tree condition instead of masking it.
+  the repo that this specific sandbox denies writes to.
+- `test_gates.py::t_rulebook_version_is_recorded`: fails here because
+  this sandbox's checkout root has untracked environment dotfiles
+  (`.bash_profile`, `.claude/`, `.mcp.json`, etc. — pre-existing
+  sandbox artifacts, not created by this session's work) that make
+  `git status --porcelain` non-empty, so `spawn.rulebook_version()`
+  correctly reports the tree as dirty (`커밋안됨`).
+
+Neither condition exists on a fresh CI checkout (`actions/checkout@v4`
+into a clean runner, no stray dotfiles, no read-only paths outside the
+workspace), which is what the CI run below actually shows: both pass
+there. What CI *did* catch that the sandbox run above could not is a
+third, CI-only failure — `pip install pytest` alone was not enough for
+green, because the runner also has no global `git user.name`/
+`user.email`, so `test_spawn.py::RulebookCheckoutMemo::test_ttl_marker_does_not_dirty_clone`
+(which does a real `git commit`) failed with exit 128. Fixed by adding
+a "configure git identity for tests" step
+(`.github/workflows/on-the-record-tests.yml`) before the run step.
+
+**Actual measured result, this branch, GitHub Actions run
+[31147608397](https://github.com/tokenmaxxxer/on-the-record/actions/runs/31147608397/job/92770241545)
+(commit `c03c7ae`, PR #295), full directory, real CI environment —
+this supersedes both prior counts above, which were sandbox-local, not
+branch state:**
+
+```
+..................                                                       [100%]
+355 passed, 23 subtests passed in 13.77s
+```
+
+0 failed. Job conclusion: success.
 
 ## What did not work
 
+- Assumed `pip install pytest` alone would make the CI job green
+  (PR #295 review); the first CI run after adding it still failed —
+  `test_spawn.py::RulebookCheckoutMemo::test_ttl_marker_does_not_dirty_clone`
+  needs to perform a real `git commit`, and the runner has no global
+  git identity configured, so it failed with exit 128. Fixed by adding
+  a "configure git identity for tests" step before the run step;
+  confirmed green on the next run (355 passed, 0 failed).
 - Expected `test_gates.py::t_rulebook_version_is_recorded` to pass
   clean after committing; it still fails post-commit because this
   sandbox's checkout root carries pre-existing untracked environment
