@@ -15,6 +15,15 @@ from pathlib import Path
 from unittest import mock
 
 import spawn
+import shape_contracts
+
+
+def _event(type_, **kw):
+    """Build a stream-json event fixture and validate its shape against
+    what spawn.py's parser reads (issue #335) before returning it."""
+    event = {"type": type_, **kw}
+    shape_contracts.assert_claude_stream_event_shape(event)
+    return event
 
 
 class RepoConfigRefusal(unittest.TestCase):
@@ -1742,8 +1751,9 @@ class EventReporting(unittest.TestCase):
         # 이슈 #246 결함 3: 실제 스트림에서 tool_result 는 언제나 그 도구를
         # 요청한 assistant 의 tool_use 블록(같은 id) 뒤에 온다 — 건별
         # 상관관계 픽스처가 그 순서를 재현한다.
-        return json.dumps({"type": "assistant", "message": {"content": [
-            {"type": "tool_use", "id": tool_use_id, "name": name, "input": {}}]}})
+        event = _event("assistant", message={"content": [
+            {"type": "tool_use", "id": tool_use_id, "name": name, "input": {}}]})
+        return json.dumps(event)
 
     def test_end_turn_result_is_not_a_gate_refusal(self):
         # issue-46/49 survey fixture: a normal end_turn result JSON line
@@ -3411,6 +3421,7 @@ class IssueComments(unittest.TestCase):
         spawn._repo_slug = lambda root: "acme/repo"
         page1 = [{"user": {"login": "a"}, "body": "one"}]
         page2 = [{"user": {"login": "b"}, "body": "two"}]
+        shape_contracts.assert_gh_paginate_slurp_shape([page1, page2])
         calls = []
 
         def fake_run(cmd, *a, **k):
@@ -3435,6 +3446,8 @@ class IssueComments(unittest.TestCase):
         orig_slug = spawn._repo_slug
         orig_run = subprocess.run
         spawn._repo_slug = lambda root: "acme/repo"
+
+        shape_contracts.assert_gh_paginate_slurp_shape([[]])
 
         def fake_run(cmd, *a, **k):
             return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps([[]]), stderr="")
@@ -4526,6 +4539,65 @@ class GitEnvTimeoutPromptVars(unittest.TestCase):
         with mock.patch.object(spawn, "_resolve_gh_token", lambda: ""):
             env = spawn._git_env()
         self.assertIsNone(env)
+
+
+class FixtureShapeContracts(unittest.TestCase):
+    """이슈 #335: 픽스처 shape 이 실제 인터페이스에서 벗어나면 조용히
+    통과하는 대신 여기서 시끄럽게 실패해야 한다."""
+
+    GOLDEN_GH_PATH = os.path.join(
+        os.path.dirname(__file__), "tests", "fixtures", "golden",
+        "gh_paginate_slurp_sample.json")
+
+    def _golden_gh_payload(self):
+        with open(self.GOLDEN_GH_PATH, encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_gh_paginate_slurp_golden_sample_matches_own_shape_check(self):
+        # 실제 dependency(gh api)에 대해 완전히 검증되는 유일한 리그: 이
+        # 픽스처는 실측 캡처본이고(proposal 참고), 그 자체를 shape-check로
+        # 검증한다 — 체크가 자기 자신만 확인하는 게 아님을 보인다.
+        payload = self._golden_gh_payload()
+        shape_contracts.assert_gh_paginate_slurp_shape(payload)
+
+    def test_gh_paginate_slurp_shape_fails_loudly_on_missing_field(self):
+        payload = self._golden_gh_payload()
+        broken = [[dict(c) for c in page] for page in payload]
+        for page in broken:
+            for comment in page:
+                del comment["body"]
+        if not any(comment for page in broken for comment in page):
+            self.skipTest("golden sample has no comments to break")
+        with self.assertRaises(AssertionError) as cm:
+            shape_contracts.assert_gh_paginate_slurp_shape(broken)
+        self.assertIn("body", str(cm.exception))
+
+    def test_gh_paginate_slurp_shape_fails_on_non_list_page(self):
+        with self.assertRaises(AssertionError):
+            shape_contracts.assert_gh_paginate_slurp_shape([{"not": "a list"}])
+
+    def test_stream_event_shape_accepts_fixtures_spawn_py_reads(self):
+        _event("result", permission_denials=[{"tool_name": "Write"}])
+        _event("user", message={"content": [
+            {"type": "tool_result", "is_error": True, "tool_use_id": "t1",
+             "content": "boom"}]})
+        _event("assistant", message={"content": [
+            {"type": "tool_use", "id": "t1", "name": "Write", "input": {}}]})
+
+    def test_stream_event_shape_fails_when_fixture_missing_field_parser_reads(self):
+        # tool_use_id 가 spawn.py:1608 부근에서 상관관계 확인에 쓰인다 —
+        # 픽스처가 이 필드를 빠뜨리면 시끄럽게 실패해야 한다.
+        with self.assertRaises(AssertionError) as cm:
+            _event("user", message={"content": [
+                {"type": "tool_result", "is_error": True, "content": "boom"}]})
+        self.assertIn("tool_use_id", str(cm.exception))
+
+    def test_stream_event_shape_rejects_unknown_top_level_type(self):
+        # spawn.py 파서가 읽지 않는 필드를 픽스처가 선언하면(여기서는
+        # top-level type 자체가 파서 기대 밖) — 파서가 실제로 읽는 값
+        # 집합과 픽스처가 어긋났다는 뜻이므로 실패해야 한다.
+        with self.assertRaises(AssertionError):
+            shape_contracts.assert_claude_stream_event_shape({"type": "system"})
 
 
 if __name__ == "__main__":
