@@ -1857,7 +1857,8 @@ def _post_stall_comment(root: Path, issue: int, key: str, work: str, log: str) -
     구분되지 않았다. `_post_crash_comment` 와 같은 read-then-check
     멱등 패턴: 고정 마커가 이미 있으면 아무것도 하지 않는다."""
     marker = _STALL_COMMENT_MARKER.format(key=key)
-    if any(marker in c.get("body", "") for c in _issue_comments(root, issue)):
+    comments, ok = _issue_comments(root, issue)
+    if ok and any(marker in c.get("body", "") for c in comments):
         return
     slug = _repo_slug(root)
     if not slug:
@@ -1881,7 +1882,8 @@ def _post_stranded_push_comment(root: Path, issue: int, role: str, branch: str,
     이후 pr-create-failed가 서로 다른 마커를 쓰고 둘 다 드러난다."""
     key = f"{branch}:{reason}"
     marker = _STRANDED_PUSH_COMMENT_MARKER.format(key=key)
-    if any(marker in c.get("body", "") for c in _issue_comments(root, issue)):
+    comments, ok = _issue_comments(root, issue)
+    if ok and any(marker in c.get("body", "") for c in comments):
         return
     slug = _repo_slug(root)
     if not slug:
