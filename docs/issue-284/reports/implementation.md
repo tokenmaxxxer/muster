@@ -184,3 +184,18 @@ fix than a synthetic probe would have been.
 ## Open findings
 
 No open findings require resolution; none outstanding.
+
+## Bootstrap body edit (PR #364)
+
+This PR's own body was written at phase 1 with no closing keyword (correct
+for phase 1) and never updated when approval flipped it to phase-2 rules,
+so it read as red on closes-gate — the exact #284 defect, on this PR
+itself. Fixed by `gh pr edit --body-file` adding `Closes #284`, verified
+green (`closes-gate pass`, run 31151773385). This edit is a one-time
+BOOTSTRAP, not the fix: once #284 lands, the gate accepts the phase-2
+record file's existence as evidence of closing intent, so future
+phase-2 PRs need no body edit at all. This PR needed the manual edit
+because it cannot land under the rule it is itself replacing. Naming it
+as a bootstrap matters — an unlabelled body edit here would read to a
+future reader as evidence that editing PR bodies is the accepted
+remedy, which is the symptom-handling the operator rejected (#363).
