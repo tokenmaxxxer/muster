@@ -1,138 +1,241 @@
 ---
 status: proposed
 files:
+  - on-the-record/hooks/hooks.json
+  - on-the-record/hooks/contract-guard.sh
+  - on-the-record/hooks/stop-gate.sh
+  - spawn.py
   - gates/boundary.py
   - gates/test_boundary.py
+  - .github/workflows/consumer-closes-gate.yml
+  - .github/workflows/consumer-closure-sweep.yml
   - .github/workflows/plan-aware-closes-gate.yml
   - .github/workflows/closure-sweep.yml
   - .github/workflows/issue-bundling-gate.yml
   - .github/workflows/on-the-record-tests.yml
-  - .github/workflows/consumer-closes-gate.yml
-  - .github/workflows/consumer-closure-sweep.yml
   - docs/specs/enforcement-boundary.md
   - on-the-record/commands/run.md
   - docs/issue-441/reports/architecture.md
 ---
+
+## Rework note (supersedes the PR #442 version of this file)
+
+PR #442 was rejected. Its conclusion — a consumer must hand-add a caller
+workflow file, called "unavoidable" by the proposal itself — leaves the
+exact shape #310 forbids: unenforced-by-default becomes
+enforced-only-if-installed, and installation is unobservable, so the two
+are practically the same state. The rejection's instruction: stop starting
+from "what must a consumer install" and start from "where does a consumer
+pass with no action of their own." This version does that. It keeps item 2
+and item 3's CI-reference mechanics from #442 (they are sound) but
+demotes them from primary path to supplement, and it completes item 1's
+table to all 11 `gates/*.py` modules plus `spawn.py` and the plugin hooks,
+per the rejection's explicit instruction.
 
 ## Intent
 
 #441 asks for the decision #396 left open: which enforcement mechanisms are
 part of the contract `run.md` ships (and must therefore reach consumer
 projects), which are legitimately local to this repository, how the
-contract-bound ones physically reach a consumer that installs only a plugin,
-how `gates/*.py` executes there, and how a consumer can read which contract
-clauses are currently unenforced for it.
+contract-bound ones physically reach a consumer that installs only a
+plugin, how `gates/*.py` executes there, and how a consumer can read which
+contract clauses are currently unenforced for it. The rework adds a fifth,
+operator-stated requirement: minimum enforcement must stand for a consumer
+who installs nothing at all.
 
-## Constraints established by the issue and the survey
+## Constraints established by the issue, the survey, and the PR #442 rejection
 
-- Item 1 needs a per-mechanism verdict with a recorded reason, not a
-  blanket ship-everything or keep-everything call.
-- Item 2's candidates are named in the issue: scaffold, documented setup
-  step, or reusable workflow reference (`uses: owner/repo/.github/workflows/x.yml@ref`).
-- Item 3 is fatal if skipped: a workflow with no `gates/*.py` present does
-  not run, regardless of what item 2 decides.
-- Item 4: an unenforced clause must be legible to a consumer, not merely
-  absent (#310).
+- Item 1 needs a per-mechanism verdict with a recorded reason, covering
+  every module under `gates/`, not a subset (rejection, explicit).
+- For each contract clause, identify the **act** that violates it and
+  determine whether that act passes a reachable gate — a hook the plugin
+  already installs, or `spawn.py` (the only path that starts a role
+  session, run directly rather than vendored, so no consumer-side copy to
+  go stale). CI workflows are a supplement for what those two do not
+  reach, never the primary path (rejection, explicit).
+- An act with no reachable zero-install gate must be recorded as
+  genuinely unreached, not papered over with a CI mechanism the consumer
+  may or may not have installed (#310).
+- Item 4: an unenforced clause must be legible to a consumer, including
+  whether the CI supplement is installed for them right now — "legible"
+  means observable per-session, not just documented once in a spec file
+  a consumer would have to think to open.
 - The boundary must be *derived*, not a hand-maintained list (#333, #376),
-  and verified by a test that fails when the derivation and reality
-  diverge (`test_gates.py` per the issue's acceptance criteria — implemented
-  as `gates/test_boundary.py` in this proposal, following this repo's
-  `test_<module>.py` naming next to the module it tests).
-- Acceptance requires running `closes-gate` in one real consumer project,
-  not reasoning about it (#416).
+  verified by a test that fails when a `gates/*.py` module, hook, or
+  workflow has no recorded verdict.
+- Acceptance requires running the enforcement in one real consumer
+  project **that has done no installation work** (rejection, explicit;
+  tightens #442's "one live consumer project" to specify its state).
 
-## Per-mechanism decision (item 1)
+## Where a consumer unavoidably passes, with no action of their own
 
-| mechanism | verdict | reason |
+Two paths exist today, before this proposal changes anything:
+
+1. **Plugin hooks** (`on-the-record/hooks/hooks.json`) — installed once
+   with the plugin, then run on every matching tool call for the life of
+   the session, refreshed by `self-update.sh`'s own TTL pull so they do
+   not go stale the way a copied workflow file would. Current wiring:
+   `SessionStart` → `self-update.sh`, `UserPromptSubmit` → `directive.sh`,
+   `PreToolUse` (matcher `Write|Edit|MultiEdit|NotebookEdit`) →
+   `deliverable-guard.sh`, `Stop` → `stop-gate.sh`. `PreToolUse` matches
+   only file-write tools today; it does not see `Bash` at all, so
+   `gh pr merge`, `gh issue close`, and `git push` currently pass through
+   unseen. Adding a `Bash` matcher puts a gate **in front of** those
+   commands, before they execute — the same trust shape core's
+   `board-gate.sh`/`approval-gate.sh` already occupy for a different act,
+   so this is not a new kind of gate, just this repository's own
+   contract-enforcement gate moved to sit where those already sit.
+2. **`spawn.py`** — the only way to start a role session. Not shipped via
+   the plugin marketplace, but not vendored either: every caller, this
+   repo included, runs this exact file directly, so there is no per-consumer
+   copy that can drift from it. A check added here runs identically for
+   every consumer the moment they call it, with zero installation step.
+
+Everything below is organized around these two paths and what they do and
+do not reach.
+
+## Item 1 — per-mechanism verdict (complete: 11 `gates/*.py` modules, `spawn.py`, the 4 plugin hooks, 4 workflows)
+
+| mechanism | violating act | reachable path | verdict | reason |
+|---|---|---|---|---|
+| `ci.py` (phase-1/phase-2, `Closes #N`, write-scope, orchestrator-authored-deliverable ban) | `gh pr merge` on the delivering PR | **new**: `PreToolUse`+`Bash` in `contract-guard.sh`, intercepts before merge | contract | `run.md` states these as obligations on a role session's PR; enforcement must travel with the text (#310) |
+| `pr_reference.py` (#126) | `gh pr create` / `gh pr merge` with a body not referencing its issue | **new**: same `contract-guard.sh` intercept | contract | same reasoning; folds into the same pre-merge check as `ci.py`, same act |
+| `closure_sweep.py`, single-PR case (closing-keyword present on the delivering PR) | `gh pr merge` without a closing keyword linking the issue | **new**: same `contract-guard.sh` intercept, checked at merge time | contract | the specific violating act (this merge, this PR) is interceptable even though the module's full board-wide mode is not (see next row) |
+| `closure_sweep.py`, board-wide case (already-merged PRs, drift discovered later, delivered-but-open state accumulated over time) | none — this is a retrospective state, not one act | CI only (`consumer-closure-sweep.yml`, supplement) | contract, CI-supplement | nothing to intercept: the violation is an absence discovered later, so periodic/triggered scanning is structurally required, not a design choice |
+| `acceptance_gate.py` (#310, executable `## Acceptance`) | opening a phase-2 session against an issue whose Acceptance is prose-only | **new**: `spawn.py` preflight, before the session starts | contract | stronger than a merge-time check — refuses the session before any work happens, matching #424's "wire out of the wrong state" over "rule to follow" |
+| `landing_readiness.py` (#407) | `gh pr merge` on a PR that fails the combined checks/approval/scope-overlap judgment | **new**: folds into the same `contract-guard.sh` pre-merge intercept | contract | same act as `ci.py`/`pr_reference.py`; today this module is advisory-only, this proposal promotes it to blocking inside the hook |
+| `spawn_coverage.py` (#330, an issue never spawned) | none — absence of an act over time | CI only (`consumer-closure-sweep.yml`, supplement) or unreached if not installed | contract, CI-supplement, **honestly unreached without it** | there is no act to intercept; "no session was ever started" cannot be caught by gating a tool call. Recorded here per #310 rather than left off the table, which is the specific defect the rejection named |
+| `issue_bundling.py` (#328) | `gh issue create` with bundled scope | (could be hooked, not chosen) | repo-local | this org's own filing hygiene; `run.md` states no such obligation on a consumer's role sessions |
+| `on-the-record-tests.yml` / this repo's own `pytest` | n/a | n/a | repo-local | verifies `on-the-record`'s own source, not a consumer's |
+| `skip_gate.py` (#334) | this repo's own `pytest` run reporting skips as pass | n/a | repo-local | wraps this repo's own CI invocation of its own suite |
+| `spec_index.py` (#336) | edits to this repo's own `docs/specs/` without index update | n/a | repo-local | checks this repo's own doc set, not a consumer's |
+| `risk_report.py` (#319) | none — advisory only | n/a | n/a (infrastructure) | non-blocking classifier feeding `gates.py`'s review surface, not itself a clause |
+| `gates.py` | none — router/dispatcher | n/a | n/a (infrastructure) | dispatches to the modules above; not a standalone clause |
+| `flows.py` (#172) | none — read-only | n/a | repo-local | feeds this repo's own status board UI |
+| plugin hooks (`directive.sh`, `deliverable-guard.sh`, `stop-gate.sh`, `self-update.sh`) | — | already shipped, `PreToolUse`/`UserPromptSubmit`/`Stop`/`SessionStart` | contract, already shipped | listed for table completeness; `deliverable-guard.sh`'s matcher gains `Bash` per this proposal (new script `contract-guard.sh`, not a rewrite of the existing deny-only file-write guard) |
+| `spawn.py` | — | itself is the reach point | contract | not marketplace-shipped, but run directly by every caller — see "where a consumer unavoidably passes" above |
+
+## Item 2 (rework) — primary path is zero-install; CI is the supplement, and its absence is now observable
+
+**Primary**: `contract-guard.sh`, a new `PreToolUse` hook matched on `Bash`,
+ships with the plugin like the three existing hook scripts. It inspects
+the command before execution (same deny-before-effect shape as
+`deliverable-guard.sh`) and, for `gh pr merge` / `gh pr create` / `gh issue close`
+matching a delivering PR in a `run.md`-governed session, runs the checks
+from the `ci.py` / `pr_reference.py` / `closure_sweep.py` (single-PR) /
+`landing_readiness.py` rows above via `gh api`/`gh pr view` calls (the
+same read-only GitHub-API access those modules already use — no local
+checkout needed, so no trust-boundary change from what `deliverable-guard.sh`
+already does today). This reaches every consumer who has the plugin
+installed, which is the same population `run.md` itself already reaches —
+no additional installation, because it is not a new artifact, it is a new
+matcher line on an artifact already present.
+
+`spawn.py` gains the `acceptance_gate.py` preflight (item 1) and, separately,
+a **visibility check**: at session start, if the target repo has no
+`.github/workflows/consumer-closes-gate.yml` (or equivalent caller), it
+prints a one-line notice to the operator that CI-side board-wide sweeps
+(`closure_sweep.py` board-wide mode, `spawn_coverage.py`) are not installed
+for this repo. This is what answers the rejection's "nobody knows which
+projects installed it, so nobody can act on it": installation state
+becomes an observed, printed fact on every session in every consumer
+repo, not a silent unknown. It does not make the CI supplement
+zero-install — it makes its absence impossible to not notice.
+
+**Supplement**: the reusable-workflow mechanics from #442 are kept
+unchanged in their design (`uses: tokenmaxxxer/on-the-record/.github/workflows/consumer-closes-gate.yml@main`,
+checkout pinned to `tokenmaxxxer/on-the-record@main` rather than the
+caller's ref or working tree, exactly matching `plan-aware-closes-gate.yml`'s
+existing trust shape) but are now positioned as covering only what the
+zero-install path structurally cannot reach — see next section — plus the
+board-wide, periodic checks (`closure_sweep.py` full mode, `spawn_coverage.py`)
+that have no single act to intercept. A consumer still adds one caller
+file to get this layer; the difference from #442 is that its absence no
+longer produces an unknowable gap — `spawn.py`'s visibility check reports
+it every session, and the baseline (merge-time and session-start checks
+above) already stands without it.
+
+## Item 3 — unchanged from #442: how `gates/*.py` executes in a consumer
+
+Kept as designed in #442: the reusable workflow's `checkout` step is
+pinned to `repository: tokenmaxxxer/on-the-record, ref: main`, giving the
+job `gates/*.py` regardless of which project's workflow invoked it, and it
+talks to the consumer's PR purely through `gh`/API calls, matching how
+`gates/ci.py --closes-only` already operates. `contract-guard.sh` (item 2,
+new) uses the same read-only API pattern rather than a checkout, since it
+runs inside an existing session rather than a fresh CI job — no new
+execution model, same access pattern read twice.
+
+## Reachable vs. unreached — recorded honestly, per #310
+
+| act | reachable by `contract-guard.sh` (Bash hook)? | reachable by `spawn.py`? |
 |---|---|---|
-| `plan-aware-closes-gate.yml` / `gates/pr_reference.py`, `gates/ci.py` (phase-1/phase-2, `Closes #N`, write-scope) | **contract** | `run.md` states these obligations as things a role session and its PR must do; a consumer installing `run.md` is told these rules apply to them. Enforcement must travel with the description or #310 reproduces across the repo boundary. |
-| `closure-sweep.yml` / `gates/closure_sweep.py` | **contract** | `run.md` (per the survey, lines ~276, ~344) describes closing-keyword/delivered-but-open discipline that only `closure_sweep.py` detects; the text ships already, so the detector must be reachable too. |
-| `issue-bundling-gate.yml` / `gates/issue_bundling.py` | **repo-local** | Checks issue-*creation* hygiene for how `tokenmaxxxer/*` projects file issues (#328). `run.md` does not state a bundling obligation for role sessions or their PRs — this is process discipline for the issue author's own habit in this org, not a clause a consumer's `run.md` copy asserts. Kept local; recorded here so the judgment isn't merely absent. |
-| `on-the-record-tests.yml` | **repo-local** | Runs `on-the-record`'s own pytest suite against its own PRs. A consumer has no reason to run on-the-record's test suite; nothing in `run.md` claims it does. |
-| `on-the-record/hooks/*.sh` | **contract, already shipped** | No action needed — already reaches consumers via the plugin. Listed for completeness of the per-mechanism table. |
+| Claude Code session runs `gh pr merge` / `gh issue close` via its Bash tool | **yes** | n/a |
+| Claude Code session runs `git push` to a protected branch via its Bash tool | **yes**, matcher extends to it | n/a |
+| Opening a phase-2 session on an issue with prose-only Acceptance | n/a | **yes** |
+| A human clicks "Merge pull request" / "Close issue" in the GitHub web UI | **no — no hook fires; no Claude Code session is involved at all** | no |
+| A person runs `gh`/`git` from a plain terminal, outside any Claude Code session | **no — hooks are session-scoped** | no |
+| Board-wide drift (`closure_sweep.py` full mode, `spawn_coverage.py`) | no — no single act to intercept | no |
 
-## Item 2 — how a contract-bound mechanism reaches a consumer
-
-**Decision: reusable workflow reference**, not a scaffold and not a
-documented manual-setup step alone.
-
-Argument: a scaffold (files a consumer copies once) drifts the moment
-`on-the-record` fixes the gate — the consumer's copy is now stale and
-nothing detects it, reproducing exactly the "description ships, backing
-doesn't" shape one layer down. A purely-documented setup step has the same
-problem plus depends on the consumer actually reading and following docs
-before an issue makes it visible. A reusable workflow reference
-(`uses: tokenmaxxxer/on-the-record/.github/workflows/consumer-closes-gate.yml@main`)
-means the consumer's own thin workflow file never changes; fixes to the gate
-logic land the moment `on-the-record`'s `main` updates, with no consumer
-action. This matches how `plan-aware-closes-gate.yml` already treats trust:
-it deliberately never runs PR-supplied code, only code pinned to a fixed
-external ref — a reusable-workflow caller is the same trust shape, just
-initiated from a different repository.
-
-Consumers still need one documented one-time step — add a caller file
-(≈10 lines) invoking the reusable workflow, since a plugin genuinely cannot
-install `.github/workflows/*`. That step is unavoidable and is recorded in
-`docs/specs/enforcement-boundary.md`, not hidden as "automatic."
-
-## Item 3 — how `gates/*.py` actually executes in a consumer
-
-The reusable workflow's own `checkout` step is pinned to
-`repository: tokenmaxxxer/on-the-record, ref: main` (not the calling repo,
-not the calling ref) — the same pinning `plan-aware-closes-gate.yml` already
-uses for its own repo, just made explicit about which repo. This is what
-makes `gates/*.py` present in the job's filesystem regardless of which
-project's workflow invoked it. The gate then talks to the *consumer's* PR
-purely through `gh` CLI / GitHub API calls (`--pr`, `github.repository`,
-`GH_TOKEN`) exactly as `gates/ci.py --closes-only` already does today — it
-was already written to never read the invoking repo's working tree for its
-closes-only mode (survey, `pr_reference.py` trust-boundary note). Concretely:
-new thin wrapper workflows `consumer-closes-gate.yml` / `consumer-closure-sweep.yml`
-add `on: workflow_call` and parameterize `github.repository` /
-`secrets: inherit`; `plan-aware-closes-gate.yml` and `closure-sweep.yml`
-become thin callers of the same job for this repo, so there is exactly one
-implementation of each job, not a fork.
-
-Not chosen: shipping `gates/*.py` inside the plugin directory. Rejected
-because the plugin has no CI execution context (it only runs inside a role
-session, per the plugin's actual shape — `commands/` + `hooks/`) — there is
-nothing in a consumer's repo that would invoke plugin-shipped Python during
-their own PR checks without the consumer writing the exact same
-`.github/workflows/*.yml` caller file anyway. Checkout-from-source removes
-the duplicate-and-drift failure mode that shipping-in-plugin would still
-have (plugin version and gate version could diverge silently).
+The bottom three rows are genuinely unreached by the zero-install baseline.
+They are only caught if the CI supplement (branch-protection-required
+`consumer-closes-gate.yml` / scheduled `consumer-closure-sweep.yml`) is
+installed — which requires the consumer to configure branch protection
+referencing the workflow, an installation act like #442's, kept here
+because no zero-install substitute exists for a human bypassing the tool
+entirely. This is recorded plainly rather than folded into the "contract"
+verdict as if solved: per item 2's visibility check, a consumer without it
+is told so every session, closing the specific complaint that installation
+state was unknowable — the residual gap itself is not closed, and is not
+claimed to be.
 
 ## Item 4 — how a consumer learns which contract clauses are unenforced for them
 
-`docs/specs/enforcement-boundary.md` is generated content (not hand
-authored per consumer) stating, per mechanism, contract-vs-repo-local and
-the reason from the table above; it ships as part of `on-the-record`'s own
-docs and is linked from `run.md` itself, so a consumer reading the contract
-text finds the boundary one hop away instead of having to infer it. The
-mechanical backstop is `gates/test_boundary.py`: it derives the *actual*
-shipped set from `marketplace.json` + the plugin directory contents (per
-#333/#376, computed not maintained) and fails if a workflow file exists
-whose backing script (`gates/*.py` it invokes) is absent from what a
-`workflow_call` caller could reach, or if a mechanism in the per-mechanism
-table above has no recorded verdict — this is the acceptance criterion's
-"a gate with no recorded judgment must not silently exist" made executable.
+Two mechanisms, not one:
+
+1. `docs/specs/enforcement-boundary.md`, generated from the item 1 table,
+   linked from `run.md` — the static reference, as in #442.
+2. `spawn.py`'s session-start visibility check (item 2) — the live,
+   per-session signal that does not require a consumer to go read a spec
+   file to find out their own installation state. This is the piece #442
+   was missing: a document a consumer must think to open does not solve
+   "nobody knows which projects installed it" by itself; a notice printed
+   at the one point every consumer unavoidably passes does.
+
+`gates/test_boundary.py` (kept from #442, scope widened): derives the
+shipped/local set from `marketplace.json` + plugin contents, and now also
+asserts every module under `gates/`, every `on-the-record/hooks/*.sh`
+script, and `spawn.py` has a row in the item 1 table with a recorded
+verdict — failing if any of the 11+ mechanisms above is added or changed
+with no verdict recorded, which is the acceptance criterion's "a gate
+with no recorded judgment must not silently exist" made executable, now
+over the complete set rather than 5 of 14.
 
 ## Out of scope
 
-- Retrofitting `issue-bundling-gate.yml` or `on-the-record-tests.yml` for
-  consumer use — decided repo-local above.
-- Any change to `run.md`'s prose beyond adding the one link to
-  `docs/specs/enforcement-boundary.md`.
-- Building the boundary derivation as a general-purpose plugin-shipping
-  framework — scoped to this repository's two consumer-bound gates.
+- Retrofitting `issue_bundling.py`, `skip_gate.py`, `spec_index.py`,
+  `on-the-record-tests.yml` for consumer use — decided repo-local above,
+  unchanged from #442.
+- Closing the human-web-UI / bare-terminal gap for a consumer who installs
+  nothing — recorded as genuinely unreached, not solved, per #310; solving
+  it requires the CI supplement, which remains consumer-installed.
+- Building `contract-guard.sh`'s command-matching into a general Bash
+  policy engine — scoped to the specific `gh`/`git` acts in the item 1
+  table.
 
 ## How this will be verified
 
-- `gates/test_boundary.py` passes and fails correctly when a mechanism is
-  added to `.github/workflows/` without a recorded verdict (mutation check).
+- `gates/test_boundary.py` passes and fails correctly when a mechanism
+  (module, hook, or workflow) is added with no recorded verdict.
 - `python3 -m pytest -q` (no `--ignore`) run and reported.
-- `closes-gate` actually invoked against a real PR in one live consumer
-  project (`project-rich`, named in #396/#441) via the reusable workflow,
-  with the run's result (not just its existence) shown.
+- In one live consumer project (`project-rich`, per #396/#441) **that has
+  installed nothing** — no `.github/workflows/`, no `gates/`, plugin only:
+  - a role session's attempted `gh pr merge` on a PR missing `Closes #N`
+    is denied by `contract-guard.sh` before the merge executes, shown as
+    an actual denied tool call, not reasoning about one (#416).
+  - `spawn.py` invoked against an issue with prose-only Acceptance refuses
+    to start the session, shown as an actual refusal.
+  - `spawn.py`'s session-start output shows the CI-supplement-absent
+    notice for that repo.
 
 ## What did not work

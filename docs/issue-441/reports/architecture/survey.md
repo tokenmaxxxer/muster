@@ -64,3 +64,43 @@ No file anywhere states, per mechanism, whether it ships. #396 established
 nothing lets a consumer install the CI-side pieces (plugins cannot install
 `.github/workflows/`), and nothing tells a consumer which contract clauses in
 their copy of `run.md` are currently unenforced.
+
+## Addendum (PR #442 rework) — full `gates/` inventory and the reachable-without-installation question
+
+PR #442's per-mechanism table covered 5 rows (`ci.py`, `closure_sweep.py`,
+`issue_bundling.py`, `on-the-record-tests.yml`, plugin hooks) and was
+rejected for two reasons: it was incomplete (`gates/` has 11 non-test
+modules, not 5), and every contract-verdicted row routed enforcement
+through a GitHub Actions workflow a consumer must hand-add — a step the
+proposal itself called unavoidable, which the operator rejected as not a
+fix (installation state is unknowable, so unenforced-until-installed is
+indistinguishable from unenforced).
+
+Full inventory, `gates/*.py` (11 modules, excluding `test_*.py`):
+
+| module | what it checks | triggering act (if any) |
+|---|---|---|
+| `ci.py` | phase-1/phase-2 bundle: `Closes #N`, write-scope, orchestrator-authored-deliverable ban | `gh pr merge` on the delivering PR |
+| `pr_reference.py` (#126) | PR body references its own issue | `gh pr create` / `gh pr merge` |
+| `closure_sweep.py` | closing-keyword / delivered-but-open consistency, board-wide | retrospective board state, not one act |
+| `acceptance_gate.py` (#310) | issue's `## Acceptance` names an executable artifact or `unverifiable:` reason | opening a phase-2 session against the issue (i.e. `spawn.py`) |
+| `landing_readiness.py` (#407) | per-PR merge-readiness (checks + approval + scope overlap) | `gh pr merge` (same act as `ci.py`) |
+| `spawn_coverage.py` (#330) | an open issue with no session ever spawned against it | absence of an act — nothing to intercept |
+| `issue_bundling.py` (#328) | one-issue-one-problem hygiene at filing time | `gh issue create` — this org's own filing habit, not a `run.md` clause |
+| `skip_gate.py` (#334) | pytest skip-vs-pass exit code | this repo's own `pytest` invocation |
+| `spec_index.py` (#336) | this repo's own `docs/specs/` content-hash drift | this repo's own doc edits |
+| `risk_report.py` (#319) | non-blocking risk classification, feeds `gates.py`'s review surface | none (advisory only) |
+| `gates.py` | manifest/write-set router `gates.py` dispatches to | (infrastructure, not a standalone clause) |
+| `flows.py` (#172) | read-only status-board data | none (read-only) |
+
+Plus `spawn.py` itself (not under `gates/`, not shipped via the plugin
+marketplace, but the only path that starts a role session — every
+consumer that uses `on-the-record` at all runs this exact file, since it
+is invoked directly rather than vendored/copied) and the four
+`on-the-record/hooks/*.sh` scripts (already reach consumers via the
+plugin, kept fresh per session by `self-update.sh`'s own TTL pull — unlike
+a workflow YAML a consumer copies once, these do not go stale).
+
+This addendum is why the rework starts from "where does a consumer pass
+with no action of their own" rather than "what does a consumer need to
+install" — see `docs/issue-441/proposals/2026-08-07-contract-enforcement-boundary.md`.
