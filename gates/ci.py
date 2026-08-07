@@ -126,6 +126,40 @@ def _pr_reviews(repo: Path, pr: int) -> list[dict] | None:
     return json.loads(r.stdout).get("reviews")
 
 
+def _pr_status_checks(repo: Path, pr: int) -> list[dict] | None:
+    """PR 의 통합 상태체크(statusCheckRollup) — issue #331 의
+    `record_checked_claims` 가 `checked: <ci-check-name>` 라인을 실제로
+    성공한 CI 결과와 크로스체크하는 데 쓴다. `gates.py` 는 diff-only 라
+    GitHub API 를 못 부르므로 이 오케스트레이션 계층에서 읽는다."""
+    import json
+    import subprocess
+    r = subprocess.run(["gh", "pr", "view", str(pr), "--json", "statusCheckRollup"],
+                       cwd=repo, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    return json.loads(r.stdout).get("statusCheckRollup")
+
+
+def _checked_ci_claims_bad(repo: Path, pr: int) -> list[str]:
+    """`gates.parse_checked_claims` 가 뽑은, `::` 없는(=CI 체크 이름) `pass`
+    클레임을 `statusCheckRollup` 과 대조한다. 섹션 부재/파싱 불가/테스트
+    존재 여부는 `gates.record_checked_claims` 가 이미 검사하므로 여기서는
+    CI 체크 성공 여부만 본다 — 중복 사유를 쌓지 않는다."""
+    claims = [(f, target) for f, target, result, _ in gates.parse_checked_claims(repo)
+              if result == "pass" and "::" not in target]
+    if not claims:
+        return []
+    rollup = _pr_status_checks(repo, pr)
+    if rollup is None:
+        return [f"PR #{pr} 의 상태체크를 읽을 수 없다(`gh pr view` 실패) — "
+                "검사 불가는 통과가 아니다."]
+    passing = {c.get("name") for c in rollup
+               if c.get("conclusion") == "SUCCESS" or c.get("state") == "SUCCESS"}
+    return [f"{f}: checked CI 체크 {target!r} 이 statusCheckRollup 에서 성공으로 "
+            "확인되지 않는다 (missing/pending/failing)"
+            for f, target in claims if target not in passing]
+
+
 def _closes_ref_for_issue(body: str, issue: int):
     """본문에 *이 이슈를* 향한 closing 키워드 매치가 있으면 그 매치를,
     없으면 None을 돌려준다 — 순수 함수(네트워크 없음).
@@ -430,6 +464,9 @@ def check(repo: Path, pr: int | None = None, issue: int | None = None,
     bad += gates.record_fulfils_diff(repo, {})
     bad += spec_index.check(repo)
     bad += gates.requirement_registry(repo, {})
+    bad += gates.record_checked_claims(repo, {})
+    if pr is not None:
+        bad += _checked_ci_claims_bad(repo, pr)
 
     # ponytail: gates.deps() 와 같은 판정을 반복한다. gates.deps 가 라우터의
     # 디렉터리 배치(d/"work")를 전제해서 그대로 못 부른다. 라우터 은퇴 시

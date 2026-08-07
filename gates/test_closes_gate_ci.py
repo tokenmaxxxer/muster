@@ -10,12 +10,16 @@
   python3 gates/test_closes_gate_ci.py
 """
 from __future__ import annotations
+import json
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import ci
+import gates
 import pr_reference
 import spawn
 import shape_contracts
@@ -773,6 +777,120 @@ def t_issue_comments_stub_shape_contract_catches_old_pre_287_shape():
 
     new_shape_stub = lambda repo, n: ([{"login": "x", "body": "y"}], True)
     shape_contracts.assert_stub_return_shape(new_shape_stub, spawn._issue_comments, Path("."), 1)
+
+
+def _checked_ci_repo(td: str) -> Path:
+    """issue #331: `checked: <ci-check-name>` 클레임이 하나 있는 터미널
+    레코드를 커밋한 저장소. `_pr_reviews` 픽스처와 같은 관례 —
+    `roles/implementation.json` 은 이 레포의 실제 정의를 그대로 쓴다
+    (loop_state 의 터미널 값이 `landed` 인 것은 이미 고정 계약)."""
+    work = Path(td) / "work"
+    d = work / "docs" / "issue-9" / "reports"
+    d.mkdir(parents=True)
+    run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                    capture_output=True, check=True)
+    run("init", "-q", "-b", "main")
+    run("config", "user.email", "t@t"); run("config", "user.name", "t")
+    (work / "README.md").write_text("x")
+    run("add", "-A"); run("commit", "-qm", "init")
+    run("branch", "-f", "origin/main")
+    (d / "implementation.md").write_text(
+        "---\nloop_state: landed\n---\n\n"
+        "## Acceptance verification\n"
+        "- 기준 — checked: my-ci-check — result: pass\n")
+    run("add", "-A"); run("commit", "-qm", "record")
+    return work
+
+
+def t_checked_ci_claims_passing_rollup_accepted():
+    with tempfile.TemporaryDirectory() as td:
+        work = _checked_ci_repo(td)
+        orig = ci._pr_status_checks
+        ci._pr_status_checks = lambda repo, pr: [
+            {"name": "my-ci-check", "conclusion": "SUCCESS"}]
+        try:
+            assert ci._checked_ci_claims_bad(work, 1) == []
+        finally:
+            ci._pr_status_checks = orig
+
+
+def t_checked_ci_claims_failing_rollup_denied():
+    with tempfile.TemporaryDirectory() as td:
+        work = _checked_ci_repo(td)
+        orig = ci._pr_status_checks
+        ci._pr_status_checks = lambda repo, pr: [
+            {"name": "my-ci-check", "conclusion": "FAILURE"}]
+        try:
+            bad = ci._checked_ci_claims_bad(work, 1)
+            assert any("my-ci-check" in b for b in bad), bad
+        finally:
+            ci._pr_status_checks = orig
+
+
+def t_checked_ci_claims_missing_from_rollup_denied():
+    with tempfile.TemporaryDirectory() as td:
+        work = _checked_ci_repo(td)
+        orig = ci._pr_status_checks
+        ci._pr_status_checks = lambda repo, pr: [
+            {"name": "unrelated-check", "conclusion": "SUCCESS"}]
+        try:
+            bad = ci._checked_ci_claims_bad(work, 1)
+            assert any("my-ci-check" in b for b in bad), bad
+        finally:
+            ci._pr_status_checks = orig
+
+
+def t_checked_ci_claims_pending_status_context_denied():
+    """statusCheckRollup 항목은 CheckRun(conclusion)뿐 아니라
+    StatusContext(state)로도 온다 — pending 인 state 는 성공이 아니다."""
+    with tempfile.TemporaryDirectory() as td:
+        work = _checked_ci_repo(td)
+        orig = ci._pr_status_checks
+        ci._pr_status_checks = lambda repo, pr: [
+            {"name": "my-ci-check", "state": "PENDING"}]
+        try:
+            bad = ci._checked_ci_claims_bad(work, 1)
+            assert any("my-ci-check" in b for b in bad), bad
+        finally:
+            ci._pr_status_checks = orig
+
+
+def t_checked_ci_claims_unreadable_rollup_fails_closed():
+    with tempfile.TemporaryDirectory() as td:
+        work = _checked_ci_repo(td)
+        orig = ci._pr_status_checks
+        ci._pr_status_checks = lambda repo, pr: None
+        try:
+            bad = ci._checked_ci_claims_bad(work, 1)
+            assert any("상태체크를 읽을 수 없다" in b for b in bad), bad
+        finally:
+            ci._pr_status_checks = orig
+
+
+def t_checked_ci_claims_no_claims_no_gh_call():
+    """CI 체크 클레임이 하나도 없으면 `_pr_status_checks` 자체를 부르지
+    않는다 — 불필요한 `gh` 호출로 매 PR 을 느리게 만들지 않는다."""
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td) / "work"
+        d = work / "docs" / "issue-9" / "reports"
+        d.mkdir(parents=True)
+        run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                        capture_output=True, check=True)
+        run("init", "-q", "-b", "main")
+        run("config", "user.email", "t@t"); run("config", "user.name", "t")
+        (work / "README.md").write_text("x")
+        run("add", "-A"); run("commit", "-qm", "init")
+        run("branch", "-f", "origin/main")
+        (d / "implementation.md").write_text("---\nloop_state: in-progress\n---\n\n본문\n")
+        run("add", "-A"); run("commit", "-qm", "record")
+        orig = ci._pr_status_checks
+        called = []
+        ci._pr_status_checks = lambda repo, pr: called.append(1) or []
+        try:
+            assert ci._checked_ci_claims_bad(work, 1) == []
+            assert not called
+        finally:
+            ci._pr_status_checks = orig
 
 
 if __name__ == "__main__":

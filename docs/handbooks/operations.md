@@ -789,6 +789,19 @@ phase-1 불일치 검사 자체도 이제 PR 본문 한 표면만이 아니라 �
 모두의 근거는
 `docs/issue-271/decisions/2026-08-04-phase-signal-and-surface-coverage-mechanism.md`.
 
+**2026-08-07 부로 두 번째 스텝이 추가됐다**(issue #331): 같은 워크플로,
+같은 job에 `gates/ci.py . --pr "$PR_NUMBER" --autodetect`를
+`--closes-only` **없이** 한 번 더 돈다 — write_scope/protected-path/
+deps/record 검사 전체 번들이 실제로 CI에서 실행되게 하는 스텝이다.
+이 번들에 새로 추가된 `gates.record_checked_claims`(터미널
+`loop_state`를 선언한 레코드에 `## Acceptance verification` 섹션을
+강제)가 유닛 테스트만 통과하고 CI에서는 한 번도 안 도는 결함을
+warrant hunt가 실측해 이 스텝이 추가됐다. 이 체크는 아직 main의 브랜치
+보호 규칙에 필수 상태 체크로 등록되지 않았다(수동 GitHub Settings
+작업, issue #245가 `closes-gate`에 이미 남긴 같은 경계) — 등록 전엔
+상태만 보고되고 머지를 막지는 않는다. 상세:
+`docs/issue-331/decisions/2026-08-07-checked-claim-marker.md`.
+
 ## 이슈-번들링 게이트
 
 `.github/workflows/issue-bundling-gate.yml`(issue #328)이 `issues:
@@ -859,6 +872,22 @@ head branch via `gh api repos/<slug>/contents/<path> -f ref=<branch>`
 instead (issue #369). This is the only content read `--closes-only`
 mode makes beyond `gh pr view`/`gh issue view`/`gh api` metadata calls;
 decision: `docs/issue-369/decisions/record-evidence-via-gh-api-contents.md`.
+
+**A second step was added 2026-08-07** (issue #331): the same workflow,
+same job, now also runs `gates/ci.py . --pr "$PR_NUMBER" --autodetect`
+**without** `--closes-only` — the full write_scope/protected-path/deps/
+record check bundle, actually executed in CI instead of only in unit
+tests. This wires in the new `gates.record_checked_claims` gate: a
+changed phase-2 record that sets its role's terminal `loop_state` (the
+last value declared in `roles/<role>.json`) must carry a `## Acceptance
+verification` section with `checked:`/`result:` lines, or the check
+denies it. A warrant hunt on the proposal found the gate would otherwise
+pass unit tests but never run in CI. This second step is not yet
+registered as a required branch-protection status check (a manual
+GitHub Settings action, same boundary #245 already drew for
+`closes-gate`) — until registered, it reports status only and does not
+block a merge. Details:
+`docs/issue-331/decisions/2026-08-07-checked-claim-marker.md`.
 
 Phase is derived from a human approval event, not from closing-keyword
 presence (issue #271): a qualifying `APPROVE issue-<n>/<role>` issue

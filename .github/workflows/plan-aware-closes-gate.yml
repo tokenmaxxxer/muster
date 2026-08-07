@@ -49,3 +49,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: python3 gates/ci.py . --pr "$PR_NUMBER" --autodetect --closes-only
+
+      # issue #331: closes-only 는 write_scope/protected-path/deps/record 검사를
+      # 전부 건너뛴다(#245 의 기존 트레이드오프) — record_checked_claims 를 포함한
+      # 그 전체 번들이 실제로 배선되려면 non-closes-only 호출이 별도로 필요하다.
+      # 이 스텝이 없으면 새 게이트는 유닛 테스트만 통과하고 CI 에서는 한 번도
+      # 실행되지 않는다(경고 코멘트 후속 warrant hunt 가 재현 확인).
+      - name: full check bundle (non-closes-only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 gates/ci.py . --pr "$PR_NUMBER" --autodetect
