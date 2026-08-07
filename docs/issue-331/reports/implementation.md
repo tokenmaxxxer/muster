@@ -303,3 +303,38 @@ hunt (stance: "assume the gate just touched is bypassable") did not
 catch this because it probed `record_checked_claims` itself, not the
 pre-existing `writeset()` check the CI-wiring change exposed as a side
 effect.
+
+## Rebase re-verification (2026-08-07, fourth pass — main kept advancing mid-session)
+
+`origin/main` advanced 2 more commits (`23d90ea` → `f3ded43`, issue-427)
+between the third pass's push and its CI run finishing — CI re-ran
+against a base that had already moved again and reported a *stale*
+`docs/specs/reconciled-index.md` hash mismatch (same 3 files as the very
+first check in this session: `protocol.md`, `protocol.ko.md`,
+`on-the-record/commands/run.md`), confirming main's `docs/specs/`-tracked
+files are churning independently of this branch on roughly the same
+timescale as this session's rebases. `git fetch origin main && git
+rebase origin/main` (new base `f3ded43`) — clean, no conflicts.
+
+Re-ran on HEAD `f3ded43` (0 commits behind `origin/main`):
+
+- `python3 gates/spec_index.py .` — **pass** (no regeneration needed;
+  the 2 new commits did not touch spec-tracked files themselves, only
+  advanced past commits that already matched).
+- `python3 -m pytest -q --ignore=gates` — **417 passed**, 0 failed.
+- `python3 -m pytest -q gates/` — **74 passed, 1 failed** (same
+  pre-existing `t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch`
+  live-issue-#304 dependency as the third pass, unchanged).
+- `python3 gates/ci.py . --pr 343 --autodetect` — the protected-path
+  block from the third pass reproduces identically (`.github/workflows/plan-aware-closes-gate.yml`,
+  `gates/ci.py`, `gates/gates.py`, `gates/test_closes_gate_ci.py`),
+  confirming it is not a rebase artifact but a standing structural
+  defect in `gates.writeset()` that this delivery's own CI-wiring change
+  exposed (see the finding above).
+
+Given `origin/main` is advancing roughly every few minutes in this
+session, a rebase run purely to chase a moving base has diminishing
+value past this point; this pass's numbers are the ones pushed. The
+`docs/specs/reconciled-index.md` churn and the `writeset()` protected-path
+block are both pre-existing conditions independent of this delivery's
+own code, not regressions this session introduced.
