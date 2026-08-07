@@ -166,7 +166,35 @@ def _phase_from_approval(repo: Path, pr: int, issue: int, role: str) -> str:
     return "phase2" if approved else "phase1"
 
 
-def _phase2_record_evidence(repo: Path, branch: str, issue: int) -> bool:
+def _fetch_ref_file(repo: Path, pr: int, branch: str, path: str) -> str | None:
+    """`ref`(PR head 브랜치)에 있는 파일의 텍스트를 `gh api ... /contents/<path>`로
+    읽는다 — 로컬 워킹트리를 전혀 안 보고, PR 코드를 체크아웃/실행하지도
+    않는다(issue #369). `_pr_commit_messages`(gates/ci.py:100-104)와 같은
+    `gh api repos/<slug>/...` 패턴 재사용 — 새 신뢰 모양을 만들지 않는다.
+    파일 없음(404) 이나 API 실패는 None."""
+    import base64
+    import json
+    import subprocess
+    slug = spawn._repo_slug(repo)
+    if not slug:
+        return None
+    r = subprocess.run(
+        ["gh", "api", f"repos/{slug}/contents/{path}", "-f", f"ref={branch}"],
+        cwd=repo, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    try:
+        data = json.loads(r.stdout)
+        content = data.get("content", "")
+    except (ValueError, AttributeError):
+        return None
+    try:
+        return base64.b64decode(content).decode("utf-8-sig", errors="replace")
+    except (ValueError, TypeError):
+        return None
+
+
+def _phase2_record_evidence(repo: Path, pr: int, branch: str, issue: int) -> bool:
     """phase-2 기록 파일의 존재 + 비어있지 않은 `loop_state` 를 closing 의도의
     대안 증거로 인정한다(issue #284 승인된 제안) — 승인 이후 phase 가 뒤바뀐
     PR을 본문을 다시 쓰지 않고도 통과시킨다. `loop_state` 의 *값*은 보지
@@ -175,15 +203,18 @@ def _phase2_record_evidence(repo: Path, branch: str, issue: int) -> bool:
     선언 enum과 실제 기록 값(`phase-2-complete`)이 어긋나 있어(값 검사는
     #337 류 기록을 오탐 차단한다 — 자세한 근거는
     `docs/issue-284/decisions/record-evidence-as-closing-intent.md`) 존재
-    검사만이 오늘 실제로 참인 것이다."""
+    검사만이 오늘 실제로 참인 것이다.
+
+    기록은 로컬 워킹트리가 아니라 PR head 브랜치에서 `gh api` 로 읽는다
+    (issue #369) — 게이트 워크플로우가 항상 `main` 을 체크아웃하므로,
+    기록이 사는 PR 브랜치 자체는 로컬 트리에 구조적으로 존재할 수 없다."""
     detected = _issue_and_role_from_branch(branch)
     if detected is None:
         return False
     _, role = detected
-    record_path = repo / f"docs/issue-{issue}/reports/{role}.md"
-    if not record_path.exists():
+    text = _fetch_ref_file(repo, pr, branch, f"docs/issue-{issue}/reports/{role}.md")
+    if text is None:
         return False
-    text = record_path.read_text(encoding="utf-8-sig", errors="replace")
     fm = gates.record_frontmatter(text)
     return bool(fm.get("loop_state", "").strip())
 
@@ -317,7 +348,7 @@ def check(repo: Path, pr: int | None = None, issue: int | None = None,
                               f"없다 — phase-2 인도 PR은 이슈를 명시적으로 닫아야 한다.")
                 if closes_msg in ref_bad:
                     branch = _pr_head_ref(repo, pr)
-                    if branch is not None and _phase2_record_evidence(repo, branch, issue):
+                    if branch is not None and _phase2_record_evidence(repo, pr, branch, issue):
                         # 승인 이벤트가 phase 를 뒤집었을 뿐 본문은 phase-1
                         # 시점 그대로인 PR(issue #284) — 기록 파일의 존재가
                         # closing 의도의 대안 증거이므로 본문 편집 없이
