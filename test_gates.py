@@ -1379,6 +1379,180 @@ def t_spawn_has_no_concurrency_limit():
         "regression test as part of that change, don't let it land silent")
 
 
+def _checked_claims_repo(td: str, role: str, loop_states: list, record_text: str,
+                          extra_files: dict = None) -> Path:
+    """issue #331 전용 픽스처: `roles/<role>.json` 을 임시 ON_THE_RECORD_ROOT 에
+    두고, `docs/issue-9/reports/<role>.md` 에 record_text 를 커밋한다."""
+    otr = Path(td) / "otr"
+    (otr / "roles").mkdir(parents=True)
+    (otr / "roles" / f"{role}.json").write_text(
+        json.dumps({"record_fields": {"loop_state": loop_states}}))
+    gates.ON_THE_RECORD_ROOT = otr
+    work = Path(td) / "work"
+    work.mkdir()
+    run = lambda *a: subprocess.run(["git", "-C", str(work), *a],
+                                    capture_output=True, check=True)
+    run("init", "-q", "-b", "main")
+    run("config", "user.email", "t@t"); run("config", "user.name", "t")
+    (work / "README.md").write_text("x")
+    run("add", "-A"); run("commit", "-qm", "init")
+    run("branch", "-f", "origin/main")
+    for path, content in (extra_files or {}).items():
+        p = work / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+    d = work / "docs" / "issue-9" / "reports"
+    d.mkdir(parents=True)
+    (d / f"{role}.md").write_text(record_text)
+    run("add", "-A"); run("commit", "-qm", "record")
+    return work
+
+
+def t_checked_claims_terminal_no_section_blocks():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _checked_claims_repo(
+                td, "implementation", ["in-progress", "landed"],
+                "---\nloop_state: landed\n---\n\n본문만 있고 섹션 없음\n")
+            bad = gates.record_checked_claims(work, {})
+            assert any("Acceptance verification" in b for b in bad), bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_checked_claims_non_terminal_untouched():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _checked_claims_repo(
+                td, "implementation", ["in-progress", "landed"],
+                "---\nloop_state: in-progress\n---\n\n섹션 없어도 괜찮다\n")
+            assert gates.record_checked_claims(work, {}) == []
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_checked_claims_wellformed_test_node_passes():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _checked_claims_repo(
+                td, "implementation", ["in-progress", "landed"],
+                "---\nloop_state: landed\n---\n\n"
+                "## Acceptance verification\n"
+                "- 기준 하나 — checked: test_gates.py::t_checked_claims_wellformed_test_node_passes — result: pass\n",
+                extra_files={"test_gates.py": "def t_checked_claims_wellformed_test_node_passes():\n    pass\n"})
+            assert gates.record_checked_claims(work, {}) == []
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_checked_claims_nonexistent_test_blocks():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _checked_claims_repo(
+                td, "implementation", ["in-progress", "landed"],
+                "---\nloop_state: landed\n---\n\n"
+                "## Acceptance verification\n"
+                "- 기준 하나 — checked: test_gates.py::t_does_not_exist — result: pass\n",
+                extra_files={"test_gates.py": "def t_other():\n    pass\n"})
+            bad = gates.record_checked_claims(work, {})
+            assert any("t_does_not_exist" in b for b in bad), bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_checked_claims_unparseable_line_blocks():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _checked_claims_repo(
+                td, "implementation", ["in-progress", "landed"],
+                "---\nloop_state: landed\n---\n\n"
+                "## Acceptance verification\n"
+                "- 확인 안 되는 줄\n")
+            bad = gates.record_checked_claims(work, {})
+            assert any("파싱 불가" in b for b in bad), bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_checked_claims_unverifiable_without_reason_blocks():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _checked_claims_repo(
+                td, "implementation", ["in-progress", "landed"],
+                "---\nloop_state: landed\n---\n\n"
+                "## Acceptance verification\n"
+                "- 기준 — checked: n/a — result: unverifiable\n")
+            bad = gates.record_checked_claims(work, {})
+            assert any("이유가 없다" in b for b in bad), bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_checked_claims_unverifiable_with_reason_passes():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _checked_claims_repo(
+                td, "implementation", ["in-progress", "landed"],
+                "---\nloop_state: landed\n---\n\n"
+                "## Acceptance verification\n"
+                "- 기준 — checked: n/a — result: unverifiable: 수동 확인만 가능\n")
+            assert gates.record_checked_claims(work, {}) == []
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_checked_claims_role_undeclared_loop_state_untouched():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _checked_claims_repo(
+                td, "issue-retrospective", [],
+                "---\nloop_state: landed\n---\n\n섹션 없음\n")
+            assert gates.record_checked_claims(work, {}) == []
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_checked_claims_ci_check_target_parsed_by_parse_checked_claims():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _checked_claims_repo(
+                td, "implementation", ["in-progress", "landed"],
+                "---\nloop_state: landed\n---\n\n"
+                "## Acceptance verification\n"
+                "- 기준 — checked: plan-aware-closes-gate — result: pass\n")
+            # gates.py 는 CI 체크 이름 자체를 검사하지 않는다(statusCheckRollup
+            # 크로스체크는 ci.py 몫) — 여기서는 section/파싱이 통과하고,
+            # parse_checked_claims 가 그 클레임을 ci.py 재사용용으로 낸다.
+            assert gates.record_checked_claims(work, {}) == []
+            claims = gates.parse_checked_claims(work)
+            assert ("docs/issue-9/reports/implementation.md",
+                    "plan-aware-closes-gate", "pass", None) in claims, claims
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
+def t_ci_check_wires_record_checked_claims():
+    old = gates.ON_THE_RECORD_ROOT
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            work = _checked_claims_repo(
+                td, "implementation", ["in-progress", "landed"],
+                "---\nloop_state: landed\n---\n\n본문만, 섹션 없음\n")
+            bad = ci.check(work)
+            assert any("Acceptance verification" in b for b in bad), bad
+    finally:
+        gates.ON_THE_RECORD_ROOT = old
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("t_")]
     for t in tests:

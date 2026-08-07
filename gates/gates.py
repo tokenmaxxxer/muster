@@ -610,6 +610,157 @@ def requirement_registry(d: Path, cfg: dict) -> list[str]:
     return bad
 
 
+_CHECKED_CLAIM_LINE = re.compile(
+    r"^\s*[-*]\s*.+—\s*checked:\s*(\S+)\s*—\s*"
+    r"result:\s*(pass|fail|unverifiable)(?::\s*(.+))?\s*$")
+_ACCEPTANCE_HEADER = re.compile(r"^##\s*Acceptance verification\s*$", re.M)
+_NEXT_HEADING = re.compile(r"^##\s+\S", re.M)
+_TEST_DEF = re.compile(r"^def\s+(\w+)", re.M)
+
+
+def _acceptance_section(text: str) -> str | None:
+    """`## Acceptance verification` 헤딩 다음, 다음 `## ` 헤딩 전까지의 본문.
+    헤딩이 없으면 None (섹션 자체가 없다는 뜻 — 빈 문자열과 구분해야 한다)."""
+    m = _ACCEPTANCE_HEADER.search(text)
+    if not m:
+        return None
+    rest = text[m.end():]
+    nxt = _NEXT_HEADING.search(rest)
+    return rest[:nxt.start()] if nxt else rest
+
+
+def _terminal_loop_state(role_cfg: dict) -> str | None:
+    """role_cfg 의 `record_fields.loop_state` 선언 목록에서 터미널 값.
+
+    role 정의는 어떤 값이 터미널인지 별도 마킹하지 않는다 — 목록 순서 자체가
+    진행 순서다(예: technical-feasibility 의 measuring→verdict, implementation
+    의 scope-proposed→...→landed). 그래서 목록의 마지막 값을 터미널로 읽는다;
+    단일 값 목록(예: defect-verification 의 cleared)도 그 하나가 곧 마지막이라
+    같은 규칙으로 맞는다. 선언 자체가 없으면 None — 이 게이트가 그 레코드를
+    건드리지 않는다(터미널을 모르면 강제할 기준이 없다)."""
+    states = role_cfg.get("record_fields", {}).get("loop_state")
+    return states[-1] if states else None
+
+
+def parse_checked_claims(work: Path) -> list[tuple[str, str, str, str | None]]:
+    """변경된 터미널 레코드의 `## Acceptance verification` 라인을 평탄화한다:
+    (record_path, checked 대상, result, reason) 튜플 목록.
+
+    구조 오류(섹션 없음/파싱 불가/unverifiable 사유 없음)는 여기서 걸러내지
+    않는다 — `record_checked_claims` 가 그 사유로 이미 차단한다. 이 함수는
+    `ci.py`의 CI 체크 크로스체크가 재사용할 파싱만 담당한다(중복 파싱 루프를
+    두 번 만들지 않기 위해)."""
+    try:
+        files = changed_files(work)
+    except RuntimeError:
+        return []
+    out = []
+    for f in files:
+        m = RECORD_PATH.match(f)
+        if not m:
+            continue
+        role = m.group(1)
+        role_file = ON_THE_RECORD_ROOT / "roles" / f"{role}.json"
+        try:
+            role_cfg = json.loads(role_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        terminal = _terminal_loop_state(role_cfg)
+        if terminal is None:
+            continue
+        record_file = work / f
+        text = (record_file.read_text(encoding="utf-8-sig", errors="replace")
+                if record_file.exists() else "")
+        if record_frontmatter(text).get("loop_state") != terminal:
+            continue
+        section = _acceptance_section(text)
+        if section is None:
+            continue
+        for ln in section.splitlines():
+            if not ln.strip():
+                continue
+            cm = _CHECKED_CLAIM_LINE.match(ln)
+            if cm:
+                out.append((f, cm.group(1), cm.group(2), cm.group(3)))
+    return out
+
+
+def record_checked_claims(d: Path, cfg: dict) -> list[str]:
+    """변경된 phase-2 레코드가 role 의 터미널 `loop_state` 를 선언하면
+    `## Acceptance verification` 섹션을 요구하고, 그 라인이 기계로 falsifiable
+    한지 검사한다 (issue #331).
+
+    `record_fulfils_diff` 와 달리 opt-in 마커가 아니다 — 터미널 상태 자체가
+    이미 "이 작업이 끝났다"는 시스템 신호(스폰/보드가 그대로 읽는다)라서,
+    그 신호에는 섹션 부재 자체가 차단 사유다. 여기서는 실행 없이 검증
+    가능한 것만 본다: `path::test_name` 형태는 파일을 파싱해 정의 존재만
+    확인한다(실행 아님) — CI 체크 이름의 statusCheckRollup 크로스체크는
+    `ci.py` 쪽(레포 diff 만으로는 GitHub API 를 못 부른다)에서 한다."""
+    root = d / "work" if (d / "work").exists() else d
+    try:
+        files = changed_files(root)
+    except RuntimeError as e:
+        return [str(e)]
+    bad = []
+    for f in files:
+        m = RECORD_PATH.match(f)
+        if not m:
+            continue
+        role = m.group(1)
+        role_file = ON_THE_RECORD_ROOT / "roles" / f"{role}.json"
+        try:
+            role_cfg = json.loads(role_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            bad.append(f"역할 정의를 읽을 수 없어 checked-claims 를 검사할 수 "
+                       f"없다: {role_file} (on-the-record 체크아웃: "
+                       f"{ON_THE_RECORD_ROOT}) ({e})")
+            continue
+        terminal = _terminal_loop_state(role_cfg)
+        if terminal is None:
+            continue
+        record_file = root / f
+        text = (record_file.read_text(encoding="utf-8-sig", errors="replace")
+                if record_file.exists() else "")
+        if record_frontmatter(text).get("loop_state") != terminal:
+            continue
+        section = _acceptance_section(text)
+        if section is None:
+            bad.append(f"{f}: loop_state={terminal!r}(터미널)인데 "
+                       "'## Acceptance verification' 섹션이 없다 — 완료 주장은 "
+                       "기계로 확인되지 않으면 터미널 상태로 못 간다")
+            continue
+        lines = [ln for ln in section.splitlines() if ln.strip()]
+        if not lines:
+            bad.append(f"{f}: '## Acceptance verification' 섹션에 파싱 가능한 "
+                       "라인이 없다")
+            continue
+        parsed = []
+        for ln in lines:
+            cm = _CHECKED_CLAIM_LINE.match(ln)
+            if not cm:
+                bad.append(f"{f}: Acceptance verification 라인 파싱 불가: "
+                           f"{ln.strip()!r}")
+                continue
+            target, result, reason = cm.group(1), cm.group(2), cm.group(3)
+            if result == "unverifiable" and not (reason and reason.strip()):
+                bad.append(f"{f}: unverifiable 항목에 이유가 없다: "
+                           f"{ln.strip()!r}")
+                continue
+            parsed.append((target, result))
+        for target, result in parsed:
+            if result != "pass" or "::" not in target:
+                continue
+            path, _, name = target.partition("::")
+            test_file = root / path
+            if not test_file.exists():
+                bad.append(f"{f}: checked 대상 파일이 없다: {target}")
+                continue
+            defs = _TEST_DEF.findall(test_file.read_text())
+            if name not in defs:
+                bad.append(f"{f}: checked 대상 테스트가 파일에 없다: {target}")
+    return bad
+
+
 BRANCH_ROLE = re.compile(r"^issue-[^/]+/([^/]+)$")
 # 항상 허용되는 레코드 경로 — 어떤 write_scope 선언·오버라이드도 이걸 못
 # 지운다 (issue-149 item 5: 기록 의무는 무조건 살아남는다).
@@ -776,7 +927,8 @@ ALL = {"writeset": writeset, "deps": deps,
        "record_derived_counts": record_derived_counts,
        "record_fulfils_diff": record_fulfils_diff,
        "duplicate_test_basenames": duplicate_test_basenames_gate,
-       "requirement_registry": requirement_registry}
+       "requirement_registry": requirement_registry,
+       "record_checked_claims": record_checked_claims}
 
 
 def check(names: list[str], d: Path, cfg: dict) -> list[str]:
