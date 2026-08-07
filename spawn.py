@@ -136,6 +136,7 @@ PACKAGE_CACHE_DIRS = [
     ("PIP_CACHE_DIR", "~/.cache/pip"),
     (None, "~/.cargo/registry"),
     ("MAVEN_REPO", "~/.m2/repository"),
+    ("PLAYWRIGHT_BROWSERS_PATH", "~/.cache/ms-playwright"),
 ]
 
 # WebSearch/WebFetch 목적지는 사전에 열거할 수 없다(이슈 #58) — 모든 역할에
@@ -180,6 +181,25 @@ def go_proxy_layer(s: dict) -> str | None:
     if host_path not in allow_read:
         return None
     return f"file://{host_path}/cache/download,https://proxy.golang.org,direct"
+
+
+def playwright_cache_layer(s: dict) -> str | None:
+    """호스트 `~/.cache/ms-playwright` 가 읽기 전용으로 마운트됐으면(이슈 #304)
+    `PLAYWRIGHT_BROWSERS_PATH` 를 그 경로로 리다이렉트한다.
+
+    go_proxy_layer() 와 같은 이유로 필요하다 — role_settings() 는 캐시를
+    allowRead 에 추가할 뿐, Playwright 자신은 그 마운트를 자동으로 쓰지
+    않는다. GOPROXY 와 달리 폴백 체인이 아니라 단일 경로 치환이다:
+    Playwright 는 브라우저 바이너리를 한 곳(PLAYWRIGHT_BROWSERS_PATH)에서만
+    찾으므로, 호스트 캐시가 있으면 그 경로를 그대로 넘긴다.
+    """
+    env_var, default_path = next(
+        p for p in PACKAGE_CACHE_DIRS if p[0] == "PLAYWRIGHT_BROWSERS_PATH")
+    host_path = os.path.expanduser(os.path.expandvars(os.environ.get(env_var, default_path)))
+    allow_read = s.get("sandbox", {}).get("filesystem", {}).get("allowRead", [])
+    if host_path not in allow_read:
+        return None
+    return host_path
 
 
 def _mkt(d: Path) -> Path:
@@ -3040,6 +3060,9 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             proxy = go_proxy_layer(s)
             if proxy:
                 extra_env["GOPROXY"] = proxy
+            playwright_cache = playwright_cache_layer(s)
+            if playwright_cache:
+                extra_env["PLAYWRIGHT_BROWSERS_PATH"] = playwright_cache
         before = board_snapshot(cwd)
         before_head = _git_head(cwd) if issue is not None else None
         t0 = time.monotonic()
