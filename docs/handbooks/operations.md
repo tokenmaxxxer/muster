@@ -789,6 +789,20 @@ phase-1 불일치 검사 자체도 이제 PR 본문 한 표면만이 아니라 �
 모두의 근거는
 `docs/issue-271/decisions/2026-08-04-phase-signal-and-surface-coverage-mechanism.md`.
 
+## 이슈-번들링 게이트
+
+`.github/workflows/issue-bundling-gate.yml`(issue #328)이 `issues:
+opened` 이벤트마다 `gates/issue_bundling.py <issue-number>`를 돌려,
+서로 무관한 여러 문제가 하나의 이슈로 뭉개졌는지 기계적으로 검사한다 —
+제목의 등위 접속사(`and`/`및`/`그리고`)와, `## Acceptance` 섹션 불릿들이
+가리키는 최상위 경로의 분산 두 가지만 본다. Actions는 이슈 생성 자체를
+막을 수 없어(PR 머지만 막을 수 있다), 위반 시 `gh issue comment`로
+이슈에 코멘트를 남기는 것이 가능한 가장 가까운 집행 지점이다 — main
+브랜치 보호에 등록할 필수 상태 체크가 아니다(막을 PR이 없다). "서로 다른
+role이 작업할 것"이라는 세 번째 tell은 이슈 텍스트에 구조화된 role
+배정 데이터가 없어 의도적으로 검사하지 않는다. 상세:
+`docs/issue-328/reports/implementation.md`.
+
 ## Merge gate (CI)
 
 `.github/workflows/plan-aware-closes-gate.yml` (issue #245) runs
@@ -902,4 +916,21 @@ python3 gates/skip_gate.py
 - **Scoring is manual.** Whether a finding hit an answer-key entry is adjudicated by
   a person (the key's adjudication clause). The runner only builds the scoresheet —
   imitating automatic adjudication is how the ledger starts lying.
+
+## Issue-bundling gate
+
+`.github/workflows/issue-bundling-gate.yml` (issue #328) runs
+`gates/issue_bundling.py <issue-number>` on every `issues: opened` event
+to mechanically flag an issue that bundles several unrelated problems
+into one — checking only two of the issue's own three named tells: a
+coordinating conjunction (`and`/`및`/`그리고`) in the title, and path
+spread across the `## Acceptance` section's bullets (two or more
+distinct top-level path roots with no shared root). Actions cannot block
+issue creation itself (only PR merges), so a violation posts as an issue
+comment (`gh issue comment`) — the closest available enforcement point;
+it is not registered as a required status check on main's branch
+protection (there is no PR to gate). The third tell — "different roles
+would work it" — is intentionally left unchecked: issue text carries no
+structured role-assignment data to check against. Details:
+`docs/issue-328/reports/implementation.md`.
 </content>

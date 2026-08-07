@@ -1,0 +1,52 @@
+name: issue-bundling-gate
+
+# issue #328: 서로 무관한 여러 문제가 하나의 이슈로 뭉개졌는지
+# 기계적으로 검사한다(gates/issue_bundling.py). GitHub Actions는 이슈
+# 생성 자체를 막을 수 없다(PR 머지만 막을 수 있다) — 그래서 이 워크플로는
+# 위반을 이슈 코멘트로 남긴다, 이것이 issues:opened 이벤트에 대해 가능한
+# 가장 가까운 집행 지점이다. 여기엔 막을 PR이 없으므로 branch protection
+# 필수 체크 등록은 해당 없다.
+#
+# `plan-aware-closes-gate.yml` 과 같은 이유로 항상 main 을 체크아웃한다:
+# 이슈 본문 자체는 신뢰 경계 밖이고, 게이트 스크립트는 이슈가 만든
+# 어떤 상태에도 의존하지 않아야 한다.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  bundling-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout gate script from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: issue-bundling gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          if ! python3 gates/issue_bundling.py "$ISSUE_NUMBER" > gate_output.txt 2>&1; then
+            cat gate_output.txt
+            {
+              echo "**issue-bundling-gate 위반**"
+              echo
+              echo '```'
+              cat gate_output.txt
+              echo '```'
+            } > comment_body.txt
+            gh issue comment "$ISSUE_NUMBER" --body-file comment_body.txt
+            exit 1
+          fi
+          cat gate_output.txt
