@@ -872,17 +872,18 @@ def t_find_violations_uses_record_evidence_for_keywordless_merge(tmp_path):
     original_fetch_ref_file = ci._fetch_ref_file
     spawn._pr_for_branch = lambda root, branch: 368
     closure_sweep._pr_view_state_body = (
-        lambda root, pr: ("MERGED", "no closing keyword here"))
+        lambda root, pr: (("MERGED", "no closing keyword here"), True))
     ci._fetch_ref_file = (
         lambda repo, pr, branch, path: ("---\nloop_state: delivered\n---\n\n본문\n", None))
     try:
-        violations = closure_sweep.find_violations(
+        violations, skips = closure_sweep.find_violations(
             root, subjects=subjects, issue_states={135: "OPEN"})
     finally:
         spawn._pr_for_branch = original_pr_for_branch
         closure_sweep._pr_view_state_body = original_pr_view
         ci._fetch_ref_file = original_fetch_ref_file
 
+    assert not skips, skips
     assert len(violations) == 1, violations
     assert violations[0]["kind"] == closure_sweep.MERGED_DELIVERY_ISSUE_OPEN, violations
 

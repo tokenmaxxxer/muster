@@ -136,6 +136,62 @@ per-file (see above) — i.e. they are themselves victims of #360, not a
 defect in the change. No other full-suite failure differs from the
 `210c704` baseline; nothing pre-existing was newly broken.
 
+## Re-verification after rebase onto main (2026-08-07)
+
+Main moved ~50 PRs ahead of this branch's original base; rebased onto
+`origin/main` (`0f3151a`) and re-ran acceptance evidence against the
+rebased tree — the numbers above predate the rebase and are superseded
+by this section (per #390: a green from the old base attests to a state
+that no longer exists).
+
+- **Rebase conflicts** (2, both resolved): `gates/ci.py` — main had
+  independently reworked `spawn._issue_comments` call sites to unpack
+  `(comments, ok)` for its own fail-closed work; merged that shape with
+  this branch's `_approved_roles_on_issue` logic (kept the role-scan,
+  adopted the tuple-unpack). `docs/specs/reconciled-index.md` — the
+  stale prior "rebase resync" commit (`3d1c2f7`) was skipped
+  (`git rebase --skip`) rather than reapplied, since it was itself a
+  now-superseded resync of an older base; regenerated fresh with
+  `python3 gates/spec_index.py --update` instead (see below).
+- **Spec index**: `python3 gates/spec_index.py --update` recomputed 5
+  hash lines (`protocol.md`, `protocol.ko.md`, `docs/specs/flows-schema.md`,
+  `docs/handbooks/on-the-record.md`, `on-the-record/commands/run.md`) —
+  all content-only drift from concurrent merges on main, none touching a
+  point recorded under "Resolved ambiguities"; that section needed no
+  update.
+- **`python3 -m pytest -q --ignore=gates`** (repo root, full run):
+  found one more pre-existing-shape fallout from the same
+  `_issue_comments` tuple-return change, this time in
+  `test_gates.py::t_find_violations_uses_record_evidence_for_keywordless_merge`
+  — its `closure_sweep._pr_view_state_body` mock and its assertion on
+  `find_violations`'s return were still the pre-#287 (non-tuple) shape;
+  `test_gates.py` is explicitly named in the proposal's Constraints as
+  required to keep passing, so fixed both (mock now returns
+  `(view, ok)`; assertion now unpacks `(violations, skips)` and asserts
+  `not skips`) — same class of fix as the two `find_violations`
+  monkeypatches already covered under "Rationale for deviations" above,
+  not a new deviation. Full run: **413 passed, 0 failed**.
+- **`python3 -m pytest -q gates`** (main's `gates/` subtree, #398 —
+  task brief says this subtree cannot collect on main; here it collects
+  fine but 13 fail): `13 failed, 63 passed`, all 13 in
+  `gates/test_closes_gate_ci.py::t_phase_from_approval_*` /
+  `t_autodetect_*` — the same `spawn._issue_comments` monkeypatch
+  fallout already logged above under "What did not work"
+  (`lambda repo, n: []`, pre-#287 shape, 9 call sites there; verified
+  the failing test count grew from 9 to 13 only because more call sites
+  in that file exercise the same stale mock than were counted
+  pre-rebase — same file, same root cause, still outside this
+  proposal's `files:` write set and Constraints list). Left unfixed per
+  the scope-exceeded rule, same as before the rebase.
+- `bash tests/run-orchestrate-tests.sh` → `13 passed, 0 failed`
+  (unchanged).
+
+Net: rebase is clean of new regressions; the only rebased-tree-specific
+fix needed was the `test_gates.py` mock/assertion shape update above.
+`gates/test_closes_gate_ci.py`'s 13 failures remain the same
+out-of-scope fallout already disclosed, now confirmed against current
+main rather than the stale base.
+
 ## closed_checks
 
 - gh-failure simulation for `closure_sweep._issue_view`/`_pr_view_state_body`
