@@ -914,6 +914,25 @@ body-only check, auto-closed an issue on merge the moment it landed.
 Rationale for both changes:
 `docs/issue-271/decisions/2026-08-04-phase-signal-and-surface-coverage-mechanism.md`.
 
+`.github/workflows/on-the-record-tests.yml`(이슈 #290)는 PR 이벤트마다 PR
+head를 체크아웃해 `pytest -q`를 돌린다 — `plan-aware-closes-gate.yml`과
+달리 `ref: main`을 고정하지 않는다(PR 자신의 코드를 실행해야 하므로).
+**아직 필수 상태 체크로 등록돼 있지 않다** — main 브랜치 보호 규칙에
+수동으로(Settings > Branches) 추가하기 전까지는 결과만 보고되고 머지를
+막지 않는다(이슈 #294, `docs/issue-290/proposals/2026-08-07-ci-and-test-hygiene.md`
+Out of scope). 그때까지는 승인자가 `gh pr checks <n>`을 머지 전에 직접
+읽어야 한다(`on-the-record/commands/run.md`의 수용 절차).
+
+`on-the-record-tests.yml`(issue #290) checks out the PR head on every PR
+event and runs `pytest -q` — unlike `plan-aware-closes-gate.yml`, it does
+not pin `ref: main` (it needs to run the PR's own code). **Not yet
+registered as a required status check** — until it is added manually to
+main's branch protection rule (Settings > Branches), it only reports a
+result and does not block merge (issue #294,
+`docs/issue-290/proposals/2026-08-07-ci-and-test-hygiene.md` Out of
+scope). Until then, the approver must read `gh pr checks <n>` before
+merging by hand (see `on-the-record/commands/run.md`'s acceptance step).
+
 ## 자체 점검
 
 ```bash
