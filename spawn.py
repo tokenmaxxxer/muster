@@ -1870,6 +1870,31 @@ def _post_stall_comment(root: Path, issue: int, key: str, work: str, log: str) -
                     "-f", f"body={body}"], cwd=root, capture_output=True, text=True)
 
 
+_STRANDED_PUSH_COMMENT_MARKER = "[on-the-record] stranded-relay: {key}"
+
+
+def _post_stranded_push_comment(root: Path, issue: int, role: str, branch: str,
+                                reason: str, detail: str) -> None:
+    """이슈 #326: `ensure_pushed()`의 push/PR-생성 실패가 조용히 사라지지
+    않게, `_post_crash_comment`와 같은 멱등 read-then-check 패턴으로 이슈에
+    코멘트를 남긴다. `key`는 `branch:reason`이라 같은 브랜치의 push-failed와
+    이후 pr-create-failed가 서로 다른 마커를 쓰고 둘 다 드러난다."""
+    key = f"{branch}:{reason}"
+    marker = _STRANDED_PUSH_COMMENT_MARKER.format(key=key)
+    if any(marker in c.get("body", "") for c in _issue_comments(root, issue)):
+        return
+    slug = _repo_slug(root)
+    if not slug:
+        return
+    body = (f"{marker}\n\n"
+            f"브랜치: {branch}\n사유: {reason}\n상세: {detail[:200]}\n\n"
+            f"{role} 역할 세션의 작업이 여기서 멈췄다 — 재개하거나(호스트에서 "
+            f"push/PR 생성을 다시 시도), 이유를 남기고 이슈를 닫아야 한다. "
+            f"사람이 개입해야 한다.")
+    subprocess.run(["gh", "api", f"repos/{slug}/issues/{issue}/comments",
+                    "-f", f"body={body}"], cwd=root, capture_output=True, text=True)
+
+
 def _respawn_or_cap(key: str, work: str, issue: int, role: str, log: str,
                     session_start_ts, state: dict, trigger: str) -> None:
     """공유 재스폰 시퀀스: 원자적 클레임 확인, 상한(`RESPAWN_MAX_ATTEMPTS`)
@@ -2992,6 +3017,8 @@ def ensure_pushed(work: str, issue: int, role: str) -> dict:
         if r.returncode != 0:
             reason = r.stderr.strip()[:200]
             print(f"[{role}] 호스트 push 실패: {reason}", file=sys.stderr)
+            _post_stranded_push_comment(Path(work), issue, role, br,
+                                        "push-failed", r.stderr.strip())
             return {"status": "push-rejected", "reason": reason}
         print(f"[{role}] 호스트에서 push 했다: {br}", file=sys.stderr)
     # "PR 있음" 판정은 OPEN 만 센다 — gh pr view <브랜치> 는 같은 브랜치의
@@ -3019,6 +3046,8 @@ def ensure_pushed(work: str, issue: int, role: str) -> dict:
         else:
             reason = c.stderr.strip()[:200]
             print(f"[{role}] PR 생성 실패: {reason}", file=sys.stderr)
+            _post_stranded_push_comment(Path(work), issue, role, br,
+                                        "pr-create-failed", c.stderr.strip())
             return {"status": "pr-create-failed", "reason": reason}
     return {"status": "pr-already-open", "reason": None}
 
