@@ -87,6 +87,52 @@ None — proposal's write set (`spawn.py`, `test_spawn.py`, `protocol.md`,
 
 N/A — no open findings.
 
+## Re-verification against current main (2026-08-07)
+
+Per #390 a green run against the branch's original base attests to a
+state that no longer exists once ~13 PRs have landed on `main` since.
+Rebased `issue-289/implementation` onto `origin/main`
+(`0f3151a`, PR #423 merged) and re-ran the suite from that base:
+
+- `python3 -m pytest -q --ignore=gates`: **407 passed** (14.41s) — the
+  `gates/` subtree is excluded per instruction (reported module-name
+  collision, #398); on this run `gates/` in fact collected (see below),
+  so that collision was not reproduced here — reported as observed,
+  not assumed still-open.
+- `python3 -m pytest -q gates` (informational, outside the requested
+  scope): 68 passed, 1 pre-existing failure
+  (`test_closes_gate_ci.py::t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch`,
+  a fixture for issue #304 missing an `## Acceptance` section) —
+  unrelated to this issue's write set (`spawn.py`, `test_spawn.py`,
+  `protocol.md`, `protocol.ko.md`); left untouched, out of scope.
+- `python3 test_spawn.py` (full unittest suite, superset check): 235
+  passed, `OK`.
+
+## Acceptance-gate blocker (issue #289, addressed to the issue author)
+
+`gates/acceptance_gate.py` (landed today via #310) now blocks this PR:
+issue #289's own `## Acceptance` section is prose only — three bullets
+naming no executable artifact. Rewriting the GitHub issue body is
+correctly out of reach for a role session: `gh issue edit` is refused
+by `gh-guard.sh` (contract v3 s9 — issues are the user's requirement
+backlog, user-authored only). The following rewrite is proposed for the
+issue author to apply directly; it was validated locally against
+`acceptance_gate.check_issue_body()` before being proposed here (empty
+violation list):
+
+```
+## Acceptance
+- check: python3 -m pytest -q test_spawn.py -k test_fresh_workspace_excludes_dotfile_set — a fresh `issue_workspace()` clone excludes the full home-dotfile set via `.git/info/exclude`, so `git add -A`/`git status` cannot surface them.
+- check: python3 -m pytest -q test_spawn.py -k test_git_lock_masquerade_is_classified_as_sandbox_refusal — the lock-masquerade wording is classified as a sandbox refusal, not left unclassified/silent, so the denial is legible to the session and to `on-the-record` reading the log.
+- unverifiable: whether a session actually refrains from deleting a lock file is a behavioral/procedural outcome, not something a repo-local test can observe. The mitigation is the `protocol.md`/`protocol.ko.md` §4 diagnose-don't-delete instruction, backed by the check above making the denial legible in the first place; compliance with that instruction happens in a session this repo cannot execute or inspect.
+```
+
+Both named checks were run and pass on this branch (see above and
+`closed_checks` below). Until the issue author applies this text (or an
+equivalent), `acceptance_gate.py` will keep blocking this PR — that
+block is correct per its own design and is not something this role
+session may bypass or route around.
+
 ## closed_checks
 
 - check: full `test_spawn.py` suite (235 tests) green after both
@@ -108,3 +154,8 @@ N/A — no open findings.
   live path in the current call graph. Left as a known brittleness
   worth hardening if `issue_workspace()`'s exclude-write ever moves off
   the create-only path — code_sha e6a63b735e1a92b8d97bf6fd8e92f75a370f9f1d.
+- check: re-verification against current `main` after rebase (#390) —
+  `python3 -m pytest -q --ignore=gates` 407 passed,
+  `python3 test_spawn.py` 235 passed OK — code_sha
+  fa496e71eed2dd23e2b5a774a868eeccdd8d77db (rebased onto
+  `origin/main@0f3151a`).
