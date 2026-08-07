@@ -65,7 +65,11 @@ def _rulebook_ttl_min() -> float:
 
 
 def _ttl_marker(d: Path) -> Path:
-    return d / ".muster-last-pull"
+    """클론 밖, `runs/` 아래 마커를 둔다(이슈 #296) — 클론 안에 두면
+    untracked 파일이 남아 `git status --porcelain` 이 영영 비지 않고,
+    그 결과 `(커밋 안 된 변경 있음)`/`+커밋안됨` 이 모든 클론에 상시로 붙는다."""
+    key = hashlib.sha256(str(d.resolve()).encode()).hexdigest()[:16]
+    return ROOT / "runs" / "ttl-markers" / key
 
 
 def _pull_is_fresh(d: Path) -> bool:
@@ -84,7 +88,9 @@ def _pull_is_fresh(d: Path) -> bool:
 
 def _mark_pulled(d: Path) -> None:
     try:
-        _ttl_marker(d).write_text(str(time.time()))
+        marker = _ttl_marker(d)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(time.time()))
     except OSError:
         pass
 

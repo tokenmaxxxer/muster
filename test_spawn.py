@@ -4317,7 +4317,6 @@ class RulebookCheckoutMemo(unittest.TestCase):
             clone_dir.mkdir(parents=True)
             (clone_dir / ".claude-plugin").mkdir()
             (clone_dir / ".claude-plugin" / "marketplace.json").write_text("{}")
-            (clone_dir / ".muster-last-pull").write_text(str(time.time()))
 
             fake_bin = Path(td) / "fakebin"
             fake_bin.mkdir()
@@ -4330,6 +4329,8 @@ class RulebookCheckoutMemo(unittest.TestCase):
             os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
             spawn.ROOT = fake_root
             try:
+                spawn._ttl_marker(clone_dir).parent.mkdir(parents=True, exist_ok=True)
+                spawn._ttl_marker(clone_dir).write_text(str(time.time()))
                 spawn.rulebook_checkout("implementation", spec)
             finally:
                 spawn.ROOT = saved_root
@@ -4345,7 +4346,6 @@ class RulebookCheckoutMemo(unittest.TestCase):
             clone_dir.mkdir(parents=True)
             (clone_dir / ".claude-plugin").mkdir()
             (clone_dir / ".claude-plugin" / "marketplace.json").write_text("{}")
-            (clone_dir / ".muster-last-pull").write_text(str(time.time()))
             subprocess.run(["git", "init", "-q", str(clone_dir)])
 
             fake_bin = Path(td) / "fakebin"
@@ -4359,6 +4359,8 @@ class RulebookCheckoutMemo(unittest.TestCase):
             os.environ["PATH"] = f"{fake_bin}{os.pathsep}{old_path}"
             spawn.ROOT = fake_root
             try:
+                spawn._ttl_marker(clone_dir).parent.mkdir(parents=True, exist_ok=True)
+                spawn._ttl_marker(clone_dir).write_text(str(time.time()))
                 spawn.rulebook_checkout("implementation", spec)
             finally:
                 spawn.ROOT = saved_root
@@ -4366,6 +4368,37 @@ class RulebookCheckoutMemo(unittest.TestCase):
 
             calls = call_count_file.read_text().splitlines() if call_count_file.exists() else []
             self.assertEqual(len(calls), 1, calls)
+
+    def test_ttl_marker_does_not_dirty_clone(self):
+        """이슈 #296: TTL 마커는 클론 밖(`runs/ttl-markers/`)에 있어야
+        한다 — 클론 안에 두면 `git status --porcelain` 이 영영 비지
+        않아 `(커밋 안 된 변경 있음)`/`+커밋안됨` 이 모든 클론에 상시로
+        붙는다."""
+        with tempfile.TemporaryDirectory() as td:
+            fake_root = Path(td) / "root"
+            clone_dir = fake_root / "runs" / "rulebooks" / "acme-rules"
+            clone_dir.mkdir(parents=True)
+            subprocess.run(["git", "init", "-q", str(clone_dir)], check=True)
+            subprocess.run(["git", "-C", str(clone_dir), "commit", "-q",
+                           "--allow-empty", "-m", "init",
+                           "--author=t <t@t.t>"], check=True, capture_output=True)
+
+            saved_root = spawn.ROOT
+            spawn.ROOT = fake_root
+            try:
+                spawn._mark_pulled(clone_dir)
+                marker = spawn._ttl_marker(clone_dir)
+                self.assertTrue(marker.exists())
+                self.assertFalse(
+                    str(marker.resolve()).startswith(str(clone_dir.resolve()) + os.sep),
+                    "TTL 마커가 클론 안에 있다")
+
+                status = subprocess.run(
+                    ["git", "-C", str(clone_dir), "status", "--porcelain"],
+                    capture_output=True, text=True, check=True)
+                self.assertEqual(status.stdout, "", status.stdout)
+            finally:
+                spawn.ROOT = saved_root
 
 
 class FetchDedupe(unittest.TestCase):
