@@ -1,5 +1,13 @@
 # Scout brief — issue #424
 
+**Superseded (2026-08-07)**: this brief scouted external fitness-function tooling (jscpd, ArchUnit)
+for a proxy-metric approach (duplication/drift/growth counts) that both operator corrections
+withdrew. The current proposal answers a different question — per-instance structural
+unreachability, patterned on this repo's own `record-fields-gate`/`closes-gate`/`board-gate` — for
+which the operator named the precedent to follow directly, so no re-scout was run (internal
+precedent fit, not a field survey). Kept as the phase-1 record of what was tried first, per this
+directive's own "append, don't erase" instruction for what did not work.
+
 Mode: 1 sweep stage, 2 web searches run in parallel (batched-sequential fallback not needed —
 both fired concurrently in one turn), stopped at judge point 1 (saturation: category is small,
 converges fast, no build decision would change with another round).

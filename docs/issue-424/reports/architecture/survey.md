@@ -1,5 +1,12 @@
 # Current-state survey — issue #424
 
+**Scope correction (2026-08-07, two operator comments, both after this survey's facts were
+gathered)**: the facts below (call sites, line numbers, existing gates) are unchanged and still
+load-bearing. What changed is the question asked of them — from "how much duplication/drift/growth
+exists" (withdrawn) to "is there wiring making symptom-handling structurally unreachable at each
+instance" (current, see proposals/accumulation-gate.md). This survey's facts are read against the
+new question directly in the proposal; no re-survey was needed since the tree state didn't move.
+
 ## What exists today
 
 - `gates/gates.py` (786 lines) is the gate registry; individual gate modules live beside it
