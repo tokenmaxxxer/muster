@@ -5,18 +5,48 @@ files:
   - on-the-record/hooks/contract-guard.sh
   - on-the-record/hooks/stop-gate.sh
   - spawn.py
-  - gates/boundary.py
   - gates/test_boundary.py
-  - .github/workflows/consumer-closes-gate.yml
-  - .github/workflows/consumer-closure-sweep.yml
-  - .github/workflows/plan-aware-closes-gate.yml
-  - .github/workflows/closure-sweep.yml
-  - .github/workflows/issue-bundling-gate.yml
-  - .github/workflows/on-the-record-tests.yml
   - docs/specs/enforcement-boundary.md
-  - on-the-record/commands/run.md
   - docs/issue-441/reports/architecture.md
 ---
+
+## Scout: skipped
+
+Skip condition: the spec leaves no design decision open that scouting
+external exemplars could inform. This issue derives a boundary internal to
+this monorepo's own gate/hook wiring (which of *our own* `gates/*.py`
+modules and hooks are contract-bound), constrained by the issue text, the
+PR #442 rejection's explicit instructions, and the operator's 2026-08-07
+approval-comment follow-up — there is no comparable external product
+category (no other project ships a "which of my internal CI scripts is
+part of my own published contract" decision) for a sweep to compare
+against. Scouting is skipped per the scout-directive's own skip condition.
+
+## Second rework note (operator approval follow-up, 2026-08-07)
+
+The operator approved with two binding changes, applied throughout this
+file: (1) `closure_sweep.py` board-wide mode and `spawn_coverage.py` are
+reclassified from "CI-supplement / unreached" to **out of scope — operator
+decision, 2026-08-07** (item 1 table) — detecting already-drifted state is
+not this issue's problem to solve, and the previous wording read as an
+unmet obligation rather than a drawn boundary. (2) Item 4's per-session
+visibility check is **dropped** (see item 4, rewritten below) rather than
+kept: it existed only to make CI-supplement absence observable, and the
+CI-supplement's remaining justification (board-wide drift) is now out of
+scope, so there is nothing left for the notice to be *for*. The residual
+gap it would have reported (human web-UI merges, bare-terminal `gh`/`git`
+use) is unreachable by any zero-install signal anyway — no session runs to
+print the notice in — so a static line in
+`docs/specs/enforcement-boundary.md` carries the same information at lower
+cost. `.github/workflows/consumer-closes-gate.yml` and
+`consumer-closure-sweep.yml` (the reusable-workflow CI supplement) are
+therefore **not built in this delivery** — the acceptance criterion's
+"closes-gate 가 실제로 돌아 강제한다" is discharged by the zero-install
+`contract-guard.sh` + `spawn.py` preflight baseline instead, per the
+operator's approval comment ("무설치 강제로 다시 잡은 것이 옳다"). Building
+the reusable CI workflows remains available as future work for the
+residual human-UI/bare-terminal gap, which stays recorded as genuinely
+unreached, not solved.
 
 ## Rework note (supersedes the PR #442 version of this file)
 
@@ -101,10 +131,10 @@ do not reach.
 | `ci.py` (phase-1/phase-2, `Closes #N`, write-scope, orchestrator-authored-deliverable ban) | `gh pr merge` on the delivering PR | **new**: `PreToolUse`+`Bash` in `contract-guard.sh`, intercepts before merge | contract | `run.md` states these as obligations on a role session's PR; enforcement must travel with the text (#310) |
 | `pr_reference.py` (#126) | `gh pr create` / `gh pr merge` with a body not referencing its issue | **new**: same `contract-guard.sh` intercept | contract | same reasoning; folds into the same pre-merge check as `ci.py`, same act |
 | `closure_sweep.py`, single-PR case (closing-keyword present on the delivering PR) | `gh pr merge` without a closing keyword linking the issue | **new**: same `contract-guard.sh` intercept, checked at merge time | contract | the specific violating act (this merge, this PR) is interceptable even though the module's full board-wide mode is not (see next row) |
-| `closure_sweep.py`, board-wide case (already-merged PRs, drift discovered later, delivered-but-open state accumulated over time) | none — this is a retrospective state, not one act | CI only (`consumer-closure-sweep.yml`, supplement) | contract, CI-supplement | nothing to intercept: the violation is an absence discovered later, so periodic/triggered scanning is structurally required, not a design choice |
+| `closure_sweep.py`, board-wide case (already-merged PRs, drift discovered later, delivered-but-open state accumulated over time) | none — this is a retrospective state, not one act | none — not attempted | **out of scope — operator decision, 2026-08-07** | operator ruled detecting already-drifted state out of scope for this issue (issue #441 approval comment); this is a deliberate boundary, not a gap this issue failed to close |
 | `acceptance_gate.py` (#310, executable `## Acceptance`) | opening a phase-2 session against an issue whose Acceptance is prose-only | **new**: `spawn.py` preflight, before the session starts | contract | stronger than a merge-time check — refuses the session before any work happens, matching #424's "wire out of the wrong state" over "rule to follow" |
 | `landing_readiness.py` (#407) | `gh pr merge` on a PR that fails the combined checks/approval/scope-overlap judgment | **new**: folds into the same `contract-guard.sh` pre-merge intercept | contract | same act as `ci.py`/`pr_reference.py`; today this module is advisory-only, this proposal promotes it to blocking inside the hook |
-| `spawn_coverage.py` (#330, an issue never spawned) | none — absence of an act over time | CI only (`consumer-closure-sweep.yml`, supplement) or unreached if not installed | contract, CI-supplement, **honestly unreached without it** | there is no act to intercept; "no session was ever started" cannot be caught by gating a tool call. Recorded here per #310 rather than left off the table, which is the specific defect the rejection named |
+| `spawn_coverage.py` (#330, an issue never spawned) | none — absence of an act over time | none — not attempted | **out of scope — operator decision, 2026-08-07** | same operator ruling: "an issue was filed but a session never started" is an absence-over-time signal, structurally identical to the row above, and detecting it retrospectively is out of scope for this issue |
 | `issue_bundling.py` (#328) | `gh issue create` with bundled scope | (could be hooked, not chosen) | repo-local | this org's own filing hygiene; `run.md` states no such obligation on a consumer's role sessions |
 | `on-the-record-tests.yml` / this repo's own `pytest` | n/a | n/a | repo-local | verifies `on-the-record`'s own source, not a consumer's |
 | `skip_gate.py` (#334) | this repo's own `pytest` run reporting skips as pass | n/a | repo-local | wraps this repo's own CI invocation of its own suite |
@@ -131,40 +161,43 @@ installed, which is the same population `run.md` itself already reaches —
 no additional installation, because it is not a new artifact, it is a new
 matcher line on an artifact already present.
 
-`spawn.py` gains the `acceptance_gate.py` preflight (item 1) and, separately,
-a **visibility check**: at session start, if the target repo has no
-`.github/workflows/consumer-closes-gate.yml` (or equivalent caller), it
-prints a one-line notice to the operator that CI-side board-wide sweeps
-(`closure_sweep.py` board-wide mode, `spawn_coverage.py`) are not installed
-for this repo. This is what answers the rejection's "nobody knows which
-projects installed it, so nobody can act on it": installation state
-becomes an observed, printed fact on every session in every consumer
-repo, not a silent unknown. It does not make the CI supplement
-zero-install — it makes its absence impossible to not notice.
+`spawn.py` gains the `acceptance_gate.py` preflight (item 1): before
+starting a phase-2 session (an issue with an `APPROVE issue-<n>/<role>`
+comment from an approvers.md account already on it —
+`gates.ci._approved_roles_on_issue`, the same predicate `ci.py` already
+uses to tell phase-1 from phase-2), it runs `acceptance_gate.check` against
+that issue and refuses to spawn if the Acceptance section is prose-only.
+Phase-1 spawns are unaffected — a phase-1 issue's Acceptance is still being
+drafted, not yet the thing being executed against.
 
-**Supplement**: the reusable-workflow mechanics from #442 are kept
-unchanged in their design (`uses: tokenmaxxxer/on-the-record/.github/workflows/consumer-closes-gate.yml@main`,
-checkout pinned to `tokenmaxxxer/on-the-record@main` rather than the
-caller's ref or working tree, exactly matching `plan-aware-closes-gate.yml`'s
-existing trust shape) but are now positioned as covering only what the
-zero-install path structurally cannot reach — see next section — plus the
-board-wide, periodic checks (`closure_sweep.py` full mode, `spawn_coverage.py`)
-that have no single act to intercept. A consumer still adds one caller
-file to get this layer; the difference from #442 is that its absence no
-longer produces an unknowable gap — `spawn.py`'s visibility check reports
-it every session, and the baseline (merge-time and session-start checks
-above) already stands without it.
+No visibility check is added (see the second rework note above for why the
+one considered in the prior round was dropped instead of kept). The
+reusable-workflow CI supplement from #442 is not built in this delivery;
+if it is built later, its installation is a one-time repo fact documented
+in `docs/specs/enforcement-boundary.md`, the same as any other opt-in CI
+check — it does not need a live per-session notice once board-wide drift
+detection (the thing that notice existed to compensate for the unknowable
+absence of) is out of scope.
 
-## Item 3 — unchanged from #442: how `gates/*.py` executes in a consumer
+## Item 3 — how `gates/*.py` executes in a consumer, for the mechanisms this delivery ships
 
-Kept as designed in #442: the reusable workflow's `checkout` step is
-pinned to `repository: tokenmaxxxer/on-the-record, ref: main`, giving the
-job `gates/*.py` regardless of which project's workflow invoked it, and it
-talks to the consumer's PR purely through `gh`/API calls, matching how
-`gates/ci.py --closes-only` already operates. `contract-guard.sh` (item 2,
-new) uses the same read-only API pattern rather than a checkout, since it
-runs inside an existing session rather than a fresh CI job — no new
-execution model, same access pattern read twice.
+`contract-guard.sh` (item 2) needs `acceptance_gate`/`ci`/`pr_reference`/
+`closure_sweep`/`landing_readiness`'s check logic to run inside the
+consumer's own Claude Code session. It does not vendor a copy: the hook
+script is itself the plugin-shipped artifact (no separate `gates/*.py`
+install step), and it re-implements the specific read-only `gh api`/`gh pr
+view` calls those modules already make, the same access pattern
+`gates/ci.py --closes-only` uses today, rather than importing the modules
+themselves (which would require shipping `gates/` to the consumer — not
+done in this delivery, see the second rework note). `spawn.py`'s
+`acceptance_gate` preflight runs the real `gates/acceptance_gate.check`
+function directly, because `spawn.py` itself always runs from this
+repository's checkout (every caller runs it directly, never a vendored
+copy — see "where a consumer unavoidably passes" above), so no execution
+gap exists there. The reusable-workflow checkout-pinning mechanics from
+#442 (`repository: tokenmaxxxer/on-the-record, ref: main`) remain the
+answer for the CI supplement whenever it is built, unchanged in design,
+just not built in this delivery.
 
 ## Reachable vs. unreached — recorded honestly, per #310
 
@@ -175,32 +208,33 @@ execution model, same access pattern read twice.
 | Opening a phase-2 session on an issue with prose-only Acceptance | n/a | **yes** |
 | A human clicks "Merge pull request" / "Close issue" in the GitHub web UI | **no — no hook fires; no Claude Code session is involved at all** | no |
 | A person runs `gh`/`git` from a plain terminal, outside any Claude Code session | **no — hooks are session-scoped** | no |
-| Board-wide drift (`closure_sweep.py` full mode, `spawn_coverage.py`) | no — no single act to intercept | no |
+| Board-wide drift (`closure_sweep.py` full mode, `spawn_coverage.py`) | **out of scope — operator decision, 2026-08-07**, not attempted | **out of scope — operator decision, 2026-08-07**, not attempted |
 
-The bottom three rows are genuinely unreached by the zero-install baseline.
-They are only caught if the CI supplement (branch-protection-required
-`consumer-closes-gate.yml` / scheduled `consumer-closure-sweep.yml`) is
-installed — which requires the consumer to configure branch protection
-referencing the workflow, an installation act like #442's, kept here
-because no zero-install substitute exists for a human bypassing the tool
-entirely. This is recorded plainly rather than folded into the "contract"
-verdict as if solved: per item 2's visibility check, a consumer without it
-is told so every session, closing the specific complaint that installation
-state was unknowable — the residual gap itself is not closed, and is not
-claimed to be.
+The middle two rows (human web UI, bare terminal) are genuinely unreached
+by the zero-install baseline built in this delivery. They would be caught
+only by the CI supplement (branch-protection-required
+`consumer-closes-gate.yml`), which is not built here (second rework note)
+— recorded plainly as unreached, not folded into "contract" as if solved.
+The last row is not "unreached" in that sense at all: the operator ruled
+it out of scope, so there is no obligation here for either path to reach
+it.
 
 ## Item 4 — how a consumer learns which contract clauses are unenforced for them
 
-Two mechanisms, not one:
-
-1. `docs/specs/enforcement-boundary.md`, generated from the item 1 table,
-   linked from `run.md` — the static reference, as in #442.
-2. `spawn.py`'s session-start visibility check (item 2) — the live,
-   per-session signal that does not require a consumer to go read a spec
-   file to find out their own installation state. This is the piece #442
-   was missing: a document a consumer must think to open does not solve
-   "nobody knows which projects installed it" by itself; a notice printed
-   at the one point every consumer unavoidably passes does.
+One mechanism: `docs/specs/enforcement-boundary.md`, generated from the
+item 1 table, linked from `run.md` — the static reference, as in #442. The
+second-round proposal (#442's rejection) added a live per-session
+visibility check on top of this; the operator's approval follow-up asks
+this delivery to re-decide it now that board-wide drift detection is out
+of scope, rather than let the prior wording stand unexamined. **Decision:
+drop it.** The visibility check existed to solve one specific problem —
+"nobody can tell which consumer projects installed the CI supplement, so
+nobody can act on that gap." With board-wide drift detection itself now
+out of scope, and the CI supplement not built in this delivery, there is
+no live-and-changing installation fact left to report: whether the CI
+supplement is installed becomes exactly as static as everything else in
+`docs/specs/enforcement-boundary.md`, and belongs there, not in a
+per-session runtime check that would exist for its own sake.
 
 `gates/test_boundary.py` (kept from #442, scope widened): derives the
 shipped/local set from `marketplace.json` + plugin contents, and now also
@@ -218,10 +252,17 @@ over the complete set rather than 5 of 14.
   unchanged from #442.
 - Closing the human-web-UI / bare-terminal gap for a consumer who installs
   nothing — recorded as genuinely unreached, not solved, per #310; solving
-  it requires the CI supplement, which remains consumer-installed.
+  it requires the CI supplement, which is not built in this delivery.
+- Detecting already-drifted state (`closure_sweep.py` board-wide mode,
+  `spawn_coverage.py`) — **operator decision, 2026-08-07**: out of scope
+  for this issue, not a gap it failed to close.
 - Building `contract-guard.sh`'s command-matching into a general Bash
   policy engine — scoped to the specific `gh`/`git` acts in the item 1
   table.
+- Building `.github/workflows/consumer-closes-gate.yml` /
+  `consumer-closure-sweep.yml` (the reusable-workflow CI supplement) —
+  deferred; the zero-install baseline discharges this issue's acceptance
+  per the operator's approval comment.
 
 ## How this will be verified
 
@@ -235,7 +276,5 @@ over the complete set rather than 5 of 14.
     an actual denied tool call, not reasoning about one (#416).
   - `spawn.py` invoked against an issue with prose-only Acceptance refuses
     to start the session, shown as an actual refusal.
-  - `spawn.py`'s session-start output shows the CI-supplement-absent
-    notice for that repo.
 
 ## What did not work
