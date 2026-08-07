@@ -524,6 +524,66 @@ def role_scope(work: Path, branch: str) -> list[str]:
             for f in files if not any(fnmatch.fnmatch(f, a) for a in allowed)]
 
 
+def orphaned_references(work: Path, base: str = BASE) -> list[tuple[str, str]]:
+    """PR 이 삭제·개명(구경로)한 경로가 diff 밖 어딘가에서 아직 참조되는지 찾는다.
+
+    (issue #330) 세 사고(#285→#296/#297, #297→#313, #140→#147) 공통점: 각
+    PR 은 자기 write-set 만 검사했고, 그 write-set 밖에서 옛 경로를 참조하는
+    코드는 아무도 보지 않았다. `_committed_changes_with_status` 로 삭제(D)
+    또는 rename 의 구경로를 모으고, PR 이 건드리지 않은 나머지 추적 파일에서
+    그 경로 문자열을 그렙한다 — 발견되면 (구경로, 참조한 파일) 쌍을 낸다.
+
+    grep 실패(파일이 바이너리이거나 읽기 불가)는 조용히 건너뛴다 — 이 게이트가
+    잡으려는 건 텍스트 참조지 바이너리 매치가 아니다."""
+    changes = _committed_changes_with_status(work)
+    old_paths = [old if old is not None else path
+                 for (status, path, old) in changes
+                 if status.startswith("D") or old is not None]
+    if not old_paths:
+        return []
+    touched = {path for _, path, _ in changes} | {old for _, _, old in changes if old}
+    p = subprocess.run(
+        ["git", "-C", str(work), "ls-files"],
+        capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(f"저장소 파일 목록 확인 불가 (fail closed): {p.stderr.strip()[:200]}")
+    tracked = [f for f in p.stdout.splitlines() if f and f not in touched]
+    hits: list[tuple[str, str]] = []
+    for old_path in old_paths:
+        g = subprocess.run(
+            ["git", "-C", str(work), "grep", "-l", "-F", old_path, "--"] + tracked,
+            capture_output=True, text=True)
+        if g.returncode not in (0, 1):
+            continue
+        for ref_file in g.stdout.splitlines():
+            if ref_file:
+                hits.append((old_path, ref_file))
+    return hits
+
+
+def reach_check(work: Path, record_text: str, base: str = BASE) -> list[str]:
+    """`orphaned_references` 의 각 히트가 `## Reach` 섹션에 이름으로 언급됐는지 검사.
+
+    (issue #330) #310 이 요구하는 실행 가능한 산출물 — "리치를 적어라"는 프로즈
+    조언이 아니라, 옛 경로가 실제로 diff 밖에서 참조되는데 레코드가 그걸 언급하지
+    않으면 이 함수가 실패 문자열을 낸다. 매칭은 옛 경로 전체 문자열 또는 그 상위
+    디렉토리 이름이 `## Reach` 섹션 본문에 등장하는지로 판단한다 — 정확한 문장
+    형식을 강제하지 않는다(그러면 프로즈 파싱 취약점이 된다), 언급 자체만 본다."""
+    hits = orphaned_references(work, base)
+    if not hits:
+        return []
+    m = re.search(r"^##\s*Reach\s*$(.*?)(?=^##\s|\Z)", record_text, re.M | re.S)
+    reach_body = m.group(1) if m else ""
+    bad = []
+    for old_path, ref_file in hits:
+        parent = old_path.rsplit("/", 1)[0] if "/" in old_path else old_path
+        if old_path not in reach_body and parent not in reach_body:
+            bad.append(
+                f"미언급 리치: {ref_file} 가 삭제/개명된 경로 {old_path} 를 "
+                f"참조하지만 레코드의 `## Reach` 섹션에 언급되지 않았다")
+    return bad
+
+
 ALL = {"writeset": writeset, "deps": deps,
        "record_enums": record_enums,
        "record_wellformed": record_wellformed,
