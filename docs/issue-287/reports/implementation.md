@@ -272,3 +272,80 @@ committed to it passing. I did not extend this reasoning to
 `gates/test_closes_gate_ci.py`, which appears in neither `files:` nor
 Constraints — that fallout is left unfixed and reported above under
 "What did not work" instead, per the scope-exceeded rule.
+
+## Re-verification after second rebase onto main (2026-08-07, closes-gate unblock pass)
+
+PR #316's `closes-gate` check started failing with a new, distinct
+reason after issue-310's acceptance-executability gate
+(`gates/acceptance_gate.py`) landed on main: issue #287's own
+`## Acceptance` section is prose-only (four plain bullet sentences, no
+backticked `test/`/`gates/`/`.github/workflows/` path, no `gate:`/
+`check:` line, no `unverifiable:` escape), which that gate now refuses.
+This is a different failure from anything this branch's code changes;
+it is about the issue body text, not the delivery.
+
+- **Issue-body edit is out of reach for this role.** `gh issue edit 287`
+  was refused by the `gh-guard.sh` PreToolUse hook: "issues are the
+  user's requirement backlog, user-authored only (contract v3 s9) — no
+  role touches them." I did not attempt a workaround (e.g. hitting the
+  GitHub API directly to bypass the guard) — that would defeat the
+  guard's purpose through a side channel rather than respect it. The
+  replacement Acceptance text is prepared and verified below; **the user
+  needs to apply it via `gh issue edit 287 --body-file <file>` or the
+  GitHub UI** before the closes-gate can pass. Text (also matches each
+  bullet to the actual test that currently passes it, checked against
+  this rebased tree, not guessed):
+
+  ```markdown
+  ## Acceptance
+  - With `gh` forced to fail, `closure_sweep` exits non-zero and says it could not check: `gates/test_closure_sweep.py::CheckerFailure::test_gh_failure_yields_ok_false`, `gates/test_closure_sweep.py::MainExit::test_issue_view_failure_is_a_skip_not_a_silent_pass`, `gates/test_closure_sweep.py::MainExit::test_pr_view_failure_is_a_skip` (asserts exit 2 and `확인 불가` in output, not exit 0/1).
+  - `flows` payload carries an explicit error instead of an empty board on `gh` failure: `test_flows.py::FlowsStageMapping::test_gh_failure_reports_errors_not_empty_board`.
+  - `deliverable-guard` denies an empty/malformed payload and gates `tests/`: `tests/run-orchestrate-tests.sh` cases `guard-tests-in-board`, `guard-empty-stdin`, `guard-non-json-stdin`, `guard-non-dict-json`, `guard-missing-file-path` (all assert exit 2/deny).
+  - `approve_scope`'s message distinguishes "no approval comment" from "could not read comments": `test_approve_scope.py::ApproveScope::test_gh_failure_message_differs_from_no_comment_message`.
+  - Skipped ledger lines are counted in the payload: `test_flows.py::FlowsStageMapping::test_ledger_skipped_line_is_counted`.
+  - gate: `python3 gates/acceptance_gate.py 287` passes against this section (issue-310's acceptance-executability gate).
+  - unverifiable: whether the fix direction fully closes S7 (escalation-comment returncode checks) is not asserted by a dedicated regression test in the current write set — no automated check exists for "the escalation comment reliably reaches a human"; this remains a manual/code-review judgment, not a mechanical one.
+  ```
+
+  Verified locally against `gates/acceptance_gate.check_issue_body` with
+  this exact text substituted for the issue's current `## Acceptance`
+  section: returns `[]` (pass). Every named test path was re-run on this
+  rebased tree (see below) and confirmed passing — none of the artifact
+  references are aspirational.
+
+- **Rebase**: main advanced from `0f3151a` (this branch's previous base,
+  see the section above) to `23d90ea` (`#429`, `#425` merged) — 2 more
+  merges, neither touching this branch's write set
+  (`git diff --stat 0f3151a origin/main -- gates/ spawn.py
+  on-the-record/hooks/ test_flows.py test_spawn.py test_approve_scope.py
+  test_gates.py tests/run-orchestrate-tests.sh
+  docs/specs/flows-schema.md` — empty). `git rebase origin/main`:
+  0 conflicts, fast and clean.
+- **`python3 -m pytest -q test_flows.py test_spawn.py
+  test_approve_scope.py test_gates.py gates/test_closure_sweep.py`** →
+  **394 passed, 0 failed** (the `test_gates.py` fix from the prior
+  rebase section carried forward cleanly; no new fixture drift from the
+  2 new merges).
+- **`python3 -m pytest -q --ignore=gates`** (repo root, full run) →
+  **413 passed, 0 failed**.
+- **`bash tests/run-orchestrate-tests.sh`** → **13 passed, 0 failed**.
+- **`python3 -m pytest -q gates`** — the task brief that opened this
+  session states main's `gates/` subtree cannot collect (module-name
+  collision, #398); on this tree it *did* collect (76 tests) and ran:
+  **13 failed, 63 passed**, all 13 in
+  `gates/test_closes_gate_ci.py::t_phase_from_approval_*` /
+  `t_autodetect_*` — the same out-of-scope `spawn._issue_comments`
+  monkeypatch fallout already logged under "What did not work" and the
+  prior rebase section, unchanged in root cause or count. I report both
+  what the brief said to expect (a collection failure) and what actually
+  happened (it collected, with these 13 pre-existing-shape failures) —
+  the discrepancy from the brief is itself worth surfacing, not silently
+  resolved in either direction.
+- **`python3 -m pytest -q`** (repo root, no ignore) → **476 passed, 13
+  failed**, the same 13 as above; no new full-suite-only flakiness
+  observed this run (unlike the very first Verification section above,
+  which predates the #360 ordering fix implied by this cleaner result).
+
+Net: code and tests are green against current main; the sole remaining
+blocker on PR #316's closes-gate is the issue-body edit above, which
+this role cannot make itself.
