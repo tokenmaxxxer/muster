@@ -591,6 +591,44 @@ def t_record_no_tool_residue_passes_clean_record():
         assert gates.record_no_tool_residue_in(work) == []
 
 
+def t_record_derived_counts_blocks_bare_ratio():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding",
+                            "---\nkind: x\n---\n\n107 of 122 개 완료됐다.\n")
+        bad = gates.record_derived_counts_in(work)
+        assert any("coding.md:5" in b and "107 of 122" in b for b in bad), bad
+
+
+def t_record_derived_counts_blocks_bare_count_noun():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding",
+                            "---\nkind: x\n---\n\n107 detection items exist.\n")
+        bad = gates.record_derived_counts_in(work)
+        assert any("107 detection items" in b for b in bad), bad
+
+
+def t_record_derived_counts_allows_fenced_number():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding",
+                            "---\nkind: x\n---\n\n```\nok 107 of 122\n```\n")
+        assert gates.record_derived_counts_in(work) == []
+
+
+def t_record_derived_counts_allows_tagged_number():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding",
+                            "---\nkind: x\n---\n\n"
+                            "107 of 122 `derived: pytest test_gates.py`\n")
+        assert gates.record_derived_counts_in(work) == []
+
+
+def t_record_derived_counts_passes_clean_record():
+    with tempfile.TemporaryDirectory() as td:
+        work = _record_repo(td, "issue-9", "coding",
+                            "---\nkind: x\n---\n\n평범한 본문, 개수 주장 없음\n")
+        assert gates.record_derived_counts_in(work) == []
+
+
 def t_record_both_defects_block_independently():
     with tempfile.TemporaryDirectory() as td:
         work = _record_repo(td, "issue-9", "coding", "kind: x\n</content>\n")

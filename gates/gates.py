@@ -406,6 +406,49 @@ def record_no_tool_residue(d: Path, cfg: dict) -> list[str]:
     return record_no_tool_residue_in(d / "work")
 
 
+_DERIVED_TAG = re.compile(r"`derived:\s*\S.*?`")
+_COUNT_RATIO = re.compile(r"\d+\s*(?:of|/)\s*\d+")
+_COUNT_NOUN = re.compile(
+    r"\d+\s+(?:detection\s+)?(?:items?|works?|checks?|cases?)\b")
+
+
+def record_derived_counts_in(work: Path) -> list[str]:
+    """`record_derived_counts` 의 실질 검사. 라우터/CI 양쪽에서 공유한다."""
+    try:
+        records = _changed_records(work)
+    except RuntimeError as e:
+        return [str(e)]
+    bad = []
+    for path in records:
+        f = work / path
+        if not f.exists():
+            continue
+        in_fence = False
+        for lineno, line in enumerate(f.read_text().splitlines(), start=1):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            for pat in (_COUNT_RATIO, _COUNT_NOUN):
+                for m in pat.finditer(line):
+                    tail = line[m.end():]
+                    if _DERIVED_TAG.match(tail.lstrip()):
+                        continue
+                    bad.append(
+                        f"레코드에 근거 없는 개수 주장: {path}:{lineno} — "
+                        f"{line.strip()!r}. 숫자가 코드펜스로 재현되지도, "
+                        "`derived: ...` 인용도 없이 그냥 타이핑되어 있다.")
+    return bad
+
+
+def record_derived_counts(d: Path, cfg: dict) -> list[str]:
+    """변경된 레코드 본문에서 "N of M"/"N items" 류 개수 주장이 코드펜스
+    재현이나 `derived: ...` 인용 없이 맨몸으로 타이핑되어 있는지 검사한다
+    (issue #333). 펜스 안 숫자는 도구 출력 재현으로 간주해 제외한다."""
+    return record_derived_counts_in(d / "work")
+
+
 _FULFILS_LINE = re.compile(r"^\s*[-*]?\s*fulfils:\s*(\S+)\s+(.*)$")
 # `count <derivation> <N>` — derivation 은 마지막 공백-분리 토큰(정수) 앞의
 # 나머지 전부다. glob/명령 둘 다 내부에 공백을 가질 수 있어(명령의 인자)
@@ -631,6 +674,7 @@ ALL = {"writeset": writeset, "deps": deps,
        "record_enums": record_enums,
        "record_wellformed": record_wellformed,
        "record_no_tool_residue": record_no_tool_residue,
+       "record_derived_counts": record_derived_counts,
        "record_fulfils_diff": record_fulfils_diff}
 
 
