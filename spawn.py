@@ -2792,13 +2792,20 @@ def checkout_issue_branch(cwd: str, issue: int, role: str) -> str:
     return br
 
 
-def ensure_pushed(work: str, issue: int, role: str) -> None:
+def ensure_pushed(work: str, issue: int, role: str) -> dict:
     """세션이 남긴 커밋을 호스트 환경에서 push 하고, PR 이 없으면 연다.
 
     샌드박스의 GitHub egress 는 환경마다 다르게 막힌다(https 프록시 403,
     ssh-only 정책, 키링 불가시 등 — 전부 실측). 산출물이 로컬 커밋으로만
     남으면 보드에 존재하지 않는 것과 같으므로, on-the-record 가 세션 종료 후
     바깥에서 릴레이한다. 역할이 스스로 push/PR 에 성공했으면 전부 no-op.
+
+    리턴은 `{"status": ..., "reason": <str|None>}` — status 는
+    `nothing-to-push` / `pushed` / `push-rejected` / `pr-create-failed` /
+    `pr-opened` / `pr-already-open`. 기존 stderr 프린트는 전부 그대로 두고
+    (사람이 로그를 tail 할 때 보는 것은 안 바뀐다), 호출자가 원격의 거부
+    사유를 이벤트/원장에 실을 수 있도록 구조화된 결과를 추가로 리턴한다
+    (이슈 #301 B2).
     """
     br = f"issue-{issue}/{role}"
     def git(*a):
@@ -2811,15 +2818,16 @@ def ensure_pushed(work: str, issue: int, role: str) -> None:
         return _run_net(["git", "-C", work, *a], f"[{role}] 호스트 git",
                         env=_git_env())
     if git("rev-parse", "--verify", "-q", br).returncode != 0:
-        return
+        return {"status": "nothing-to-push", "reason": None}
     ahead = git("rev-list", "--count", f"origin/{br}..{br}")
     unborn = ahead.returncode != 0          # 원격에 브랜치 자체가 없음
     n = ahead.stdout.strip() if ahead.returncode == 0 else "?"
     if unborn or n not in ("", "0"):
         r = git("push", "-q", "-u", "origin", br)
         if r.returncode != 0:
-            print(f"[{role}] 호스트 push 실패: {r.stderr.strip()[:200]}", file=sys.stderr)
-            return
+            reason = r.stderr.strip()[:200]
+            print(f"[{role}] 호스트 push 실패: {reason}", file=sys.stderr)
+            return {"status": "push-rejected", "reason": reason}
         print(f"[{role}] 호스트에서 push 했다: {br}", file=sys.stderr)
     # "PR 있음" 판정은 OPEN 만 센다 — gh pr view <브랜치> 는 같은 브랜치의
     # 머지된 과거 PR(phase 1)도 잡아서, phase 2 의 새 PR 생성을 조용히
@@ -2842,8 +2850,12 @@ def ensure_pushed(work: str, issue: int, role: str) -> None:
         if c.returncode == 0:
             print(f"[{role}] PR 을 열었다: {c.stdout.strip().splitlines()[-1] if c.stdout.strip() else br}",
                   file=sys.stderr)
+            return {"status": "pr-opened", "reason": None}
         else:
-            print(f"[{role}] PR 생성 실패: {c.stderr.strip()[:200]}", file=sys.stderr)
+            reason = c.stderr.strip()[:200]
+            print(f"[{role}] PR 생성 실패: {reason}", file=sys.stderr)
+            return {"status": "pr-create-failed", "reason": reason}
+    return {"status": "pr-already-open", "reason": None}
 
 
 def _session_log_path(cwd: str) -> Path:
@@ -3287,11 +3299,17 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                   f"같은 이슈로 재스폰하면 이 워크스페이스를 이어받아 커밋부터 "
                   f"끝낼 수 있다:\n  " + "\n  ".join(uncommitted[:10]),
                   file=sys.stderr)
-        ensure_pushed(cwd, issue, role)
+        push_result = ensure_pushed(cwd, issue, role)
+    else:
+        push_result = None
     gates = gate_report(cwd) + ownership_report(cwd, role, delta)
     outcome = classify(rc, result, delta, blocked)
     if outcome == "silent-failure" and uncommitted:
         outcome = "uncommitted-work"
+    elif outcome == "silent-failure" and push_result and push_result["status"] == "push-rejected":
+        outcome = "push-rejected"
+        print(f"[{role}] 호스트 push 가 거부됐다 — 커밋은 로컬에 있다: "
+              f"{push_result['reason']}", file=sys.stderr)
     new_commit = issue is not None and _is_new_commit(cwd, before_head, after_head)
     already_delivered = False
     if issue is not None and outcome == "progressed" and not blocked and not new_commit:
@@ -3332,6 +3350,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         "core": core_version(),
         "gates": gates,
         "log": str(log_path),
+        "push_reason": push_result.get("reason") if push_result else None,
     })
 
     for line in gates:
@@ -3371,7 +3390,10 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
         # 어써샬-브로큰 헌트, 실제 재귀 이벤트 시퀀스로 재현). 먼저
         # session-end 를 남기면 새 세대의 session-start 가 이 세션 자신의
         # session-end **뒤에** 오므로 그 오판이 구조적으로 불가능해진다.
-        _append_event(events_path, "session-end", outcome)
+        push_reason = push_result.get("reason") if push_result else None
+        _append_event(events_path, "session-end",
+                      {"outcome": outcome, "reason": push_reason}
+                      if push_reason is not None else outcome)
         _self_trigger_respawn(outcome, roster_key, cwd, issue, role,
                               str(log_path), session_start_ts)
         os._exit(rc if isinstance(rc, int) else 0)

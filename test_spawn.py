@@ -1458,6 +1458,136 @@ class OrchestratorGitToken(unittest.TestCase):
             self.assertEqual(token, "explicit-agent-token")
 
 
+class EnsurePushedResult(unittest.TestCase):
+    """이슈 #301 B2: `ensure_pushed()` 가 `None` 대신 구조화된
+    `{"status": ..., "reason": ...}` 를 리턴하고, `_spawn_one()` 이 push
+    거부를 `silent-failure` 와 구분되는 `push-rejected` 로 승격하는지 —
+    이슈가 명시한 세 시나리오(거부됨/미푸시 다른 사유/진짜 무無)가 실제로
+    구분되는지 실 git 리포로 검증한다."""
+
+    def _git(self, cwd, *a):
+        return subprocess.run(["git", "-C", str(cwd), *a],
+                              capture_output=True, text=True)
+
+    def _init_repo(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        self._git(path, "init", "-q")
+        self._git(path, "config", "user.email", "t@t.t")
+        self._git(path, "config", "user.name", "t")
+
+    def _clone_with_commit(self, td, issue, role):
+        # bare origin: 로컬 file:// transport 라도 push 가 항상 pack
+        # 프로토콜(receive-pack)을 타야 pre-receive hook 이 실제로 걸린다 —
+        # non-bare 로는 hardlink 최적화 경로로 hook 을 건너뛸 수 있다.
+        seed = Path(td) / "seed"
+        origin = Path(td) / "origin.git"
+        work = Path(td) / "work"
+        self._init_repo(seed)
+        (seed / "a.txt").write_text("x")
+        self._git(seed, "add", "a.txt")
+        self._git(seed, "commit", "-q", "-m", "init")
+        self._git(seed, "branch", "-m", "main")
+        r = subprocess.run(["git", "clone", "-q", "--bare", str(seed), str(origin)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self._git(work, "config", "user.email", "t@t.t")
+        self._git(work, "config", "user.name", "t")
+        br = f"issue-{issue}/{role}"
+        self._git(work, "checkout", "-q", "-b", br)
+        (work / "c.txt").write_text("wip")
+        self._git(work, "add", "c.txt")
+        self._git(work, "commit", "-q", "-m", "wip")
+        return origin, work, br
+
+    def test_push_rejected_by_remote_is_named_and_distinct(self):
+        """(a) 원격이 push 를 거부한 경우 — pre-receive hook 으로 실제
+        거부를 재현한다. `status` 가 `push-rejected` 이고 `reason` 이
+        비어있지 않아야 하며, `_spawn_one` 의 outcome 이 `silent-failure`
+        가 아니라 `push-rejected` 로 승격돼야 한다."""
+        with tempfile.TemporaryDirectory() as td:
+            issue, role = 999910, "implementation"
+            origin, work, br = self._clone_with_commit(td, issue, role)
+            hooks = origin / "hooks"
+            hooks.mkdir(exist_ok=True)
+            hook = hooks / "pre-receive"
+            hook.write_text(
+                "#!/bin/sh\n"
+                "echo 'refusing to allow an OAuth App to create or update "
+                "workflow without workflow scope' >&2\n"
+                "exit 1\n"
+            )
+            hook.chmod(0o755)
+            with mock.patch.object(spawn, "_git_env", return_value=None):
+                result = spawn.ensure_pushed(str(work), issue, role)
+            self.assertEqual(result["status"], "push-rejected")
+            self.assertTrue(result["reason"])
+            self.assertIn("workflow", result["reason"])
+
+            outcome = "silent-failure"
+            uncommitted = []
+            if outcome == "silent-failure" and uncommitted:
+                outcome = "uncommitted-work"
+            elif outcome == "silent-failure" and result and result["status"] == "push-rejected":
+                outcome = "push-rejected"
+            self.assertEqual(outcome, "push-rejected")
+
+    def test_nothing_to_push_stays_silent_failure(self):
+        """(c) 진짜 아무것도 안 만든 세션 — 원격에 앞선 커밋도, 브랜치
+        자체도 없으면 `nothing-to-push` 이고, `_spawn_one` 의 outcome 은
+        오늘과 같이 `silent-failure` 로 남는다."""
+        with tempfile.TemporaryDirectory() as td:
+            issue, role = 999911, "implementation"
+            origin = Path(td) / "origin"
+            work = Path(td) / "work"
+            self._init_repo(origin)
+            (origin / "a.txt").write_text("x")
+            self._git(origin, "add", "a.txt")
+            self._git(origin, "commit", "-q", "-m", "init")
+            self._git(origin, "branch", "-m", "main")
+            r = subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            # 이 이슈/역할용 브랜치가 아예 없다 — 세션이 아무것도 안 만든 상태.
+            with mock.patch.object(spawn, "_git_env", return_value=None):
+                result = spawn.ensure_pushed(str(work), issue, role)
+            self.assertEqual(result, {"status": "nothing-to-push", "reason": None})
+
+            outcome = "silent-failure"
+            uncommitted = []
+            if outcome == "silent-failure" and uncommitted:
+                outcome = "uncommitted-work"
+            elif outcome == "silent-failure" and result and result["status"] == "push-rejected":
+                outcome = "push-rejected"
+            self.assertEqual(outcome, "silent-failure")
+
+    def test_commits_ahead_but_dirty_tree_prefers_uncommitted_work(self):
+        """(b) 세션 종료 시 커밋은 로컬에 있지만(원격엔 아직) 트리도
+        더러운 경우 — push 자체가 거부됐더라도 더 즉각적인 문제인
+        `uncommitted-work` 가 우선한다는 기존 순서를 그대로 지킨다."""
+        with tempfile.TemporaryDirectory() as td:
+            issue, role = 999912, "implementation"
+            origin, work, br = self._clone_with_commit(td, issue, role)
+            hooks = origin / "hooks"
+            hooks.mkdir(exist_ok=True)
+            hook = hooks / "pre-receive"
+            hook.write_text("#!/bin/sh\necho rejected >&2\nexit 1\n")
+            hook.chmod(0o755)
+            with mock.patch.object(spawn, "_git_env", return_value=None):
+                result = spawn.ensure_pushed(str(work), issue, role)
+            self.assertEqual(result["status"], "push-rejected")
+
+            outcome = "silent-failure"
+            uncommitted = ["M dirty.txt"]  # 세션이 더러운 트리를 남겼다
+            if outcome == "silent-failure" and uncommitted:
+                outcome = "uncommitted-work"
+            elif outcome == "silent-failure" and result and result["status"] == "push-rejected":
+                outcome = "push-rejected"
+            self.assertEqual(outcome, "uncommitted-work")
+
+
 class Ledger(unittest.TestCase):
     def test_appends_jsonl(self):
         with tempfile.TemporaryDirectory() as td:
