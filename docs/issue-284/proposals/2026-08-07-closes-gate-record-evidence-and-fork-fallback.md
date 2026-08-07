@@ -84,7 +84,12 @@ never reads `role`, so fork PRs still classify correctly via that path;
 they simply can't use the single-account `APPROVE issue-<n>/<role>`
 comment path (which was never reachable for external contributors anyway,
 since approvers.md logins commenting `APPROVE issue-N/role` presumes an
-internal role session exists).
+internal role session exists). The after-proposal warrant hunt (stance 0,
+`docs/reports/2026-08-07-hunt-issue-284-closes-gate-record-evidence-and-fork-fallback.md`)
+found the unguarded version of this fallback lets any internal PR on a
+wrong-shaped branch spoof an issue reference and reach phase2 via the
+role-blind PR-review-Approve path — addressed by scoping the fallback to
+confirmed cross-repo (fork) PRs only, see step 3 below.
 
 ## What will be done
 
@@ -103,17 +108,23 @@ internal role session exists).
    path as an alternative so the refusal is actionable per the issue's
    fallback direction.
 3. `gates/ci.py::_autodetect_issue_phase`: when
-   `_issue_and_role_from_branch(branch)` returns `None`, fall back to
-   `pr_reference._PLAIN_REF` against the PR body (fetched via the existing
-   `_pr_view`/`pr_reference._pr_view` path) before failing closed; on a
-   match, proceed with `role=None`. Still fail closed if neither the
-   branch nor the body resolves an issue number.
+   `_issue_and_role_from_branch(branch)` returns `None`, fall back to the
+   body-`#N` extraction (below) **only if the PR is actually cross-repo**
+   (`gh pr view --json isCrossRepository` true) — i.e. a real fork PR, not
+   an internal PR whose branch merely doesn't follow the naming
+   convention. On that condition, use `pr_reference._PLAIN_REF` against the
+   PR body before failing closed; on a match, proceed with `role=None`.
+   Still fail closed if neither the branch resolves, nor (for a confirmed
+   fork) the body resolves an issue number (see Rationale above for why
+   the cross-repo guard is required).
 4. `gates/test_closes_gate_ci.py`: add coverage for (a) a phase2 PR with no
    Closes in body but a record file carrying `loop_state`, passing; (b) a
    phase2 PR with neither, still blocked, message names both options; (c)
-   a fork-shaped branch with a resolvable `#N` body reference, issue
-   resolved and role `None`; (d) a fork-shaped branch with no resolvable
-   reference anywhere, still fail-closed.
+   a confirmed-cross-repo branch with a resolvable `#N` body reference,
+   issue resolved and role `None`; (d) a fork-shaped branch with no
+   resolvable reference anywhere, still fail-closed; (e) a wrong-shaped
+   but same-repo (non-cross-repo) branch with a resolvable `#N` in the
+   body — still fail-closed, per the after-proposal hunt finding.
 5. `docs/issue-284/decisions/record-evidence-as-closing-intent.md`: record
    the "existence, not value" choice on `loop_state` and why (the enum
    mismatch found in the survey), since it's a check-shape decision a
