@@ -1782,6 +1782,7 @@ def _prior_event_details(events_path: Path, ev_type: str) -> set:
 RESPAWN_STATE = ROOT / "runs" / "respawn_state.json"
 RESPAWN_MAX_ATTEMPTS = 2
 _CRASH_COMMENT_MARKER = "[on-the-record] {key}: crashed, 재스폰 상한({cap}) 도달"
+_STALL_COMMENT_MARKER = "[on-the-record] {key}: stalled"
 
 
 def _respawn_state_load() -> dict:
@@ -1816,6 +1817,28 @@ def _post_crash_comment(root: Path, issue: int, key: str, work: str, log: str,
     body = (f"{marker}\n\n"
             f"트리거: {trigger}\n워크스페이스: {work}\n로그: {log}\n\n"
             f"{RESPAWN_MAX_ATTEMPTS}회 자동 재스폰을 모두 소진했다 — 사람이 개입해야 한다.")
+    subprocess.run(["gh", "api", f"repos/{slug}/issues/{issue}/comments",
+                    "-f", f"body={body}"], cwd=root, capture_output=True, text=True)
+
+
+def _post_stall_comment(root: Path, issue: int, key: str, work: str, log: str) -> None:
+    """이슈 #325: `stalled` 판정을 최초 1회 이슈 코멘트로 남긴다.
+
+    `stalled` 는 재스폰을 트리거하지 않는다(관찰-전용 정책, 이슈 #132 —
+    바뀌지 않는다) — 다만 지금까지는 그 판정이 워치독을 부른 터미널의
+    `print()` 한 줄로만 남아, 진행 중인 세션과 조용히 멈춘 세션이 밖에서
+    구분되지 않았다. `_post_crash_comment` 와 같은 read-then-check
+    멱등 패턴: 고정 마커가 이미 있으면 아무것도 하지 않는다."""
+    marker = _STALL_COMMENT_MARKER.format(key=key)
+    if any(marker in c.get("body", "") for c in _issue_comments(root, issue)):
+        return
+    slug = _repo_slug(root)
+    if not slug:
+        return
+    body = (f"{marker}\n\n"
+            f"워크스페이스: {work}\n로그: {log}\n\n"
+            f"세션이 멈춘 것으로 판정됐다 — 자동 재스폰은 걸리지 않는다"
+            f"(관찰-전용 정책). 사람이 확인해야 한다.")
     subprocess.run(["gh", "api", f"repos/{slug}/issues/{issue}/comments",
                     "-f", f"body={body}"], cwd=root, capture_output=True, text=True)
 
@@ -1886,7 +1909,9 @@ def _respawn_or_cap(key: str, work: str, issue: int, role: str, log: str,
 def _auto_respawn_check(key: str, entry: dict, state: dict) -> None:
     """죽은 로스터 엔트리 하나에 대해 `crashed` 인지 판정하고, 그렇다면
     `_respawn_or_cap()` 에 넘긴다. `stalled`/`normal`/`in-progress` 는
-    그냥 보고만 하고 끝난다(관찰-전용 계약 유지, 이슈 #132)."""
+    재스폰을 걸지 않는다(관찰-전용 계약 유지, 이슈 #132) — 다만 `stalled`
+    는 최초 1회 이슈 코멘트로 남는다(이슈 #325): 재스폰하지 않는 것과
+    아무도 모르게 재스폰하지 않는 것은 다르다."""
     work = entry.get("work")
     issue = entry.get("issue")
     role = entry.get("role")
@@ -1895,6 +1920,9 @@ def _auto_respawn_check(key: str, entry: dict, state: dict) -> None:
     log_path = Path(entry["log"]) if entry.get("log") else None
     verdict = session_end_verdict(work, log_path)
     print(f"[watchdog] {key}: {verdict}")
+    if verdict == "stalled":
+        _post_stall_comment(Path(work), issue, key, work, entry.get("log", ""))
+        return
     if verdict != "crashed":
         return
     events_path = _events_path(work)
