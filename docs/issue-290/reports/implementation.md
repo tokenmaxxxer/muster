@@ -19,6 +19,25 @@ resolved_findings:
     numbers corrected from a sandbox-local "2 failed, 352 passed" (an
     artifact of this session's sandbox, not the branch) to the actual
     CI-measured 355 passed / 0 failed.
+  - #390 unblock (2026-08-07): branch was ~179 commits behind main.
+    Rebased onto origin/main (commit 0f3151a); one textual conflict in
+    `test_approve_scope.py` (this branch's scoped-mock.patch fix and
+    main's own equivalent fix landed on the same lines) resolved by
+    keeping main's already-integrated version, which is behaviorally
+    identical to this branch's. `gates/spec_index.py --update` reported
+    drift on `docs/specs/reconciled-index.md` (protocol.md/protocol.ko.md
+    hashes changed by a concurrent merge, issue-289); checked the
+    concurrent diff — it does not touch the "Ledger storage location"
+    resolved ambiguity, so only hashes were regenerated, no ambiguity
+    text changed. Re-ran acceptance evidence against the rebased,
+    committed tree: `python3 -m pytest -q --ignore=gates` — 407 passed,
+    0 failed (commit 3946aa1). `python3 -m pytest -q gates` (informational,
+    not part of this issue's acceptance) collects and runs but has 1
+    pre-existing failure unrelated to this branch
+    (`t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch`,
+    real issue #304 lacking an `## Acceptance` section) — #398's claim
+    that the `gates/` subtree cannot collect does not reproduce here; it
+    collects and runs, just with one pre-existing unrelated failure.
 ---
 
 # issue-290 / issue-294 — phase 2: CI + test-hygiene fix
