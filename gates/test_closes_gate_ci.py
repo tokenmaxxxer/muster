@@ -410,6 +410,152 @@ def t_autodetect_closes_only_blocks_commit_message_keyword_with_clean_body():
     assert any("커밋 메시지에" in b and "closing 키워드" in b for b in bad), bad
 
 
+def t_phase2_record_evidence_true_when_record_has_nonempty_loop_state():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        record = repo / "docs/issue-245/reports/implementation.md"
+        record.parent.mkdir(parents=True)
+        record.write_text("---\nloop_state: phase-2-complete\n---\nbody\n")
+        assert ci._phase2_record_evidence(repo, "issue-245/implementation", 245) is True
+
+
+def t_phase2_record_evidence_false_when_record_missing():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        assert ci._phase2_record_evidence(repo, "issue-245/implementation", 245) is False
+
+
+def t_phase2_record_evidence_false_when_loop_state_empty():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        record = repo / "docs/issue-245/reports/implementation.md"
+        record.parent.mkdir(parents=True)
+        record.write_text("---\nloop_state: \n---\nbody\n")
+        assert ci._phase2_record_evidence(repo, "issue-245/implementation", 245) is False
+
+
+def t_phase2_record_evidence_false_when_branch_not_issue_role_shaped():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        assert ci._phase2_record_evidence(repo, "patch-1", 245) is False
+
+
+def t_ci_check_phase2_passes_via_record_evidence_without_body_edit():
+    # (a) — proposal item 4a: no Closes in body, but a record file with a
+    # non-empty loop_state exists — passes without a body edit.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        record = repo / "docs/issue-245/reports/implementation.md"
+        record.parent.mkdir(parents=True)
+        record.write_text("---\nloop_state: phase-2-complete\n---\nbody\n")
+        orig_body, orig_issue_body = pr_reference._pr_view, pr_reference._issue_view_body
+        orig_head_ref = ci._pr_head_ref
+        pr_reference._pr_view = lambda repo, pr: "delivered the feature, see #245"
+        pr_reference._issue_view_body = lambda repo, issue: ""
+        ci._pr_head_ref = lambda repo, pr: "issue-245/implementation"
+        try:
+            bad = ci.check(repo, pr=1, issue=245, phase="phase2", closes_only=True)
+        finally:
+            pr_reference._pr_view, pr_reference._issue_view_body = orig_body, orig_issue_body
+            ci._pr_head_ref = orig_head_ref
+        assert bad == [], bad
+
+
+def t_ci_check_phase2_blocks_and_names_both_options_when_neither_present():
+    # (b) — no Closes in body, no record file: still blocked, message names
+    # both the body-edit and record-evidence paths.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        orig_body, orig_issue_body = pr_reference._pr_view, pr_reference._issue_view_body
+        orig_head_ref = ci._pr_head_ref
+        pr_reference._pr_view = lambda repo, pr: "delivered the feature, see #245"
+        pr_reference._issue_view_body = lambda repo, issue: ""
+        ci._pr_head_ref = lambda repo, pr: "issue-245/implementation"
+        try:
+            bad = ci.check(repo, pr=1, issue=245, phase="phase2", closes_only=True)
+        finally:
+            pr_reference._pr_view, pr_reference._issue_view_body = orig_body, orig_issue_body
+            ci._pr_head_ref = orig_head_ref
+        assert len(bad) == 1, bad
+        assert "Closes #245" in bad[0] and "loop_state" in bad[0], bad
+
+
+def t_fork_issue_from_body_resolves_for_confirmed_cross_repo_pr():
+    # (c) — a confirmed cross-repo (fork) PR with a resolvable #N body
+    # reference resolves the issue, role stays None.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        orig_cross, orig_body = ci._pr_is_cross_repo, pr_reference._pr_view
+        ci._pr_is_cross_repo = lambda repo, pr: True
+        pr_reference._pr_view = lambda repo, pr: "Fixes bug, see #330"
+        try:
+            assert ci._fork_issue_from_body(repo, 1) == 330
+        finally:
+            ci._pr_is_cross_repo, pr_reference._pr_view = orig_cross, orig_body
+
+
+def t_autodetect_resolves_fork_pr_with_role_none():
+    orig_head_ref = ci._pr_head_ref
+    orig_cross, orig_body = ci._pr_is_cross_repo, pr_reference._pr_view
+    orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
+    ci._pr_head_ref = lambda repo, pr: "patch-1"
+    ci._pr_is_cross_repo = lambda repo, pr: True
+    pr_reference._pr_view = lambda repo, pr: "Fixes bug, see #330"
+    spawn._approvers = lambda repo: {"jjongkwann"}
+    spawn._issue_comments = lambda repo, n: []
+    ci._pr_reviews = lambda repo, pr: []
+    try:
+        result = ci._autodetect_issue_phase(Path("."), 1, None, None)
+    finally:
+        ci._pr_head_ref = orig_head_ref
+        ci._pr_is_cross_repo, pr_reference._pr_view = orig_cross, orig_body
+        spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
+    assert result == (330, "phase1"), result
+
+
+def t_autodetect_fails_closed_for_fork_shaped_branch_with_no_resolvable_ref():
+    # (d) — confirmed fork PR, no #N anywhere in body: still fail closed.
+    orig_head_ref = ci._pr_head_ref
+    orig_cross, orig_body = ci._pr_is_cross_repo, pr_reference._pr_view
+    ci._pr_head_ref = lambda repo, pr: "patch-1"
+    ci._pr_is_cross_repo = lambda repo, pr: True
+    pr_reference._pr_view = lambda repo, pr: "no issue reference here"
+    try:
+        result = ci._autodetect_issue_phase(Path("."), 1, None, None)
+    finally:
+        ci._pr_head_ref = orig_head_ref
+        ci._pr_is_cross_repo, pr_reference._pr_view = orig_cross, orig_body
+    assert isinstance(result, list), result
+    assert any("추출할 수 없다" in b for b in result), result
+
+
+def t_autodetect_fails_closed_for_wrong_shaped_internal_branch_despite_resolvable_ref():
+    # (e) — after-proposal hunt finding: a wrong-shaped but SAME-repo branch
+    # (not cross-repo) with a resolvable #N in the body must still fail
+    # closed — the fork fallback is scoped to confirmed cross-repo PRs only,
+    # otherwise an internal PR could spoof an issue reference and reach
+    # phase2 via the role-blind PR-review-Approve path.
+    orig_head_ref = ci._pr_head_ref
+    orig_cross, orig_body = ci._pr_is_cross_repo, pr_reference._pr_view
+    ci._pr_head_ref = lambda repo, pr: "patch-1"
+    ci._pr_is_cross_repo = lambda repo, pr: False
+    pr_reference._pr_view = lambda repo, pr: "Fixes bug, see #330"
+    try:
+        result = ci._autodetect_issue_phase(Path("."), 1, None, None)
+    finally:
+        ci._pr_head_ref = orig_head_ref
+        ci._pr_is_cross_repo, pr_reference._pr_view = orig_cross, orig_body
+    assert isinstance(result, list), result
+    assert any("추출할 수 없다" in b for b in result), result
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("t_")]
     for t in tests:

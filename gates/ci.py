@@ -166,6 +166,61 @@ def _phase_from_approval(repo: Path, pr: int, issue: int, role: str) -> str:
     return "phase2" if approved else "phase1"
 
 
+def _phase2_record_evidence(repo: Path, branch: str, issue: int) -> bool:
+    """phase-2 기록 파일의 존재 + 비어있지 않은 `loop_state` 를 closing 의도의
+    대안 증거로 인정한다(issue #284 승인된 제안) — 승인 이후 phase 가 뒤바뀐
+    PR을 본문을 다시 쓰지 않고도 통과시킨다. `loop_state` 의 *값*은 보지
+    않는다: `record-shape-directive` 가 이미 모든 phase-2 기록에 이 필드를
+    강제하므로 존재 자체가 새 의무가 아니고, `roles/implementation.json` 의
+    선언 enum과 실제 기록 값(`phase-2-complete`)이 어긋나 있어(값 검사는
+    #337 류 기록을 오탐 차단한다 — 자세한 근거는
+    `docs/issue-284/decisions/record-evidence-as-closing-intent.md`) 존재
+    검사만이 오늘 실제로 참인 것이다."""
+    detected = _issue_and_role_from_branch(branch)
+    if detected is None:
+        return False
+    _, role = detected
+    record_path = repo / f"docs/issue-{issue}/reports/{role}.md"
+    if not record_path.exists():
+        return False
+    text = record_path.read_text(encoding="utf-8-sig", errors="replace")
+    fm = gates.record_frontmatter(text)
+    return bool(fm.get("loop_state", "").strip())
+
+
+def _pr_is_cross_repo(repo: Path, pr: int) -> bool | None:
+    """PR이 실제로 fork(다른 저장소) 발원인지 — 브랜치명이 관례를 안 따르는
+    "형태가 잘못된 내부 PR"과 구분하기 위해 필요하다. 이 구분이 없으면
+    내부 PR이 본문에 이슈 참조를 적어 넣는 것만으로 브랜치 명명 강제를
+    우회해 role-blind PR-review-Approve 경로로 phase2 에 도달할 수 있다
+    (after-proposal warrant hunt, stance 0 실측)."""
+    import json
+    import subprocess
+    r = subprocess.run(["gh", "pr", "view", str(pr), "--json", "isCrossRepository"],
+                       cwd=repo, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    try:
+        return json.loads(r.stdout).get("isCrossRepository")
+    except ValueError:
+        return None
+
+
+def _fork_issue_from_body(repo: Path, pr: int) -> int | None:
+    """확인된 cross-repo(포크) PR에 한해, 본문의 평문 `#N` 참조로 이슈
+    번호를 뽑는다(issue #284 fork 폴백) — phase1이 모든 PR 본문에 이미
+    요구하는 것과 같은 패턴(`pr_reference._PLAIN_REF`)을 재사용한다.
+    cross-repo 가 아니면(또는 판정 불가면) 아예 시도하지 않는다 — 그
+    호출부(`_autodetect_issue_phase`)가 이어서 fail closed 한다."""
+    if not _pr_is_cross_repo(repo, pr):
+        return None
+    body = pr_reference._pr_view(repo, pr)
+    if not body:
+        return None
+    refs = pr_reference._PLAIN_REF.findall(body)
+    return int(refs[0]) if refs else None
+
+
 def _phase1_mismatch(body: str, issue: int) -> list[str]:
     """phase1 문서 규칙("Closes/Fixes/Resolves 금지")의 기계 검사 — 순수 함수,
     본문 한 표면만 본다. `_phase1_surface_mismatch`의 단일-표면 특수형 —
@@ -214,13 +269,20 @@ def _autodetect_issue_phase(repo: Path, pr: int, issue: int | None,
             return [f"PR #{pr} 의 head 브랜치를 읽을 수 없다 (fail closed)"]
         detected = _issue_and_role_from_branch(branch)
         if detected is None:
-            return [f"브랜치 {branch!r} 에서 이슈 번호를 추출할 수 없다 "
-                    f"(issue-<n>/<role> 형태가 아니다) — fail closed: 이슈에 "
-                    f"연결 안 된 PR을 이 검사 없이 통과시키지 않는다. 브랜치를 "
-                    f"issue-<n>/<role> 로 바꾸면 재검사된다."]
-        detected_issue, role = detected
-        if issue is None:
-            issue = detected_issue
+            fork_issue = _fork_issue_from_body(repo, pr)
+            if fork_issue is None:
+                return [f"브랜치 {branch!r} 에서 이슈 번호를 추출할 수 없다 "
+                        f"(issue-<n>/<role> 형태가 아니다) — fail closed: 이슈에 "
+                        f"연결 안 된 PR을 이 검사 없이 통과시키지 않는다. 내부 "
+                        f"PR이면 브랜치를 issue-<n>/<role> 로 바꾸면 재검사된다; "
+                        f"확인된 fork PR이면 본문에 '#<이슈번호>'를 적으면 "
+                        f"재검사된다(role 은 None 으로 남는다)."]
+            if issue is None:
+                issue = fork_issue
+        else:
+            detected_issue, role = detected
+            if issue is None:
+                issue = detected_issue
     if phase is None:
         phase = _phase_from_approval(repo, pr, issue, role)
     return issue, phase
@@ -249,7 +311,24 @@ def check(repo: Path, pr: int | None = None, issue: int | None = None,
             bad.append("--phase가 필요하다(phase1|phase2) — 생략하면 phase-2 "
                        "검사가 조용히 건너뛰어진다")
         else:
-            bad += pr_reference.check(repo, pr, issue, phase)
+            ref_bad = pr_reference.check(repo, pr, issue, phase)
+            if phase == "phase2":
+                closes_msg = (f"PR 본문에 'Closes #{issue}'(또는 Fixes/Resolves)가 "
+                              f"없다 — phase-2 인도 PR은 이슈를 명시적으로 닫아야 한다.")
+                if closes_msg in ref_bad:
+                    branch = _pr_head_ref(repo, pr)
+                    if branch is not None and _phase2_record_evidence(repo, branch, issue):
+                        # 승인 이벤트가 phase 를 뒤집었을 뿐 본문은 phase-1
+                        # 시점 그대로인 PR(issue #284) — 기록 파일의 존재가
+                        # closing 의도의 대안 증거이므로 본문 편집 없이
+                        # 통과시킨다.
+                        ref_bad = [b for b in ref_bad if b != closes_msg]
+                    else:
+                        ref_bad = [closes_msg + " (대안: 이슈에 연결된 phase-2 "
+                                   "기록 파일이 loop_state 를 채워 존재하면 "
+                                   "통과한다)" if b == closes_msg else b
+                                   for b in ref_bad]
+            bad += ref_bad
             if phase == "phase1":
                 body = pr_reference._pr_view(repo, pr)
                 if body is None:
