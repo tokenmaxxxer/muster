@@ -1,0 +1,35 @@
+name: on-the-record-tests
+
+# issue #290: no workflow ran the pytest suite on a PR head, so PRs merged
+# with zero automated verification. This checks out the PR's own head
+# (default actions/checkout@v4 ref) — unlike plan-aware-closes-gate.yml's
+# deliberate `ref: main` pin, this job needs to run the PR's actual code.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: install test dependencies
+        run: pip install pytest
+
+      - name: configure git identity for tests
+        run: |
+          git config --global user.email "ci@on-the-record.local"
+          git config --global user.name "on-the-record CI"
+
+      - name: run test suite
+        run: pytest -q

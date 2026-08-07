@@ -97,7 +97,7 @@ def t_rulebook_version_is_recorded():
     핀을 못 박으면 **무엇이 돌았는지라도 남겨야** ablation 이 검증 가능해진다."""
     v = spawn.rulebook_version("execution-observation")
     assert "(" in v and ")" in v, v          # sha (branch)
-    assert "커밋안됨" not in v or True       # 더러우면 그 사실이 문자열에 남는다
+    assert "커밋안됨" not in v                # 더러우면 그 사실이 문자열에 남는다
 
     # 알 수 없을 때 조용히 빈 문자열을 돌려주면 기록이 "버전 없음"으로 보인다.
     import json, tempfile
