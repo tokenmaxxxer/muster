@@ -30,9 +30,26 @@ so the workaround does not read as precedent.
   second parallel "bootstrap" check cannot substitute when the primary
   required check is red — the escape hatch has to live inside `gates/ci.py`,
   the single script the one required check already runs.
-- Must not weaken the check for any PR outside `gates/`/`.github/workflows/`.
+- Must not weaken the check for any PR outside `gates/`.
 - Must not retroactively bless the three already-merged workarounds as
   acceptable practice; the record must say what was actually done.
+- Bootstrap eligibility's changed-file test covers `gates/**` only, never
+  `.github/workflows/**` — after-proposal warrant hunt (stance 3,
+  docs/reports/2026-08-07-hunt-gate-fix-bootstrap-path.md) found that
+  `plan-aware-closes-gate.yml` uses the plain `pull_request` trigger, under
+  which GitHub executes the workflow *definition* from the PR's own ref
+  (unlike `pull_request_target`, which the file's own comment at lines 12-15
+  already relies on to justify this trigger choice for a different reason —
+  no secrets exposure). A PR whose changed-file set fell inside a
+  `.github/workflows/`-eligible bootstrap path could edit the workflow file
+  itself — change the checkout ref, drop the step, anything — and that edited
+  version is what would actually run, bypassing `_gate_bootstrap_eligible()`
+  entirely without ever touching `gates/ci.py`. The trust boundary this
+  proposal preserves (`checkout: ref: main` inside the job) only protects code
+  the job *executes after checkout*; it does not protect the workflow file
+  itself under `pull_request`. Scoping eligibility to `gates/**` only sidesteps
+  this: the workflow file is never a bootstrap-eligible path, so a PR touching
+  it never qualifies for the waiver regardless of body content.
 
 ## Rationale
 
@@ -79,17 +96,21 @@ rather than leave it as silent admin discretion.
   implementing the three-part test above, reusing
   `_pr_head_ref`/`gh api pulls/<n>/files`/`_phase_from_approval` (no new
   network-call helpers beyond one `gh api ... /files` call for changed
-  paths).
+  paths). The changed-file subset test checks against `gates/` only — see
+  the `.github/workflows/` scoping constraint above.
 - Wire it into `check()`'s `closes_only` branch: when the closes-keyword
   mismatch (`closes_msg`) would otherwise block AND
   `_gate_bootstrap_eligible()` is true, drop that reason (same pattern as the
   existing `_phase2_record_evidence` waiver at ci.py:318-330) and record which
   waiver fired so the two are distinguishable in output.
 - Extend `gates/test_closes_gate_ci.py`:
-  1. PR confined to `gates/**`/`.github/workflows/**`, with justification
-     section and phase2-approval evidence → bootstrap fires, PR passes.
-  2. Same PR but touching one file outside those two prefixes → bootstrap
-     does not fire (falls through to normal, still-blocked behavior).
+  1. PR confined to `gates/**`, with justification section and
+     phase2-approval evidence → bootstrap fires, PR passes.
+  2. Same PR but touching one file outside `gates/` (including a file under
+     `.github/workflows/`) → bootstrap does not fire (falls through to
+     normal, still-blocked behavior). This case is the regression test for
+     the hunt finding above — it must cover a workflow-file touch
+     specifically, not just an arbitrary non-gates file.
   3. Same PR but missing the justification section, or missing approval
      evidence → bootstrap does not fire.
   4. A non-gate PR (e.g. touching only `src/`) can never reach the
