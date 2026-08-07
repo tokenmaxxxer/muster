@@ -338,3 +338,49 @@ value past this point; this pass's numbers are the ones pushed. The
 `docs/specs/reconciled-index.md` churn and the `writeset()` protected-path
 block are both pre-existing conditions independent of this delivery's
 own code, not regressions this session introduced.
+
+## Rebase re-verification (2026-08-07, fifth pass — ~80 PRs merged to main since fourth pass)
+
+`origin/main` advanced from `f3ded43` to `2395573` (merge of PR #305).
+`git rebase origin/main` hit one real conflict this time, in
+`gates/test_closes_gate_ci.py`: both sides added independent new test
+functions adjacent to each other (this branch's `t_checked_ci_claims_*`
+suite vs. upstream's `t_issue_comments_stub_shape_contract_catches_old_pre_287_shape`)
+— resolved by keeping both function definitions, dropping only the
+conflict markers (no logic on either side was altered). A second
+conflict in `docs/specs/reconciled-index.md` (a generated file) was
+resolved by regenerating it via `python3 gates/spec_index.py . --update`
+rather than hand-merging the hash table.
+
+Re-ran on the rebased tree (HEAD past `2395573`, 0 commits behind
+`origin/main`, working tree clean apart from this session's untracked
+dotfiles which are not part of the diff):
+
+- `python3 gates/spec_index.py .` — **pass**, all spec docs match their
+  recorded hash after the regeneration above.
+- `python3 -m pytest -q` (this task's instructed command — run with
+  **no** `--ignore` flag, per the operator's instruction that main's
+  full suite is green at 508 with no ignore) — **524 passed**, 0 failed.
+  The count differs from the operator-cited 508 because it is measured
+  on this branch's rebased tree (508 + this delivery's 16 new tests,
+  little on top from the merged upstream commits) rather than on bare
+  `origin/main`; no failures either way.
+- `python3 gates/ci.py . --pr 343 --autodetect` (the exact command CI
+  runs) — the protected-path block from the third/fourth passes
+  reproduces identically and unchanged (`gates/ci.py`, `gates/gates.py`,
+  `gates/test_closes_gate_ci.py`, `.github/workflows/plan-aware-closes-gate.yml`,
+  plus this pass's `docs/specs/reconciled-index.md` regeneration and
+  `docs/reports/2026-08-07-hunt-checked-claims-gate.md`, both also under
+  the blocked protected-path list) — confirming the structural finding
+  above still stands after ~80 intervening merges: this PR's own diff
+  still cannot pass the CI step it itself adds, because `gates.writeset()`
+  (pre-existing, unconditional, no bypass) blocks any changed path under
+  `gates/`/`.github/` whenever the non-`--closes-only` bundle runs, and
+  this delivery is what first wired that bundle into required CI.
+
+No code changes beyond conflict-free-in-substance rebase (only marker
+resolution, no logic touched) and the spec-index regeneration — no scope
+was widened. This finding is unresolved and is not this session's to fix
+(outside the frozen write set); it remains blocking for this PR's own
+required check regardless of how many more times main advances before
+someone addresses `gates.writeset()` directly.
