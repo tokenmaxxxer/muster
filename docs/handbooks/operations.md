@@ -924,7 +924,12 @@ Out of scope). 그때까지는 승인자가 `gh pr checks <n>`을 머지 전에 
 읽어야 한다(`on-the-record/commands/run.md`의 수용 절차). CI 러너에는
 `pytest`가 기본 설치돼 있지 않으므로, `pytest -q`를 돌리기 전에
 `pip install pytest` 단계가 필요하다 — 없으면 `pytest: command not
-found`(exit 127)로 스위트를 한 번도 돌리지 않고 실패한다.
+found`(exit 127)로 스위트를 한 번도 돌리지 않고 실패한다. 또한 CI
+러너에는 전역 `git user.name`/`user.email`이 설정돼 있지 않아
+`test_spawn.py::RulebookCheckoutMemo::test_ttl_marker_does_not_dirty_clone`
+같은 실제 `git commit`을 도는 케이스가 exit 128로 실패한다 — 스위트를
+돌리기 전에 CI 전용 자리표시 identity(`git config --global`)를
+설정해야 한다.
 
 `on-the-record-tests.yml`(issue #290) checks out the PR head on every PR
 event and runs `pytest -q` — unlike `plan-aware-closes-gate.yml`, it does
@@ -938,7 +943,12 @@ merging by hand (see `on-the-record/commands/run.md`'s acceptance step).
 The CI runner does not ship `pytest` preinstalled, so the job installs
 it (`pip install pytest`) before running `pytest -q` — without that
 step the job fails at `pytest: command not found` (exit 127) without
-ever exercising the suite.
+ever exercising the suite. The CI runner also has no global `git
+user.name`/`user.email` set, which makes tests that perform a real
+`git commit` (e.g.
+`test_spawn.py::RulebookCheckoutMemo::test_ttl_marker_does_not_dirty_clone`)
+fail with exit 128 — the job sets a placeholder CI-only identity via
+`git config --global` before running the suite.
 
 ## 자체 점검
 

@@ -26,5 +26,10 @@ jobs:
       - name: install test dependencies
         run: pip install pytest
 
+      - name: configure git identity for tests
+        run: |
+          git config --global user.email "ci@on-the-record.local"
+          git config --global user.name "on-the-record CI"
+
       - name: run test suite
         run: pytest -q
