@@ -5,7 +5,7 @@ code_under_review:
   - gates/ci.py
   - test_gates.py
   - docs/issue-321/decisions/2026-08-07-registry-placement.md
-loop_state: landed
+loop_state: closed
 open_findings: none
 ---
 
@@ -156,3 +156,57 @@ attests to a state that no longer exists):
 
 No code changes beyond the two conflict resolutions above; no scope
 widened, no adjacent issues fixed.
+
+## Closure (2026-08-07, this session)
+
+PR #352 merged the registry + gate to `main` (`7732cfd`), but its title
+and body were written as "phase 1" / "References #321" — no `Closes #321`
+trailer — so the delivered mechanism never formally closed the issue.
+This session found the code already present and working on `main`
+(`0f3151a`, 33 commits ahead of where this branch last synced) and is
+opening a closes-carrying PR to correct that gap, not rebuilding the
+mechanism.
+
+**Verified against base `0f3151a`** (per #390):
+
+- `python3 -m pytest test_gates.py -k requirement_registry -v`: same 6
+  tests, all pass, unchanged.
+- `python3 -m pytest -q --ignore=gates`: **406 passed, 1 failed** —
+  the failure is `test_spec_index.py::t_baseline_repo_passes`, a
+  pre-existing `docs/specs/reconciled-index.md` hash-drift unrelated to
+  `docs/specs/requirements.md` or `gates/requirement_registry`; not
+  touched by this issue, not investigated further (out of scope).
+- `python3 -m pytest -q gates`: **68 passed, 1 failed** — collection
+  succeeds (contrary to #398's note, consistent with what this record
+  already flagged on the prior rebase); the one failure
+  (`t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch`)
+  is a `gh`-network-dependent closes-gate test unrelated to this
+  change.
+- `python3 gates/ci.py` end-to-end: still not run — same reason as
+  before (`--pr`/`--issue`/`gh` access not available headless here).
+
+Per #416: this claim of "still works" comes from the runs above against
+current `main`, on the same registry file and same six tests seeded at
+build time (R001, this issue's own requirement) — this corpus has always
+covered only the populated-registry state (one entry) plus the
+no-file-yet state (`t_requirement_registry_no_file_passes`); it has never
+exercised a registry with more than one entry. That gap is named, not
+closed, by this session — out of scope for a closure-only pass.
+
+Per #363: the generator here is a human-authored gate function
+(`gates.requirement_registry` in `gates/gates.py`) plus one hand-written
+registry entry (`R001` in `docs/specs/requirements.md`) — not a
+templated or scripted generator. Nothing was removed; this session adds
+no new instance.
+
+Per #419: the same "requirement stated once, then diluted by volume"
+pattern this issue names also applies, unaddressed, to
+`docs/decisions/`, `docs/reports/`, and PR bodies generally — anywhere
+an operator quote could be paraphrased away over successive documents.
+Only the registry itself (`docs/specs/requirements.md`) is covered by
+`gates.requirement_registry`; the other locations are not, and this
+session does not extend coverage to them.
+
+No code changes in this session — `git reset --hard origin/main`
+followed by this record edit only. `Closes #321` in the PR is what
+performs the actual closure.
