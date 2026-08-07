@@ -159,3 +159,28 @@ open item.
 
 None — build matched the approved proposal's "What will be done"
 exactly; no scope-exceeded stop and no alternative swap occurred.
+
+## Follow-up: index regeneration after #369 (2026-08-07)
+
+After #336's gate merged to `main`, it correctly reported drift on
+`docs/handbooks/operations.md`: its recorded hash in
+`docs/specs/reconciled-index.md` no longer matched the file on disk.
+This was caused by #369 (`issue-369: read phase-2 record via gh api on
+PR ref, not local tree`), which merged an edit to `operations.md`
+*after* #336 recorded the index — a concurrent-merge race, not an
+author editing a spec out from under the gate. #390 documents this
+exact shape (a PR verified against a base that then moved); this drift
+is an instance of it, not a new failure mode. Read #369's diff to
+`operations.md`: it adds a paragraph explaining why the record-evidence
+check reads the phase-2 record via `gh api ... -f ref=<branch>` instead
+of the local checked-out tree (trust boundary, `ref: main` pinning). It
+does not touch the ledger-storage-location topic that is this index's
+only "Resolved ambiguities" entry, so that section needed no update.
+Ran `python3 gates/spec_index.py --update`, then confirmed
+`test_spec_index.py::t_baseline_repo_passes` (and the other 3 tests in
+that file) pass: 4 passed. `python3 -m pytest -q --ignore=gates` also
+run: 372 passed — this excludes the `gates/` package because main's
+suite currently cannot collect it (module name collision, #398 in
+flight); `gates/spec_index.py`'s own check and `test_spec_index.py`
+(root-level, not under `gates/`) were run directly instead and are
+unaffected by that collision.
