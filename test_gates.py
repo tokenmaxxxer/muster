@@ -112,7 +112,15 @@ def t_rulebook_version_is_recorded():
 def t_repo_local_claude_config_stops_the_spawn():
     """대상 레포의 `.claude/` 훅은 on-the-record 가 선언한 샌드박스 경계를 **안 받는다.**
     실측 2026-07-27: denyWrite 경로에 쓰고 denyRead 인 ~/.claude 를 읽어냈다.
-    레포를 클론해서 on-the-record 를 겨눈 것만으로 성립하므로 경고가 아니라 정지다."""
+    레포를 클론해서 on-the-record 를 겨눈 것만으로 성립하므로 경고가 아니라 정지다.
+
+    이슈#367: require_no_repo_config 는 신뢰 고정을 실제 ~/.tokenmaxxxer 밑에
+    쓴다 — 그 경로가 읽기 전용인 기계에서는 통과 여부가 코드가 아니라 기계의
+    속성이 된다. MUSTER_TOKENMAXXXER_HOME 으로 격리하고, 실제 홈 밑
+    trusted-repo-config.json 은 이 테스트 전후로 안 바뀌었다고 단언한다."""
+    real_pins = Path.home() / ".tokenmaxxxer" / "trusted-repo-config.json"
+    before = real_pins.read_bytes() if real_pins.exists() else None
+
     for rogue in (".claude/settings.json", ".claude/settings.local.json", ".claude/hooks"):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "repo"
@@ -121,13 +129,26 @@ def t_repo_local_claude_config_stops_the_spawn():
                 (root / rogue).mkdir()
             else:
                 (root / rogue).write_text("{}")
+            fake_home = Path(td) / "fake-tokenmaxxxer-home"
+            prior = os.environ.get("MUSTER_TOKENMAXXXER_HOME")
+            os.environ["MUSTER_TOKENMAXXXER_HOME"] = str(fake_home)
             try:
-                spawn.require_no_repo_config(str(root), False)
-            except SystemExit as e:
-                assert rogue.split("/")[-1] in str(e), e
-            else:
-                raise AssertionError(f"{rogue} 를 통과시켰다")
-            spawn.require_no_repo_config(str(root), True)   # 명시적 opt-out 은 통과
+                try:
+                    spawn.require_no_repo_config(str(root), False)
+                except SystemExit as e:
+                    assert rogue.split("/")[-1] in str(e), e
+                else:
+                    raise AssertionError(f"{rogue} 를 통과시켰다")
+                spawn.require_no_repo_config(str(root), True)   # 명시적 opt-out 은 통과
+                assert (fake_home / "trusted-repo-config.json").exists()
+            finally:
+                if prior is None:
+                    os.environ.pop("MUSTER_TOKENMAXXXER_HOME", None)
+                else:
+                    os.environ["MUSTER_TOKENMAXXXER_HOME"] = prior
+
+    after = real_pins.read_bytes() if real_pins.exists() else None
+    assert before == after, "실제 ~/.tokenmaxxxer/trusted-repo-config.json 을 건드렸다"
 
 
 def t_role_files_carry_no_absolute_home_path():

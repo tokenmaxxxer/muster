@@ -873,7 +873,12 @@ def require_no_repo_config(cwd: str, override: bool) -> None:
             h.update(p.read_bytes())
     digest = h.hexdigest()
 
-    pins = Path.home() / ".tokenmaxxxer" / "trusted-repo-config.json"
+    # MUSTER_TOKENMAXXXER_HOME: 실제 ~/.tokenmaxxxer 대신 쓸 경로. 테스트가
+    # 실제 홈을 건드리지 않고 격리하기 위한 오버라이드(이슈#367) — 기본은
+    # 그대로 Path.home().
+    home_override = os.environ.get("MUSTER_TOKENMAXXXER_HOME")
+    tokenmaxxxer_home = Path(home_override) if home_override else Path.home() / ".tokenmaxxxer"
+    pins = tokenmaxxxer_home / "trusted-repo-config.json"
     try:
         table = json.loads(pins.read_text())
     except (OSError, ValueError):
