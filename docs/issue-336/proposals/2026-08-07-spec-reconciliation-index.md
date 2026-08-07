@@ -90,8 +90,21 @@ a new class of unverifiable LLM-judgment gate.
    (`--update`) that rewrites the recorded hashes, so fixing drift
    requires a human to run it deliberately and see the diff in the PR.
 4. Wire `gates/spec_index.py` into `gates/ci.py` alongside the existing
-   gate calls so it runs on every CI invocation, the same as other
-   `gates/*.py` checks.
+   gate calls, the same as other `gates/*.py` checks. Note (found by
+   warrant-hunter after this proposal's first draft — see
+   `docs/reports/2026-08-07-hunt-spec-reconciliation-index.md`): the
+   only live CI entrypoint, `.github/workflows/plan-aware-closes-gate.yml`,
+   always checks out `main` (never the PR's diff) and runs
+   `gates/ci.py --closes-only`, which by design skips every gate but
+   the Closes gate — deliberately, per issue #245's trust-boundary
+   comment in that workflow, since checking out a PR's own diff to run
+   a gate against itself lets the PR rewrite the gate to pass. Wiring
+   `spec_index` into `gates/ci.py` therefore does not, by itself, make
+   CI block anything; it only makes the check available to run
+   locally/on demand until a workflow is designed to invoke it safely.
+   Actually making CI block on drift is out of scope for this proposal
+   (see below) — it needs the same design work #245 already did for
+   the Closes gate, applied to a new gate, which is its own decision.
 5. Write `test_spec_index.py`: asserts the gate exits 0 against the
    current repo state (baseline), and asserts it exits nonzero when a
    listed file's on-disk content is mutated relative to what's
@@ -109,6 +122,12 @@ a new class of unverifiable LLM-judgment gate.
 - #321 (requirement dilution across operator turns) and #328 (issue
   bundling) — named as related context by the issue, not folded in.
 - Any change to `roles/` rulebooks or role-session behavior.
+- Designing and wiring a CI workflow that actually enforces
+  `spec_index` on pull requests (the way `.github/workflows/plan-aware-closes-gate.yml`
+  enforces the Closes gate for #245). `gates/ci.py` will run the check;
+  making a workflow invoke it safely against a PR's diff is separate
+  follow-on work, tracked as a gap this proposal surfaces rather than
+  closes.
 
 ## How you'll know it worked
 
@@ -118,6 +137,7 @@ spec-shaped document is edited without `docs/specs/reconciled-index.md`
 being regenerated to match — i.e. it fails on exactly the regression
 the issue describes (a spec doc drifting out from under its recorded,
 reconciled reading). `gates/spec_index.py` run standalone (`python
-gates/spec_index.py`) gives the same signal outside pytest, and its
-inclusion in `gates/ci.py` means CI itself blocks a PR that edits a
-spec-shaped doc without updating the index.
+gates/spec_index.py`) gives the same signal outside pytest and is
+callable the same way other `gates/*.py` checks are. It does not yet
+run automatically in CI on every PR — see the CI-enforcement gap noted
+in step 4 and in "Out of scope."
