@@ -4,18 +4,30 @@ code_under_review: gates/ci.py, gates/test_closes_gate_ci.py,
   docs/issue-312/decisions/phase-is-an-issue-property.md
 loop_state: landed
 closed_checks:
-  - check: "gates/test_closes_gate_ci.py full suite, 32/32 pass, including
+  - check: "gates/test_closes_gate_ci.py full suite, 33/33 pass, including
       the two new acceptance tests (#304/#307 cross-role handoff shape
       reproduction; missing-approval refusal names role searched and
-      approvals present) and the reversed wrong-role test."
+      approvals present), the reversed wrong-role test, and the
+      warrant-hunter empty-role-suffix regression test."
     ref: gates/test_closes_gate_ci.py:1
   - check: "Live gate run against real, unmodified GitHub state: `python3
       gates/ci.py . --pr 307 --issue 304 --autodetect --closes-only`
       → \"게이트 통과\" (exit 0) — PR #307 (issue-304/implementation,
       body carries `Closes #304`) no longer misdiagnosed as phase1
       because issue #304's `APPROVE issue-304/architecture` now
-      qualifies the whole issue for phase2."
+      qualifies the whole issue for phase2. Re-run after the
+      empty-role-suffix fix, still passes."
     ref: docs/issue-312/reports/implementation.md
+resolved_findings:
+  - finding: "warrant-hunter (before-landing, stance 3, docs/reports/2026-08-07-hunt-2026-08-07-closes-gate-issue-level-phase-and-evidence-bearing-refusal.md):
+      a comment body exactly `APPROVE issue-<n>/` (empty role suffix) from
+      an allowlisted login made `_approved_roles_on_issue` add the empty
+      string to its role set, which is truthy in Python — permanently
+      opening phase2 for the whole issue with no real role ever approved."
+    resolution: "`_approved_roles_on_issue` (gates/ci.py) now skips a
+      zero-length role token; added
+      `t_phase_from_approval_empty_role_suffix_comment_is_phase1`
+      (gates/test_closes_gate_ci.py) as the red/green regression proof."
 ---
 
 # Phase 2 — closes-gate: phase is an issue property; evidence-bearing refusal (issue #312)
@@ -83,6 +95,21 @@ closed_checks:
   is a known, accepted split (proposal's Out of scope): the board's
   reading and the gate's reading of "phase" are no longer the same
   question, and nothing in this change reconciles them.
+
+## Hunt
+
+Before-landing warrant-hunter dispatch (stance 3, "assume the rule as
+written cannot hold — find the state nothing maintains"), 120s cap,
+default tier. FINDING: an `APPROVE issue-<n>/` comment with an empty
+role suffix from an allowlisted login made `_approved_roles_on_issue`
+add `""` to its role set — truthy in Python — permanently opening
+phase2 for the whole issue with no real role approved. Fixed in
+`gates/ci.py::_approved_roles_on_issue` (skip zero-length role tokens)
+and covered by
+`t_phase_from_approval_empty_role_suffix_comment_is_phase1`; see
+`resolved_findings` in this record's frontmatter and
+`docs/reports/2026-08-07-hunt-2026-08-07-closes-gate-issue-level-phase-and-evidence-bearing-refusal.md`
+for the hunter's own record.
 
 ## What did not work
 

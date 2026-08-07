@@ -148,6 +148,25 @@ def t_autodetect_respects_explicit_issue_and_phase():
     assert result == (999, "phase2"), result
 
 
+def t_phase_from_approval_empty_role_suffix_comment_is_phase1():
+    # warrant-hunter (before-landing, stance 3) 실측: "APPROVE issue-<n>/"
+    # (role 접미사가 빈 문자열)이 승인자 계정에서 오면 옛 코드는 빈
+    # 문자열을 role 토큰으로 집합에 넣었고, 빈 문자열은 파이썬에서
+    # truthy 집합 멤버라 `_phase_from_approval`이 실제로는 아무 role 도
+    # 승인되지 않았는데 phase2 를 돌려줬다 — 되돌릴 방법 없이 이슈
+    # 전체의 phase1 closing-키워드 게이트를 영구 무력화했다.
+    orig_approvers, orig_comments, orig_reviews = spawn._approvers, spawn._issue_comments, ci._pr_reviews
+    spawn._approvers = lambda repo: {"jjongkwann"}
+    spawn._issue_comments = (
+        lambda repo, n: [{"login": "jjongkwann", "body": "APPROVE issue-245/"}]
+        if n == 245 else [])
+    ci._pr_reviews = lambda repo, pr: []
+    try:
+        assert ci._phase_from_approval(Path("."), 1, 245, "implementation") == "phase1"
+    finally:
+        spawn._approvers, spawn._issue_comments, ci._pr_reviews = orig_approvers, orig_comments, orig_reviews
+
+
 def t_phase_from_approval_no_signal_is_phase1():
     # 승인 이벤트가 전혀 없으면(코멘트도 리뷰도) phase1 — closing 키워드
     # 유무는 이 판정에 관여하지 않는다(issue #271 요구사항 2, #245 관찰 F1).

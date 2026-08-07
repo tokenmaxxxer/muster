@@ -157,7 +157,9 @@ def _approved_roles_on_issue(repo: Path, issue: int) -> set[str]:
     for c in comments:
         body = (c.get("body") or "").strip()
         if body.startswith(prefix) and c.get("login") in approvers:
-            roles.add(body[len(prefix):])
+            role_token = body[len(prefix):]
+            if role_token:  # empty suffix ("APPROVE issue-<n>/") approves no real role
+                roles.add(role_token)
     return roles
 
 
