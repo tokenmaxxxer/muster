@@ -110,7 +110,7 @@ def find_violations(root: Path, subjects: dict | None = None,
             if view is None:
                 continue
             pr_state, pr_body = view
-            has_record_evidence = ci._phase2_record_evidence(root, branch, issue)
+            has_record_evidence = ci._phase2_record_evidence(root, pr, branch, issue)
             kind = classify(issue_state, pr_state, pr_body, issue, has_record_evidence)
             if kind:
                 violations.append({"issue": issue, "pr": pr, "role": role, "kind": kind})

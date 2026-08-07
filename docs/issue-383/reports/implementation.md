@@ -102,6 +102,67 @@ Propagating an equivalent sweep to `tokenmaxxxer-core` (which has no
 candidate follow-up issue, not something discovered mid-build that
 changes this delivery's scope.
 
+## Rebase onto main (2026-08-07, post-delivery)
+
+Main moved ~124 commits ahead of this branch's base (~40 PRs landed
+2026-08-07); `git rebase origin/main` conflicted on one file,
+`docs/handbooks/operations.md` — both sides added a new handbook section
+(main's issue-bundling-gate section, this branch's closure-sweep
+section) adjacent to each other with no semantic overlap. Resolved by
+keeping both sections in sequence (bundling-gate before closure-sweep,
+matching main's ordering), no content dropped from either side.
+`test_gates.py` merged cleanly with no markers.
+
+The rebase surfaced one real incompatibility, not just a text conflict:
+`gates/ci.py::_phase2_record_evidence` gained a `pr` parameter upstream
+(issue #369 — record evidence is now fetched from the PR head branch via
+`gh api`, not the local working tree, since gate workflows always check
+out `main`). `gates/closure_sweep.py`'s call site was still using the
+pre-#369 3-arg signature and raised `TypeError` on any invocation. Fixed
+the call to pass the already-available `pr` local
+(`gates/closure_sweep.py:113`). This is a same-shape fix to the code
+already in this write set, not new scope.
+
+That signature change also broke this branch's own acceptance test
+(`t_find_violations_uses_record_evidence_for_keywordless_merge`): it
+planted the record file in a local `tmp_path` tree, which `#369`'s
+`gh api`-based fetch never reads, so the test silently found zero
+violations instead of one. Updated the test to mock
+`ci._fetch_ref_file` directly (the seam #369 introduced) instead of
+writing to a local path — same intent (record file exists, no closing
+keyword), now aimed at the code path that actually runs post-#369.
+
+Also required a mechanical `python3 gates/spec_index.py --update` after
+resolving the handbook conflict, since the merged
+`docs/handbooks/operations.md` content hash no longer matched
+`docs/specs/reconciled-index.md`'s recorded hash (`test_spec_index.py`
+enforces this).
+
+### Re-run acceptance evidence, on the rebased tree (real numbers)
+
+- `python3 gates/closure_sweep.py` -> `종결 일관성 스윕: 위반 없음`. This
+  is expected and different from this record's original "after fix"
+  claim: issue #367 (the case this fix targets) is now `CLOSED` — closed
+  by one of today's other merges/sweep runs during the ~124-commit gap,
+  independent of this branch. The sweep having nothing to report here is
+  the correct behavior, not a regression; the keywordless-merge detection
+  itself is what the unit tests below still exercise directly.
+- `python3 -m pytest test_gates.py -k closure_sweep -q` -> 8 passed (same
+  count as originally reported; one test updated per above to keep
+  exercising the real code path after #369).
+- `python3 -m pytest -q --ignore=gates` -> 393 passed (main's own
+  baseline is 389 per this session's verification note; the +4 are this
+  branch's own additions to `test_gates.py`). No regressions.
+- `python3 -m pytest -q` (no ignore) -> 451 passed, clean collection, no
+  `gates/` module-name collision. This contradicts the verification note
+  stating `gates/` "still cannot collect" per #398 — on this rebased
+  tree the collision does not reproduce, so #398's fix (or an equivalent)
+  appears to already be on `main`. Reporting this discrepancy rather than
+  the stale expectation; not investigating #398 further as that is
+  outside this issue's write set.
+- `grep -rn closure_sweep .github/` -> still finds
+  `.github/workflows/closure-sweep.yml`, unaffected by the rebase.
+
 ## Doc-placement ladder
 
 - Decision (library/format choice over a rejected alternative):

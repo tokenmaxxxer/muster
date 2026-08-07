@@ -866,22 +866,22 @@ def t_find_violations_uses_record_evidence_for_keywordless_merge(tmp_path):
     has_record_evidence를 계산해 classify에 넘기는지 — issue #367/PR #368
     모양(머지, 닫는 키워드 없음, 기록 파일 존재)을 재현한다."""
     root = tmp_path / "repo"
-    (root / "docs" / "issue-135" / "reports").mkdir(parents=True)
-    (root / "docs" / "issue-135" / "reports" / "implementation.md").write_text(
-        "---\nloop_state: delivered\n---\n\n본문\n")
-
     subjects = {"issue-135": {"implementation": {}}}
     original_pr_for_branch = spawn._pr_for_branch
     original_pr_view = closure_sweep._pr_view_state_body
+    original_fetch_ref_file = ci._fetch_ref_file
     spawn._pr_for_branch = lambda root, branch: 368
     closure_sweep._pr_view_state_body = (
         lambda root, pr: ("MERGED", "no closing keyword here"))
+    ci._fetch_ref_file = (
+        lambda repo, pr, branch, path: ("---\nloop_state: delivered\n---\n\n본문\n", None))
     try:
         violations = closure_sweep.find_violations(
             root, subjects=subjects, issue_states={135: "OPEN"})
     finally:
         spawn._pr_for_branch = original_pr_for_branch
         closure_sweep._pr_view_state_body = original_pr_view
+        ci._fetch_ref_file = original_fetch_ref_file
 
     assert len(violations) == 1, violations
     assert violations[0]["kind"] == closure_sweep.MERGED_DELIVERY_ISSUE_OPEN, violations
