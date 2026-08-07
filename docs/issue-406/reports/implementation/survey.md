@@ -171,6 +171,67 @@ the part that stays a manual, recorded phase-2 confirmation.
   are the only spawn-related tracked files; no separate cargo-specific
   module exists to hold this instead.
 
+## After-proposal hunt correction (warrant-hunter, stance 0, 2026-08-07)
+
+A hunt dispatched against the first version of this proposal (stance:
+assume the gate just touched is bypassable) found two things this
+survey had wrong or incomplete:
+
+1. `role_settings()` merges `WEB_ACCESS_DOMAINS = ["*"]` into the same
+   `allowedDomains` list as `PACKAGE_REGISTRY_HOSTS` (spawn.py:142-147,
+   477-499) — a literal `"*"` that Claude Code's own domain matcher
+   (`Kat()`) matches against every host. That means `sandbox.network
+   .allowedDomains` is **already wildcard-open for every sandboxed
+   role, for every host, unconditionally** — not just for `github.com`
+   via each role's own declaration (as this survey's earlier section
+   found), but for literally anything. Adding `github.com` to
+   `PACKAGE_REGISTRY_HOSTS` is therefore a **no-op**: the network layer
+   was never the blocker, for any host, on any role, at any point this
+   issue could have been filed. Confirmed by reading spawn.py:142-147's
+   own comment plus the merge order at spawn.py:477-499 (`WEB_ACCESS_DOMAINS`
+   merges into the identical `domains` list `PACKAGE_REGISTRY_HOSTS`
+   populates, in the same function, before either list is used anywhere
+   else).
+2. Read `spawn_cmd`'s caller (spawn.py:3124-3146) to find where the
+   *actual* generator for a clean-host cargo git failure lives. It
+   redirects `GOCACHE`, `GOMODCACHE`, `GOENV`, `GOPATH`,
+   `XDG_CACHE_HOME`, `npm_config_cache`, `PIP_CACHE_DIR` into
+   `<workspace>/.muster-cache/...` (spawn.py:3131-3140) specifically
+   because writes outside the workspace fall outside the sandbox's
+   write scope and previously stalled a build on an unanswerable
+   approval prompt (comment at spawn.py:3126-3130: "실측: phase 2 가 go
+   build 를 한 번도 못 돌림"). **There is no `CARGO_HOME` entry in this
+   dict.** Cargo's default `CARGO_HOME` (`~/.cargo`) is outside the
+   workspace, so a clean-host `cargo build` needing to write a new git
+   checkout has nowhere writable to put it — this is the real,
+   reproducible generator: not a network block (moot per point 1 above),
+   not solely a missing read-only cache mount (which only helps a host
+   that already has the clone), but a missing write-path redirection of
+   the exact kind every other already-covered toolchain (go, npm, pip)
+   already gets at this same call site.
+
+This changes the proposal materially from its first draft: the
+`PACKAGE_REGISTRY_HOSTS` addition is dropped (no-op, confirmed above);
+the fix moves to adding `CARGO_HOME` to the `extra_env` redirection at
+spawn.py:3131-3140, the same shape as the six keys already there. The
+read-only `~/.cargo/git` cache-mount addition to `PACKAGE_CACHE_DIRS`
+is kept (still correct and still cheap — it lets a *pre-fetched* host
+cache serve as one of cargo's fallback sources) but is now explicitly
+secondary to the `CARGO_HOME` write-redirect, which is the piece that
+makes a *clean* host succeed, matching what the issue itself asked for
+("this case genuinely requires network access" turns out to be false;
+what it genuinely requires is a writable `CARGO_HOME`).
+
+Per #363: the corrected generator is "the workspace-cache write
+redirection at spawn.py:3131-3140 was built by observing go/npm/pip
+failures and never extended to cargo, which failed the same way but
+had not yet been observed." Adding `CARGO_HOME` removes that generator
+for cargo specifically; it does not sweep in any other unobserved
+toolchain (e.g. Maven, gem, cabal) that might hit the identical pattern
+later — those remain unmeasured and out of scope.
+
+Full hunt record: `docs/reports/2026-08-07-hunt-issue-406.md`.
+
 ## Scout skip record
 
 Per the scout-directive skip conditions: this is a two-constant, list-

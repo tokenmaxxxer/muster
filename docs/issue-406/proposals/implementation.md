@@ -10,10 +10,9 @@ files:
 
 #406: a role hit a build it could not run — a sandboxed session tried to
 fetch a cargo git dependency (`{ git = "https://github.com/..." }`) and
-could not, because `~/.cargo/git` (the cache cargo uses for VCS
-dependencies, distinct from `~/.cargo/registry`) is never mounted. The
-session recorded the limitation honestly instead of claiming success,
-and the issue asks that the gap be closed rather than only logged.
+could not. The session recorded the limitation honestly instead of
+claiming success, and the issue asks that the gap be closed rather than
+only logged.
 
 ## Constraints
 
@@ -29,67 +28,73 @@ and the issue asks that the gap be closed rather than only logged.
 
 ## Rationale
 
-Two designs were weighed for the network half (the cache half has one
-obvious shape, covered under "What will be done").
+The issue's own framing treats this as a network-access decision
+(whether `github.com` should be allowlisted). survey.md's after-proposal
+hunt correction found that framing is wrong: `WEB_ACCESS_DOMAINS =
+["*"]` (spawn.py:142-147) is already merged into every sandboxed role's
+`sandbox.network.allowedDomains` (spawn.py:477-499), and Claude Code's
+own domain matcher treats a literal `"*"` entry as matching every host.
+Network access to `github.com` — to any host — is already open for
+every role. That measurement replaces the issue's stated premise; two
+designs were weighed for what to do about the *actual* generator.
 
-**(a) Manifest-derived, per-spawn host allowlisting** — parse the
-project's `Cargo.toml`/`Cargo.lock` before building a role's settings,
-extract git-dependency hosts, and merge only those into that spawn's
-`allowedDomains`, reusing #303's declaration-over-enumeration framing.
-Rejected for now: `role_settings()` has no existing input for "which
-project directory is this spawn for" (it only reads the role file and
-`os.environ`), so this needs new plumbing through the caller as well as
-a manifest parser, for a host — `github.com` — that survey.md's direct
-measurement shows is **already** present in all 43 roster roles' own
-`allowedDomains` declarations. Building manifest-derived scoping now
-would add real surface (parser, new function parameter, new failure
-modes when a manifest is malformed) to solve a problem that, on the
-present roster, does not reproduce. It is the right shape if a future
-role narrows its own declared domains and needs cargo git deps scoped
-tightly — noted as a follow-up, not built here.
+**(a) Add `github.com` to `PACKAGE_REGISTRY_HOSTS` anyway**, as
+defense-in-depth for a hypothetical future role that both narrows its
+own `allowedDomains` and somehow loses the wildcard merge. Rejected:
+`WEB_ACCESS_DOMAINS` is unconditional in `role_settings()` — there is no
+code path today where a sandboxed role gets `allowedDomains` without it
+(spawn.py:489-491 runs inside the same `if sb0.get("enabled")` block as
+the registry-host merge, with no branch that skips it). Defending
+against a code path that does not exist is speculative, not a scoped
+fix, and it would not have changed the outcome of #406's own reported
+failure even if built.
 
-**(b) Add `github.com` to `PACKAGE_REGISTRY_HOSTS`** — chosen. This is
-the exact mechanism the other eight registry hosts already use
-(spawn.py:118-127), merged the same way, tested the same generic,
-list-driven way `PackageRegistryAccess` already tests the other eight.
-It closes the actual regression survey.md identified: a role file added
-later that does not itself declare `github.com` would silently hit
-#406's failure again, and `PACKAGE_REGISTRY_HOSTS` is precisely the
-layer #38 built so a role does not have to remember every package
-ecosystem's host by hand. Effective permissions for the 43 existing
-roles do not change (the host is already merged in via their own
-declarations); the guarantee is for the roster's next role, which is
-the actual generator #406's own failure traces back to — a global list
-missing one git-hosting entry the other seven ecosystems' equivalents
-already have.
+**(b) Redirect `CARGO_HOME` into the workspace, the same way `GOCACHE`,
+`GOMODCACHE`, `GOPATH`, `npm_config_cache`, and `PIP_CACHE_DIR` already
+are** (spawn.py:3131-3140) — chosen. Reading that call site (added for
+Go specifically, per its own comment: "실측: phase 2 가 go build 를 한
+번도 못 돌림") shows the real generator: writes outside the workspace
+fall outside the sandbox's write scope and stall on an unanswerable
+approval prompt in a headless session. Cargo's default `CARGO_HOME`
+(`~/.cargo`) is exactly such a path, and it is the one already-common
+toolchain-cache key missing from that six-entry dict. This is the
+smallest change that targets the actual failure (a write, not a
+network, block) and reuses an established, already-tested pattern
+rather than inventing a new one.
 
-Per #363: the generator was `PACKAGE_REGISTRY_HOSTS`/`PACKAGE_CACHE_DIRS`
-being built for registry-style (single-host, versioned-artifact)
-package fetches and never extended to cover a VCS-style dependency,
-which cargo (uniquely among the six ecosystems already covered) supports
-natively. Adding both entries removes the generator for cargo git
-dependencies specifically; it does not remove the generator for VCS-style
-dependencies in other ecosystems (e.g. `npm install github:user/repo`,
-`pip install git+https://...`) — those are a different instance of the
-same class and are out of scope below, not silently swept in.
+Per #363: the generator is "the workspace-cache write-redirection at
+spawn.py:3131-3140 was built by observing go/npm/pip failures one at a
+time and never extended to cargo, which fails the identical way but had
+not yet been observed here." Adding `CARGO_HOME` removes that generator
+for cargo; it does not remove it for any other unobserved toolchain
+that might hit the same pattern later (e.g. Maven's local repo already
+has read-only cache support via `PACKAGE_CACHE_DIRS`, but no workspace
+write-redirect either) — noted as a like-for-like follow-up, not built
+here, since it has not been measured as failing.
+
+The read-only `~/.cargo/registry` sibling, `~/.cargo/git`, is still
+added to `PACKAGE_CACHE_DIRS` alongside the `CARGO_HOME` redirect: it is
+cheap, mirrors the existing entry exactly, and lets a host that has
+already fetched git dependencies outside the sandbox serve them as a
+fallback source — useful on its own, but (per the issue's own words)
+insufficient alone on a clean host, which is why `CARGO_HOME` is the
+change that actually closes the gap.
 
 ## What will be done
 
-1. `spawn.py`: add `(None, "~/.cargo/git")` to `PACKAGE_CACHE_DIRS`
+1. `spawn.py`: add `"CARGO_HOME": os.path.join(wcache, "cargo")` to the
+   `extra_env` dict at spawn.py:3131-3140, in the same `if issue is not
+   None:` block, alongside the six existing keys.
+2. `spawn.py`: add `(None, "~/.cargo/git")` to `PACKAGE_CACHE_DIRS`
    (spawn.py:133-140) — same skip-if-absent mount rule every other entry
    already gets (spawn.py:506-515), no new code path.
-2. `spawn.py`: add `"github.com"` to `PACKAGE_REGISTRY_HOSTS`
-   (spawn.py:118-127) — merged into every sandboxed role's
-   `allowedDomains` the same way the existing eight are (spawn.py:479-491).
-3. `test_spawn.py`, `PackageRegistryAccess` class:
-   - extend `test_registry_hosts_merged_into_allowed_domains` (or add a
-     sibling assertion) to include `github.com`.
-   - a new test using a role **fixture** with a narrow, hand-written
-     `allowedDomains` (not a real roster role, so the assertion is not
-     vacuously satisfied by every role already declaring `github.com`
-     itself) asserting `github.com` still lands in the merged output —
-     this is the regression test for the actual gap identified in
-     survey.md (a future narrowly-scoped role).
+3. `test_spawn.py`:
+   - a test asserting `"CARGO_HOME"` is present in the `extra_env`
+     returned for an `issue`-scoped spawn and points inside
+     `<cwd>/.muster-cache` — the same shape an existing test (if any)
+     uses for `GOMODCACHE`/`GOCACHE` at that call site; if no such test
+     exists yet for the Go keys, add one for all of them together rather
+     than leaving `CARGO_HOME` as the only tested key in that dict.
    - a cache-dir test for `~/.cargo/git` parametrized the same way
      `test_present_cache_dir_added_to_allow_read` /
      `test_absent_cache_dir_is_skipped_without_error` already cover
@@ -105,28 +110,27 @@ same class and are out of scope below, not silently swept in.
 
 - #303's general declared-capability-envelope mechanism.
 - #304 (already solved, different failure kind).
-- Manifest-derived, per-project host scoping (alternative (a) above) —
-  left as a named follow-up, not built.
+- Adding `github.com` to `PACKAGE_REGISTRY_HOSTS` (alternative (a)
+  above) — confirmed no-op given the unconditional `"*"` wildcard merge,
+  not built.
+- Extending the same workspace-cache write-redirect pattern to any other
+  toolchain besides cargo (e.g. Maven) — not measured as failing here.
 - VCS-style git dependencies in other ecosystems (`npm install
   github:...`, `pip install git+...`) — same defect class, different
   instance, not measured or fixed here.
-- Any pre-build refusal/warning UI for the (currently unreproducible)
-  case of a role that narrows its own `allowedDomains` below
-  `github.com` — noted in survey.md as moot for the present roster.
 
 ## How you'll know it worked
 
-- `python3 -m pytest -q test_spawn.py -k PackageRegistryAccess` passes,
-  including the two new assertions (narrow-role-fixture merge, and the
-  `~/.cargo/git` present/absent cache pair) — each fails if the
-  corresponding constant entry regresses or the merge/mount logic
-  changes shape.
+- `python3 -m pytest -q test_spawn.py -k "PackageRegistryAccess or cargo or CARGO_HOME"`
+  passes, including the new `CARGO_HOME` extra_env assertion and the
+  `~/.cargo/git` present/absent cache pair — each fails if the
+  corresponding redirect or cache entry regresses.
 - `python3 -m pytest -q --ignore=gates` (module-name collision with
   `gates/`, #398 in flight) passes with the new/changed tests included.
 - Manual confirmation, recorded once in
   `docs/issue-406/reports/implementation.md`: a real cargo project with
   a `{ git = "https://github.com/..." }` dependency, built inside an
-  actual spawned role session, either succeeds or is blocked by
-  something this change does not claim to fix (recorded honestly either
-  way, per #310/#358) — this is the part survey.md names as outside
-  what the unit tests alone can discharge.
+  actual spawned role session with `CARGO_HOME` redirected, either
+  succeeds or is blocked by something this change does not claim to fix
+  (recorded honestly either way, per #310/#358) — this is the part
+  survey.md names as outside what the unit tests alone can discharge.
