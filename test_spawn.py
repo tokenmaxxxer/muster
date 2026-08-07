@@ -2616,9 +2616,9 @@ class Clean(unittest.TestCase):
 class Watchdog(unittest.TestCase):
     """이슈 #90 phase-2: observe-only 이상 신호 네 가지."""
 
-    def _entry(self, log, work=None, ts=None, before_head=None):
+    def _entry(self, log, work=None, ts=None, before_head=None, pid=None):
         return {"log": str(log), "work": work, "ts": ts or int(time.time()),
-                "before_head": before_head}
+                "before_head": before_head, "pid": pid}
 
     def test_silence_signal_fires_past_threshold(self):
         with tempfile.TemporaryDirectory() as td:
@@ -2748,6 +2748,52 @@ class Watchdog(unittest.TestCase):
                 spawn.ROSTER = old_roster
                 spawn.WATCHDOG_STATE = old_state
             self.assertIn("돌고 있는 역할 세션 없음", buf.getvalue())
+
+    def test_roster_watchdog_returns_zero_for_clean_non_empty_roster(self):
+        with tempfile.TemporaryDirectory() as td:
+            roster_path = Path(td) / "active.json"
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text"}\n')
+            roster_path.write_text(json.dumps({
+                "k": self._entry(log, pid=os.getpid())}))
+            old_roster = spawn.ROSTER
+            old_state = spawn.WATCHDOG_STATE
+            spawn.ROSTER = roster_path
+            spawn.WATCHDOG_STATE = Path(td) / "watchdog_state.json"
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                result = spawn.roster_watchdog()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                spawn.WATCHDOG_STATE = old_state
+            self.assertEqual(result, 0)
+
+    def test_roster_watchdog_returns_anomaly_count_for_stalled_entry(self):
+        with tempfile.TemporaryDirectory() as td:
+            roster_path = Path(td) / "active.json"
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text"}\n')
+            stale = time.time() - (spawn.WATCHDOG_SILENCE_MIN + 5) * 60
+            os.utime(log, (stale, stale))
+            roster_path.write_text(json.dumps({
+                "k": self._entry(log, pid=os.getpid())}))
+            old_roster = spawn.ROSTER
+            old_state = spawn.WATCHDOG_STATE
+            spawn.ROSTER = roster_path
+            spawn.WATCHDOG_STATE = Path(td) / "watchdog_state.json"
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                result = spawn.roster_watchdog()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                spawn.WATCHDOG_STATE = old_state
+            self.assertEqual(result, 1)
 
 
 class SessionEndVerdict(unittest.TestCase):
