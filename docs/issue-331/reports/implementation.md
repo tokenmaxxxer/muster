@@ -121,61 +121,75 @@ None — no attempt was undone or replaced, and everything expected to
 hold (test wiring, CI-check cross-check shape, decision doc placement)
 held on the first pass.
 
-## Rebase re-verification (2026-08-07, main advanced ~141 commits)
+## Rebase re-verification (2026-08-07, second pass — main advanced to `0f3151a`, ~177 commits ahead of the prior rebase base)
 
-`git fetch origin && git rebase origin/main` (old base `c71173b`
-unchanged as the merge target — this branch's own 2 commits, `d167c48`
-phase-1 and `30e07a9` phase-2, replayed cleanly on top with 5 files
-carrying real conflicts, all additive on both sides (no line ever
-touched by both branches' *intent*, only by proximity):
+The branch had already been rebased once (see the superseded numbers this
+section replaces below); `origin/main` moved another ~36 commits in the
+interim, so per this task's instruction ("a green from your original
+base attests to a state that no longer exists") the rebase and full
+re-run were repeated against current `origin/main` rather than trusting
+the earlier pass.
 
-- `gates/ci.py` — main added `spec_index.check(repo)` to the bundle;
-  this branch added `record_checked_claims`/`_checked_ci_claims_bad`.
-  Kept both calls.
-- `gates/gates.py` — main added `record_derived_counts` and
-  `duplicate_test_basenames` to the `ALL` registry; this branch added
-  `record_checked_claims`. Kept all three registry entries.
-- `test_gates.py` — main added `t_spawn_has_no_concurrency_limit`; this
-  branch added the `_checked_claims_repo` fixture and its 10 tests.
-  Concatenated both function blocks.
+`git fetch origin && git rebase origin/main` (new base `0f3151a`) —
+conflicts in 4 files, all additive on both sides (no line touched by
+both branches' *intent*, only by proximity):
+
+- `gates/ci.py` — main added `gates.requirement_registry(repo, {})` to
+  the check bundle; this branch's `record_checked_claims`/
+  `_checked_ci_claims_bad` calls. Kept both.
+- `gates/gates.py` — two separate hunks: (1) `requirement_registry`'s
+  full definition (main) alongside `record_checked_claims`'s full
+  definition (this branch) — concatenated, both kept; (2) the `ALL`
+  registry dict — main's `"requirement_registry": requirement_registry`
+  entry plus this branch's `"record_checked_claims": record_checked_claims`
+  entry, both kept.
 - `gates/test_closes_gate_ci.py` — main added
-  `t_phase2_record_evidence_true_when_record_has_nonempty_loop_state`
-  and neighboring tests; this branch added `_checked_ci_repo` and its 6
+  `t_autodetect_missing_approval_refusal_names_role_searched_and_approvals_present`
+  and neighboring tests; this branch's `_checked_ci_repo` fixture and 6
   tests. Concatenated both blocks.
-- `docs/handbooks/operations.md` — main added a new "이슈-번들링 게이트"
-  section (issue #328) and a `#369` paragraph on `gh api` record
-  fetching; this branch added narrative paragraphs (Korean + English)
-  about the new non-`--closes-only` CI step. Kept all four additions,
-  ordered so each continues the section it was written under rather
-  than interleaving unrelated topics.
+- `docs/specs/reconciled-index.md` — stale content hashes (concurrent
+  merges changed `protocol.md`, `protocol.ko.md`,
+  `docs/handbooks/operations.md`, `on-the-record/commands/run.md` since
+  the file was last regenerated). This is exactly #336's gate working as
+  designed on a file a concurrent merge changed, not a real ambiguity:
+  regenerated with `python3 gates/spec_index.py --update`; the
+  "Resolved ambiguities" section itself was not touched by any concurrent
+  edit (diff was hashes only), so it needed no update.
 
-After resolving, `python3 gates/spec_index.py --update` was required —
-merging into `operations.md` changed its content hash and
-`t_baseline_repo_passes` caught the stale `docs/specs/reconciled-index.md`
-entry immediately; regenerated and re-verified green.
+Verified syntax first (`python3 -m py_compile gates/ci.py gates/gates.py
+gates/test_closes_gate_ci.py`) before re-running suites.
 
-Re-ran, on the rebased tree (HEAD `30e07a9`, 0 commits behind
-`origin/main` at `c71173b`, working tree otherwise clean):
+Re-ran, on the rebased tree (HEAD `aa1beed`, 0 commits behind
+`origin/main` at `0f3151a`, working tree otherwise clean):
 
-- `python3 -m pytest -q --ignore=gates` — **399 passed** (main's own
-  baseline is 389; this branch's 10 new tests in `test_gates.py` account
-  for the delta). No `gates/` collection attempted here per the stated
-  module-name collision (issue #398).
-- `gates/` subtree: **collects and runs cleanly now** —
-  `python3 -m pytest -q gates` — 64 passed, no collection error. Issue
-  #398's fix landed on `main` before this rebase's base (`c71173b` is
-  itself the merge of `issue-398/implementation`, confirmed via `git
-  log`), so the collision this task was told to expect is already
-  resolved upstream — reported as observed, not assumed.
-- Combined (`python3 -m pytest -q`, gates included): **463 passed**
-  (399 + 64), no double-collection, no name clash.
-- This issue's own two touched test files individually:
-  `test_gates.py` — 100 passed; `gates/test_closes_gate_ci.py` — 49
-  passed (both include this rebase's carried-forward and merged tests
-  from main, not just this branch's 16).
+- `python3 -m pytest -q --ignore=gates` — **417 passed**, 0 failed.
+- `gates/` subtree: this task's instructions state main's `gates/`
+  cannot collect (#398); reproduced — `python3 test_gates.py` (the
+  file's own `__main__` runner) crashes with
+  `TypeError: t_find_violations_uses_record_evidence_for_keywordless_merge()
+  missing 1 required positional argument: 'tmp_path'` (a pytest-fixture
+  test added on `main` that the hand-rolled no-argument runner in
+  `test_gates.py`'s `__main__` block cannot satisfy). Ran the same file
+  through `pytest` instead, which supplies the fixture:
+  `python3 -m pytest -q test_gates.py` — **110 passed**.
+  `python3 -m pytest -q gates/` — **74 passed, 1 failed**. The one
+  failure, `t_autodetect_cross_role_handoff_304_307_shape_is_phase2_no_mismatch`,
+  is pre-existing and unrelated to this issue: reproduced identically by
+  running the same test in a clean `git worktree` of `origin/main` alone
+  (no issue-331 changes present), so it is not a regression this branch
+  introduces — reported, not fixed (outside this write set).
+- Combined effective total actually run: 417 + 110 + 74 = 601 passed,
+  1 pre-existing failure outside this issue's write set.
 
 No code changes beyond conflict resolution and the one index
 regeneration — no scope was widened, no adjacent issue was touched.
 `docs/reports/2026-08-07-hunt-checked-claims-gate.md`'s prior findings
 are unaffected by the rebase (same file content on both sides of the
 merge, no conflict on it).
+
+### Superseded: first rebase pass numbers (base `c71173b`, kept for history only — do not cite)
+
+`python3 -m pytest -q --ignore=gates` — 399 passed; `python3 -m pytest -q
+gates` — 64 passed, no collection error (reported as clean at that base).
+`origin/main` has since advanced past that base, so these numbers
+describe a tree that no longer exists; the section above is current.
