@@ -1535,6 +1535,28 @@ def _roster_save(d: dict) -> None:
     ROSTER.write_text(json.dumps(d, indent=2, ensure_ascii=False))
 
 
+def _watcher_looks_real(pid: int, issue: int | None) -> bool:
+    """이슈 #488 before-landing hunt 발견: `_alive()` 만으로는 워처가 죽은
+    뒤 OS 가 같은 pid 를 다른 프로세스에 재할당한 경우를 못 잡는다 — 살아는
+    있지만 그 워처가 아니다. `issue` 를 알면(로스터 엔트리가 준다)
+    `/proc/<pid>/cmdline` 이 실제로 이 이슈의 `watch` 호출인지까지 최선
+    노력으로 확인한다. `/proc` 없는 플랫폼이나 `issue` 를 모르는 호출(adhoc
+    스폰)에서는 `_alive()` 로 저하한다 — 표시적 신원 검사가 리눅스 전용
+    기능이라 그 이상은 판단 불가."""
+    if not _alive(pid):
+        return False
+    if issue is None:
+        return True
+    cmdline_path = Path(f"/proc/{pid}/cmdline")
+    if not cmdline_path.exists():
+        return True
+    try:
+        parts = cmdline_path.read_bytes().decode("utf-8", "replace").split("\x00")
+    except OSError:
+        return True
+    return "watch" in parts and str(issue) in parts
+
+
 def _alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -1667,6 +1689,20 @@ def watchdog_check_one(key: str, entry: dict, now: float | None = None,
             anomalies.append(
                 f"no-commits-late: {int(elapsed_min)}분 경과, "
                 f"{before_head} 이후 커밋 0건")
+
+    # signal 5 (이슈 #488): 자동 무장한 워처가 죽었거나 애초에 없으면 신고한다
+    # — 죽은 워처는 조용히 넘어가면 auto-arm 의 요구("워처 없는 스폰 불가")를
+    # 관측 시점에서 다시 어기는 셈이라, watchdog 틱마다 여기서 잡는다.
+    ws_entry = _workspace_index_load().get(key)
+    if ws_entry is not None:
+        watcher_pid = ws_entry.get("watcher_pid")
+        if watcher_pid is None:
+            anomalies.append(f"watcher-missing: {key} 에 등록된 워처가 없다")
+        elif not _watcher_looks_real(watcher_pid, entry.get("issue")):
+            anomalies.append(
+                f"watcher-dead: 워처 pid {watcher_pid} 가 죽어 있거나(또는 다른 "
+                f"프로세스가 그 pid 를 물려받았거나) — spawn.py watch --issue "
+                f"<n> --follow 로 재무장하라")
 
     return anomalies
 
@@ -2179,10 +2215,16 @@ def _workspace_index_load() -> dict:
         return {}
 
 
-def _workspace_index_put(issue: int, role: str, work: str, log: str) -> None:
+def _workspace_index_put(issue: int, role: str, work: str, log: str,
+                          watcher_pid: int | None = None) -> None:
+    """이슈 #488: `watcher_pid` 는 이 스폰이 자동 무장한 워처 프로세스의
+    pid(있으면) — `watchdog`이 여기서 읽어 워처가 죽었는지 신고한다."""
     WORKSPACE_INDEX.parent.mkdir(parents=True, exist_ok=True)
     d = _workspace_index_load()
-    d[f"issue-{issue}/{role}"] = {"work": work, "log": log}
+    entry = {"work": work, "log": log}
+    if watcher_pid is not None:
+        entry["watcher_pid"] = watcher_pid
+    d[f"issue-{issue}/{role}"] = entry
     WORKSPACE_INDEX.write_text(json.dumps(d, indent=2, ensure_ascii=False))
 
 
@@ -2352,6 +2394,44 @@ def _watch(issue: int, role: str | None, stall_timeout_min: float,
                   f"로그 변화도 없이 멈춘다. 다시 spawn.py watch --follow 로 "
                   f"재무장하라", file=sys.stderr)
             return 0
+
+
+def _watch_all(stall_timeout_min: float) -> int:
+    """`spawn.py watch --all --follow` — 이슈 #488 요구 (2): 워크스페이스
+    인덱스 전체를 다중화해 하나의 장수명 호출로 스트리밍한다. 매 반복마다
+    인덱스를 다시 읽으므로, 이 호출이 시작된 *뒤*에 등록된 스폰도 잡힌다
+    (auto-arm 이 개별 워처를 이미 세우지만, 이건 그 전체를 한 화면에서
+    보는 오케스트레이터용 집계 뷰다). SIGINT/SIGTERM 으로 끊길 때까지 돈다.
+    """
+    seen_end: set[str] = set()
+    poll_s = 0.2
+    try:
+        while True:
+            idx = _workspace_index_load()
+            for key, entry in sorted(idx.items()):
+                if key in seen_end:
+                    continue
+                work = entry.get("work")
+                log_path = Path(entry["log"]) if entry.get("log") else None
+                if not work or log_path is None:
+                    continue
+                events_path = _events_path(work)
+                offset_path = _offset_path(work)
+                seen = _read_offset(offset_path)
+                if not events_path.exists():
+                    continue
+                lines = events_path.read_text(encoding="utf-8").splitlines()
+                while len(lines) > seen:
+                    ev = json.loads(lines[seen])
+                    seen += 1
+                    _write_offset(offset_path, seen)
+                    print(f"[watch-all] {key} {ev['type']}: {ev['detail']}")
+                    if ev["type"] == "session-end":
+                        seen_end.add(key)
+                        break
+            time.sleep(poll_s)
+    except KeyboardInterrupt:
+        return 0
 
 
 def roster_kill(issue: int, role: str) -> int:
@@ -2723,6 +2803,9 @@ def main() -> int:
     ap.add_argument("--follow", action="store_true",
                     help="watch: 이벤트마다 재무장하지 않고 session-end 까지 "
                          "_await_bounded 를 반복 호출하며 스트리밍한다")
+    ap.add_argument("--all", action="store_true",
+                    help="watch: 워크스페이스 인덱스 전체를 다중화해 스트리밍한다 "
+                         "(오케스트레이터가 대화당 한 번 무장하는 집계 뷰, 이슈 #488)")
     ap.add_argument("--auto-respawn", action="store_true",
                     help="watchdog: crashed 세션에 한해 최대 2회 자동 재스폰, "
                          "상한 도달 시 이슈 코멘트 (기본 off, 관찰-전용 유지)")
@@ -2773,9 +2856,13 @@ def main() -> int:
             sys.exit("사용법: spawn.py kill <역할> --issue <n>")
         return roster_kill(a.issue, a.task)
     if a.role == "watch":
+        if a.all:
+            if a.issue is not None:
+                sys.exit("사용법: spawn.py watch --all 은 --issue 와 함께 못 쓴다")
+            return _watch_all(a.stall_timeout)
         if a.issue is None:
             sys.exit("사용법: spawn.py watch --issue <n> [--role <역할>] "
-                     "[--stall-timeout <분>]")
+                     "[--stall-timeout <분>], 또는 spawn.py watch --all")
         return _watch(a.issue, a.watch_role, a.stall_timeout, follow=a.follow)
     if a.role == "clean":
         # 안전한 것만 지운다: 미커밋 변경 없음 + origin 에 없는 커밋 없음.
@@ -3449,6 +3536,31 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             child_pid = os.fork()
             if child_pid > 0:
                 is_parent_return = True
+                # 이슈 #488: watch 는 여태 사람/오케스트레이터가 스폰마다 따로
+                # 재무장해야 하는 opt-in 이었다 — 재무장을 깜빡하면 세션이
+                # 조용히 끝났다(실측: #472/#473/#484/#173 재스폰 라운드).
+                # 여기서 스폰 자신이 `spawn.py watch --follow` 를 detached
+                # 프로세스로 띄우고 그 pid 를 workspace index 에 등록한다.
+                # 워처를 못 띄우면 스폰 자체를 완료로 치지 않는다 — 구조적으로
+                # "워처 없는 스폰"이 불가능해야 한다는 요구이기 때문이다.
+                watcher_log = Path(str(cwd) + ".watcher.log")
+                try:
+                    with watcher_log.open("a", encoding="utf-8") as wf:
+                        wproc = subprocess.Popen(
+                            [sys.executable, str(Path(__file__).resolve()),
+                             "watch", "--issue", str(issue), "--role", role,
+                             "--follow", "--stall-timeout", str(stall_timeout_min)],
+                            stdin=subprocess.DEVNULL, stdout=wf,
+                            stderr=subprocess.STDOUT, start_new_session=True,
+                        )
+                except OSError as exc:
+                    print(f"[{role}] 워처 자동 무장 실패 — 스폰을 완료로 치지 "
+                          f"않는다: {exc}", file=sys.stderr)
+                    return 1
+                _workspace_index_put(issue, role, str(cwd), str(log_path),
+                                      watcher_pid=wproc.pid)
+                print(f"[{role}] 워처 자동 무장: pid {wproc.pid} "
+                      f"(로그 {watcher_log})", file=sys.stderr)
                 return _await_bounded(events_path, offset_path,
                                        stall_timeout_min, log_path)
             _rewrite_spawn_claim_pid(cwd)
