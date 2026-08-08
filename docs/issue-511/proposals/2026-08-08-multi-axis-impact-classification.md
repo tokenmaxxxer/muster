@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: landed
 files:
   - docs/specs/impact-classification.md
   - docs/specs/standing-decisions.md
@@ -8,7 +8,7 @@ files:
   - gates/test_risk_report.py
   - on-the-record/hooks/impact-guard.sh
   - on-the-record/hooks/test_impact_guard.py
-  - .claude-plugin/hooks.json
+  - on-the-record/hooks/hooks.json
 ---
 
 # Multi-axis impact classification + standing decisions (issue #511)
@@ -187,3 +187,28 @@ into `contract` — that table update ships in the same PR
 - `gates/test_boundary.py` passes with `risk_report.py`'s row updated.
 - A warrant-hunter dispatch (stance 4, "the write set cannot carry this
   work") runs after this proposal per the standing warrant directive.
+
+## What did not work
+- `.claude-plugin/hooks.json` (write-set item) does not exist — the
+  plugin's real hook manifest is `on-the-record/hooks/hooks.json`
+  (verified by reading the shipped `PreToolUse`/`Stop` arrays other
+  hooks in this delivery register into). Registered `impact-guard.sh`
+  there instead; write set corrected in this doc's frontmatter to match.
+- `gates/test_risk_report.py` collided with a pre-existing repo-root
+  `test_risk_report.py` (issue #319's original acceptance test) —
+  `gates/test_duplicate_test_basenames.py` failed on the same basename
+  with no package boundary. Consolidated the #319 tests into the new
+  `gates/test_risk_report.py` (as the `ClassifyLegacy` class) and removed
+  the root-level duplicate; not a write-set item in this proposal, but
+  required for the suite to pass at all and strictly a move, not new
+  scope.
+- Mapping each `gh pr merge` invocation to its originating proposal (by
+  PR branch/body) inside `impact-guard.sh` was dropped as too heavy for
+  a zero-install `PreToolUse` hook (would need a `gh pr view` round-trip
+  per merge, the same cost contract-guard.sh already limits itself
+  against). `impact-guard.sh` instead blocks any Bash command batching
+  2+ `gh pr merge` calls whenever the target repo's own currently-open
+  proposal set contains one requiring individual approval — coarser than
+  per-PR mapping, but still a genuine block on the batching act itself
+  (single merges pass through unconditionally), and documented as such
+  in the hook's header and in `docs/specs/impact-classification.md`.

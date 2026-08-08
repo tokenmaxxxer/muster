@@ -32,7 +32,8 @@
         "hooks": [
           { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/contract-guard.sh" },
           { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pr-preflight.sh" },
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/spec-index-preflight.sh" }
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/spec-index-preflight.sh" },
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/impact-guard.sh" }
         ]
       },
       {
