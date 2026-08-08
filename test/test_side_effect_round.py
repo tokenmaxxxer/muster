@@ -19,13 +19,14 @@ _spec.loader.exec_module(acceptance_gate)
 check_issue_body = acceptance_gate.check_issue_body
 
 
-def test_acceptance_gate_accepts_phantom_github_workflows_reference():
-    """attempt 5 repro: `.github/workflows/` is confirmed absent from the
-    repo (gates/test_boundary_workflow_migration.py), yet
-    acceptance_gate.py's _ARTIFACT_REF regex still accepts a backtick-quoted
-    `.github/workflows/...` path as satisfying the executable-artifact-
-    reference requirement — an issue can cite a path that will never
-    execute and still pass the gate.
+def test_acceptance_gate_flags_phantom_github_workflows_reference():
+    """attempt 5 repro, fixed (issue-499): `.github/workflows/` is confirmed
+    absent from the repo (gates/test_boundary_workflow_migration.py, retired
+    by #460 with no replacement path). acceptance_gate.py's _ARTIFACT_REF
+    regex no longer accepts a backtick-quoted `.github/workflows/...` path
+    as satisfying the executable-artifact-reference requirement — an issue
+    citing that path can never execute it, so the gate now flags it as
+    prose-only instead of passing it.
     """
     body = (
         "## Acceptance\n"
@@ -34,9 +35,7 @@ def test_acceptance_gate_accepts_phantom_github_workflows_reference():
         "provenance: read\n"
     )
     violations = check_issue_body(999, body)
-    assert violations == [], (
-        "expected the gate to currently (incorrectly) accept a phantom "
-        f".github/workflows/ reference as valid; got violations={violations!r} "
-        "— if this now fails, the phantom-path bug has been fixed and this "
-        "test should be updated to assert the gate flags it instead"
+    assert violations != [], (
+        "expected the gate to flag a phantom .github/workflows/ reference "
+        f"as invalid (retired by #460); got violations={violations!r}"
     )

@@ -19,7 +19,7 @@ from pathlib import Path
 _SECTION_HEADING = re.compile(r"(?im)^#{1,6}\s*acceptance\b.*$")
 _NEXT_HEADING = re.compile(r"(?m)^#{1,6}\s")
 _ARTIFACT_REF = re.compile(
-    r"`[^`]*(?:test/|gates/|\.github/workflows/)[^`]*`"
+    r"`[^`]*(?:test/|gates/)[^`]*`"
     r"|^\s*[-*]?\s*(gate|check)\s*:\s*\S+",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -48,9 +48,11 @@ def check_issue_body(issue: int, body: str) -> list[str]:
 
     `## Acceptance`(또는 임의 레벨 헤딩의 "acceptance") 절이 아예 없으면
     검사 불가 — fail closed, 통과가 아니라 위반으로 취급한다. 절이
-    있으면 실행가능한 산출물 참조(백틱으로 감싼 `test/`/`gates/`/
-    `.github/workflows/` 아래 경로, 또는 `gate:`/`check:` 줄) 또는
-    `unverifiable:` 로 시작하는 명시적 이유 줄 중 하나를 요구한다.
+    있으면 실행가능한 산출물 참조(백틱으로 감싼 `test/`/`gates/` 아래
+    경로, 또는 `gate:`/`check:` 줄) 또는 `unverifiable:` 로 시작하는
+    명시적 이유 줄 중 하나를 요구한다. `.github/workflows/` 는 #460 으로
+    저장소에서 완전히 삭제되어 더 이상 실행가능한 산출물이 될 수 없으므로
+    받아들이지 않는다(issue-499).
     """
     body = body or ""
     section = _acceptance_section(body)
@@ -62,8 +64,8 @@ def check_issue_body(issue: int, body: str) -> list[str]:
         return []
     if not _ARTIFACT_REF.search(section):
         return [f"이슈 #{issue}의 'Acceptance' 절이 프로즈뿐이다 — 실행가능한 "
-                f"산출물(백틱으로 감싼 test/, gates/, .github/workflows/ 경로, "
-                f"또는 'gate:'/'check:' 줄)을 가리키거나, 검증 불가능한 이유를 "
+                f"산출물(백틱으로 감싼 test/, gates/ 경로, 또는 'gate:'/'check:' "
+                f"줄)을 가리키거나, 검증 불가능한 이유를 "
                 f"'unverifiable: <이유>' 로 명시해야 한다."]
     # issue-416: 실행가능 산출물 참조가 있으면(=행동 주장) empty state/provenance
     # 존재를 추가로 요구한다. unverifiable: 은 위에서 이미 둘 다 면제했다.
