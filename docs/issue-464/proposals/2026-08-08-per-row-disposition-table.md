@@ -5,6 +5,14 @@ files:
   - docs/issue-464/reports/architecture.md
 ---
 
+## Scouting
+
+Scouting skipped (survey.md's Scouting section carries the full
+reasoning): no design decision open that an external exemplar sweep could
+inform — this deliverable classifies this repo's own governance rows
+against its own existing mechanisms, not a product-shaped or
+externally-comparable field.
+
 ## Intent
 
 Produce the per-row disposition table issue-464 asks for: for class A
