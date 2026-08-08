@@ -220,20 +220,27 @@ _ISSUE_467_BATCH_A_CITATIONS = {
     412: ROOT / "on-the-record" / "hooks" / "test_self_update_shallow.py",
 }
 
+_ISSUE_467_BATCH_C_CITATIONS = {
+    320: ROOT / "gates" / "test_report_framing_check.py",
+    376: ROOT / "gates" / "test_capability_gates.py",
+    377: ROOT / "gates" / "test_claims.py",
+}
+
 
 def t_class_b_disposition_rows_cited():
     """issue-467 ADR: 13개 `deployed-contract+check` 행이 전부 표에 있어야
-    하고, 이미 배달된 배치(A: #362/#390/#412)는 실제 파일 경로 인용이
-    있어야 한다 — 아직 배달 안 된 나머지 10개 행은 표에 있는 것만으로
-    충분하다(뒤 배치가 자기 배달 때 인용을 추가한다)."""
+    하고, 이미 배달된 배치(A: #362/#390/#412, C: #320/#376/#377)는 실제
+    파일 경로 인용이 있어야 한다 — 아직 배달 안 된 나머지 행은 표에
+    있는 것만으로 충분하다(뒤 배치가 자기 배달 때 인용을 추가한다)."""
     missing_citation = []
-    for n in _ISSUE_467_BATCH_A_CITATIONS:
+    for n in {**_ISSUE_467_BATCH_A_CITATIONS, **_ISSUE_467_BATCH_C_CITATIONS}:
         assert n in ISSUE_467_DISPOSITION_ROWS, f"#{n} 이 disposition 표에 없다."
-        path = _ISSUE_467_BATCH_A_CITATIONS[n]
-        if not path.is_file():
-            missing_citation.append((n, path))
+    for citations in (_ISSUE_467_BATCH_A_CITATIONS, _ISSUE_467_BATCH_C_CITATIONS):
+        for n, path in citations.items():
+            if not path.is_file():
+                missing_citation.append((n, path))
     assert not missing_citation, (
-        f"배치 A 행이 인용하는 파일이 없다: {missing_citation}"
+        f"배치 행이 인용하는 파일이 없다: {missing_citation}"
     )
     assert len(ISSUE_467_DISPOSITION_ROWS) == 13, (
         "issue-467 disposition 표는 13개 행이어야 한다."

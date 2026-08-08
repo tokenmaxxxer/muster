@@ -41,7 +41,8 @@
         "hooks": [
           { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-gate.sh" },
           { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/role-test-claim-guard.sh" },
-          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/decision-queue-stopgate.sh" }
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/decision-queue-stopgate.sh" },
+          { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/report-framing-check.sh" }
         ]
       }
     ]

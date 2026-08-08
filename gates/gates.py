@@ -179,6 +179,10 @@ def writeset(d: Path, cfg: dict) -> list[str]:
 
     write-set 이 선언되지 않으면 fail closed 다. 자율 머지 파이프라인에서 "범위를
     말하지 않았으니 아무 데나 써도 된다"는 성립하지 않는다.
+
+    # CLAIM-CHECK: producer-exists spec.md
+    (issue-377: 이 게이트는 `spec.md` 가 어딘가에서 생산된다는 전제로 서술돼
+    있다 — 아무도 `spec.md` 를 만들지 않으면 이 서술은 조용히 거짓이 된다.)
     """
     try:
         files = changed_files(d / "work")
@@ -279,6 +283,9 @@ def deps(d: Path, cfg: dict) -> list[str]:
     return bad
 
 
+# issue-377: roles/*.json 의 record_fields.loop_state 선언이 실제 레코드
+# frontmatter 가 쓰는 값 어휘와 어긋나면(#147 류 drift) 여기서 잡는다.
+# CLAIM-CHECK: enum-subset roles/implementation.json:record_fields.loop_state docs/issue-*/reports/*.md:loop_state
 RECORD_PATH = re.compile(r"^docs/issue-[^/]+/reports/([^/]+)\.md$")
 
 
@@ -1065,6 +1072,91 @@ def sibling_mention_check_gate(d: Path, cfg: dict) -> list[str]:
     return sibling_mention_check(work, record_text)
 
 
+_GATE_CALL = re.compile(r"gates\.(\w+)\(")
+_CLOSES_ONLY_RETURN = re.compile(r"^\s*if closes_only:\s*$", re.MULTILINE)
+
+
+def ci_reachable_gates(d: Path, cfg: dict) -> list[str]:
+    """`gates.ALL` 에 등록된 게이트가 `gates/ci.py::check()` 의 실제 호출
+    그래프에서 도달 가능한지 검사한다 (issue #376).
+
+    실제 CI 진입점(`.github/workflows/` 은퇴 후 로컬로 도는
+    `gates/ci.py --closes-only`)이 유일하게 쓰는 모드가 `closes_only=True`
+    이므로, `closes_only` 가드 앞에서 호출되지 않는 게이트는 등록만 되고
+    실제로는 절대 안 돈다 — 등록됐다는 사실이 "실행된다"를 보장하지
+    않는다는 정확히 그 결함."""
+    ci_py = ON_THE_RECORD_ROOT / "gates" / "ci.py"
+    if not ci_py.exists():
+        return [f"{ci_py} 를 찾을 수 없어 도달성을 검사할 수 없다"]
+    text = ci_py.read_text(encoding="utf-8")
+    m = _CLOSES_ONLY_RETURN.search(text)
+    before_guard = text[:m.start()] if m else text
+    called_anywhere = set(_GATE_CALL.findall(text))
+    called_before_guard = set(_GATE_CALL.findall(before_guard))
+    bad = []
+    for name in sorted(ALL):
+        if name not in called_anywhere:
+            bad.append(
+                f"등록된 게이트가 gates/ci.py 에서 전혀 호출되지 않는다: "
+                f"gates.{name} — 등록만 되고 절대 안 도는 죽은 게이트다")
+        elif name not in called_before_guard:
+            bad.append(
+                f"등록된 게이트가 `closes_only` 가드 이후에만 호출된다: "
+                f"gates.{name} — 실제 CI 진입점(--closes-only)에서는 "
+                f"도달 불가능하다")
+    return bad
+
+
+_SCHEMA_FIELD_ROW = re.compile(r"^\|\s*`([a-zA-Z_][\w]*)`\s*\|\s*\S", re.MULTILINE)
+_FIELD_ASSIGN_OR_LITERAL = re.compile(
+    r"\b{name}\b\s*(=[^=]|:\s*\[|:\s*\{{|\.append\()")
+
+
+def schema_field_orphans(d: Path, cfg: dict) -> list[str]:
+    """`docs/specs/*.md` 스키마 표에 문서화된 필드가 실제로 어딘가에서
+    읽히는지 검사한다 (issue #376). 저장소 전체 — 자신을 선언한 스펙
+    파일과 테스트 파일, 그리고 필드를 정의/생산하는 파일(자기 자신을
+    할당·초기화하는 파일) 은 제외 — 를 훑어 이름을 코드(.py/.sh)에서
+    다시 찾지 못하면 그 필드는 문서화됐지만 아무도 읽지 않는 죽은
+    스키마 필드다."""
+    root = d / "work" if (d / "work").exists() else d
+    specs_dir = root / "docs" / "specs"
+    if not specs_dir.is_dir():
+        return []
+
+    code_files = [p for p in root.rglob("*.py")] + [p for p in root.rglob("*.sh")]
+    code_files = [p for p in code_files if ".git" not in p.parts]
+    code_texts = {}
+    for p in code_files:
+        try:
+            code_texts[p] = p.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+
+    bad = []
+    for spec in sorted(specs_dir.glob("*.md")):
+        text = spec.read_text(encoding="utf-8")
+        fields = set(_SCHEMA_FIELD_ROW.findall(text))
+        for name in sorted(fields):
+            producer_re = _FIELD_ASSIGN_OR_LITERAL.pattern.format(name=re.escape(name))
+            producer_pat = re.compile(producer_re)
+            found = False
+            for p, t in code_texts.items():
+                if _TEST_BASENAME.match(p.name):
+                    continue
+                if producer_pat.search(t):
+                    continue
+                if re.search(rf"\b{re.escape(name)}\b", t):
+                    found = True
+                    break
+            if not found:
+                bad.append(
+                    f"문서화된 스키마 필드가 코드에서 읽히지 않는다: "
+                    f"`{name}` ({spec.relative_to(root)}) — 생산·테스트 "
+                    f"파일 밖에서 참조하는 코드가 없다")
+    return bad
+
+
 ALL = {"writeset": writeset, "deps": deps,
        "record_enums": record_enums,
        "record_wellformed": record_wellformed,
@@ -1075,7 +1167,22 @@ ALL = {"writeset": writeset, "deps": deps,
        "requirement_registry": requirement_registry,
        "record_checked_claims": record_checked_claims,
        "subprocess_call_shape_divergence": subprocess_call_shape_divergence_gate,
-       "sibling_mention_check": sibling_mention_check_gate}
+       "sibling_mention_check": sibling_mention_check_gate,
+       "ci_reachable_gates": ci_reachable_gates,
+       "schema_field_orphans": schema_field_orphans}
+
+
+def _claims_gate(d: Path, cfg: dict) -> list[str]:
+    """claims.py imports gates (sibling module, same directory-on-sys.path
+    convention as ci.py/acceptance_gate.py) — a module-level `import claims`
+    here would be circular (claims.py needs `record_frontmatter`, already
+    defined, but gates.py hasn't finished executing this dict literal yet).
+    Deferred import avoids it."""
+    import claims
+    return claims.check(d, cfg)
+
+
+ALL["claims"] = _claims_gate
 
 
 def check(names: list[str], d: Path, cfg: dict) -> list[str]:
