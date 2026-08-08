@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: landed
 files:
   - docs/issue-476/reports/execution-observation/survey.md
   - docs/issue-476/proposals/execution-observation.md
