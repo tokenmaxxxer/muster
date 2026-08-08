@@ -93,9 +93,18 @@ step may trigger (see What will be done).
    plan-stated named cross-unit dependency; this applies both to the
    top-level coordinator loop and to any role session that fans out its
    own sub-work (dispatch guidance). Cross-reference #171, #501, #407.
-2. Add one assertion function to `gates/test_boundary.py` (parallel in
-   style to `t_run_md_references_unenforced_clauses`) asserting the new
-   section's marker text is present in run.md.
+2. Add one assertion function to `gates/test_boundary.py` asserting the
+   new section is present *as enforced policy*, not just as a bare
+   substring anywhere in run.md — a plain `marker in run.md.read_text()`
+   check (the shape `t_run_md_references_unenforced_clauses` uses) would
+   also pass if the marker phrase merely appears inside a rejected-
+   alternative aside or negated prose (issue-464 already hit and fixed
+   this exact bare-substring/section-fallback bypass shape for a sibling
+   gate — see `gates/test_boundary.py:146-151`). The new assertion must
+   require the marker sentence itself to carry the streaming-is-default
+   /barrier-exception disposition and must exclude matches found inside
+   a "반려/rejected" subsection, mirroring issue-464's disposition-
+   vocabulary fix rather than repeating the bare-substring shape.
 3. Add a red-green fixture pair to `test_spawn.py` (in/near the
    `Reconcile`/`RosterConcurrency` classes) that simulates 3 roster
    entries completing at different times and asserts each is reconciled
