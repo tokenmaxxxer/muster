@@ -371,6 +371,28 @@ running/waiting/done 세 그룹 중 하나로 정상 분류된다.
      알린다 (`gh api repos/<o>/<r>/collaborators/<agent> -X PUT`).
    전부 사용자의 확인을 받고 실행한다 — 조용히 만들지 않는다.
 
+## 게이트 작성 시 지킬 것 (#362)
+
+`gates/*.py` 에 새 검사를 추가할 때: 아티팩트가 작성될 당시 준수했던
+규칙을 나중에 바뀐 규칙으로 다시 검사해 실패시키지 않는다 — 소급 실패는
+재시도로 고칠 수 없다. 판정은 항상 아티팩트 작성 시점의 규칙 기준이어야
+한다(`gates/gates.py` 모듈 docstring, `gates/test_boundary.py::t_gates_docstring_states_retroactivity_rule`).
+
+## 체크아웃/검증 상태 관련 주의 (#390, #412)
+
+- **PR 의 green 은 검증 당시 상태를 증언하지, 실제로 랜딩되는 상태를
+  증언하지 않는다(#390).** stale-base 머지(다른 PR 이 그 사이 병합돼
+  base 가 바뀜)나 실행 환경 차이는 PR 화면의 초록 체크만으로는 안 잡힌다.
+  `gates/test_merge_state_gate.py` 를 로컬에서 직접 돌려 merge-tree 상태를
+  검증하라 — GitHub Actions 는 은퇴됐고 `closes-gate` 잡에 배선돼 있지
+  않다.
+- **자기 클론/기존 체크아웃이 얕을(shallow) 수 있다(#412).** 얕은
+  체크아웃은 히스토리 의존 검사(log/blame 범위)를 조용히 깬다.
+  `on-the-record/hooks/self-update.sh` 가 세션 시작마다 `--is-shallow-repository`
+  를 확인하고 unshallow 를 시도하며, 성공/실패와 무관하게 체크아웃 루트의
+  `.shallow-check` 파일에 결과를 남긴다 — 얕은 상태가 남아있어도 최소한
+  보인다.
+
 ## 하지 않는 것
 
 - 보드 기록을 직접 쓰지 않는다 — 그건 역할의 것이다.

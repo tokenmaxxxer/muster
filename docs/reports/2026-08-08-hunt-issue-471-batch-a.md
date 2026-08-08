@@ -63,3 +63,34 @@ reference a case where a rule changed after an artifact was authored and
 assert the artifact still passes — not merely assert a sentence describing
 the property is present in a docstring, which can be true independent of
 whether any code obeys it.
+
+## before-landing — stance 1: assume this change and another plugin's rule cancel each other — find the pair
+
+Verdict: FINDING — `gates.role_scope()` (the pre-existing role/write_scope governance rule) and this Batch A delivery cancel each other: every file this diff needs to touch (`gates/gates.py`, `gates/test_boundary.py`, `gates/test_merge_state_gate.py`, `on-the-record/commands/run.md`, `on-the-record/hooks/self-update.sh`, `on-the-record/hooks/test_self_update_shallow.py`) falls outside `roles/implementation.json`'s `write_scope` (`["src/**", "test/**"]`), and this repo has no `docs/specs/write_scope.md` override to widen it. `gates/ci.py::check()` calls `gates.role_scope(repo, branch)` for any PR check that isn't `--closes-only` (i.e. the normal review path, not just the required-status-check path) — so the very PR that delivers this Batch A work, opened from `issue-471/implementation`, is flagged as scope-violating by its own repo's role gate for every file it ships.
+Kind: composition
+Seed: gates/gates.py (+4 lines docstring), gates/test_boundary.py (+43), on-the-record/commands/run.md (+22), on-the-record/hooks/self-update.sh (+17), plus new gates/test_merge_state_gate.py, on-the-record/hooks/test_self_update_shallow.py
+cap_seconds: 180
+tier: size:large
+diff_stat_lines: 87 tracked + 2 new files
+started_at: 2026-08-08T00:06:00Z
+ended_at: 2026-08-08T00:09:00Z
+
+### Reproduce
+```
+cd /home/jwjung/.tokenmaxxxer/work/on-the-record-issue-471-implementation
+python3 -c "import sys; sys.path.insert(0,'gates'); import gates; from pathlib import Path; print(gates.role_scope(Path('.'), 'issue-471/implementation'))"
+```
+
+### Observed
+```
+['write_scope 이탈: gates/gates.py (역할 implementation, 허용: src/**, test/**, docs/issue-*/reports/implementation.md, docs/issue-*/reports/implementation/**, docs/issue-*/proposals/**)',
+ 'write_scope 이탈: gates/test_boundary.py ...',
+ 'write_scope 이탈: on-the-record/commands/run.md ...',
+ 'write_scope 이탈: on-the-record/hooks/self-update.sh ...',
+ 'write_scope 이탈: gates/test_merge_state_gate.py ...',
+ 'write_scope 이탈: on-the-record/hooks/test_self_update_shallow.py ...']
+```
+Confirmed the enforcement path is live (not just the narrow `--closes-only` mode): `gates/ci.py::check()`, when called with `pr is not None` and `closes_only=False` (the default review-time invocation, distinct from the `--closes-only` required-status-check mode carved out for issue #245), unconditionally appends `gates.role_scope(repo, branch)` to the blocking-reason list (`gates/ci.py` around line 460).
+
+### Expected
+Either `roles/implementation.json`'s `write_scope` should include the paths this Batch A work is required to touch (`gates/**`, `on-the-record/**`), or a write-scope override should exist widening it for this issue/role — otherwise the role-scope gate and the Batch A deliverable cancel each other: the deliverable cannot land as an `issue-471/implementation` PR without also being flagged as a scope violation by the same repo's own governance rule.

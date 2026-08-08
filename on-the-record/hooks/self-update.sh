@@ -34,5 +34,22 @@ _checkout_resolve() {
 }
 CHECKOUT="$(_checkout_resolve || true)"
 [ -n "$CHECKOUT" ] && git -C "$CHECKOUT" pull -q --ff-only 2>/dev/null || true
+# #412: a self-clone (or any pre-existing checkout) can be shallow — a
+# shallow checkout silently breaks history-dependent checks (log/blame
+# ranges truncate at the shallow boundary). Detect it and attempt to
+# unshallow; record the outcome either way so a still-shallow checkout is
+# at least visible, not silent.
+if [ -n "$CHECKOUT" ]; then
+  marker="$CHECKOUT/.shallow-check"
+  if [ "$(git -C "$CHECKOUT" rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+    if git -C "$CHECKOUT" fetch -q --unshallow 2>/dev/null; then
+      printf 'shallow=true unshallow=ok\n' > "$marker" 2>/dev/null || true
+    else
+      printf 'shallow=true unshallow=failed\n' > "$marker" 2>/dev/null || true
+    fi
+  else
+    printf 'shallow=false\n' > "$marker" 2>/dev/null || true
+  fi
+fi
 trap - EXIT
 exit 0
