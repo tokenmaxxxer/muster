@@ -251,6 +251,27 @@ def t_class_b_disposition_rows_cited():
     )
 
 
+_ISSUE_492_RECONCILE_CITATIONS = {
+    "reconcile()": (ROOT / "spawn.py", "def reconcile(expected: dict, observed: dict)"),
+    "reconcile CLI verb": (ROOT / "spawn.py", 'if a.role == "reconcile":'),
+    "drive() reconcile edit": (ROOT / "spawn.py", "reconcile(_build_expected(e), _build_observed(root, e))"),
+}
+
+
+def t_issue_492_reconcile_pieces_present():
+    """issue-492 step2 acceptance check 3: gates/test_boundary.py manifest
+    row per delivered piece (reconcile(), the reconcile CLI verb, the
+    drive() edit) — ADR:
+    docs/issue-492/decisions/2026-08-08-reconciliation-step-for-supervision.md,
+    proposal:
+    docs/issue-492/proposals/2026-08-08-implement-reconciliation-step.md."""
+    missing = []
+    for name, (path, marker) in _ISSUE_492_RECONCILE_CITATIONS.items():
+        if not path.is_file() or marker not in path.read_text(encoding="utf-8"):
+            missing.append(name)
+    assert not missing, f"issue-492 reconcile manifest 행 미충족: {missing}"
+
+
 def _run(fns):
     ok = 0
     for name, fn in fns:

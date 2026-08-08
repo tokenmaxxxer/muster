@@ -1507,6 +1507,119 @@ def fail_closed_downgrade(outcome: str, issue: int | None, blocked: list,
     return "failed-no-commit"
 
 
+def reconcile(expected: dict, observed: dict) -> list[dict]:
+    """이슈-492 step 2 (ADR: `docs/issue-492/decisions/2026-08-08-reconciliation-step-for-supervision.md`).
+
+    순수 함수: 로스터/보드/PR/git 에서 이미 읽은 값을 받아 비교만 한다 —
+    여기서 새 `gh` 호출이나 파일 읽기를 하지 않는다.
+
+    `expected = {"expects_pr": bool, "role": str, "branch": str}`
+    `observed = {"session_verdict": str, "pr_number": int|None,
+                 "loop_state": str|None, "new_commit": bool}`
+
+    반환: `[{"kind": str, "detail": str, "next_action": str}, ...]` —
+    divergence 없으면 빈 리스트. next_action 집합은 닫혀 있다: `respawn`,
+    `resume-watch`, `manual-review`, `none` 뿐 (ADR Decision 3).
+
+    규칙 순서(이슈의 실측 예시 그대로):
+    1. `session_verdict == "crashed"` → `respawn` — kill -9 등으로 세션이
+       죽었는데 침묵하지 않는다.
+    2. `session_verdict == "stalled"` → `resume-watch` — #132 의 관찰-전용
+       standing decision 그대로, 자동 재무장은 안 하고 이름만 붙인다.
+    3. PR 을 기대했는데(`expects_pr`) 아직 없고(`pr_number is None`) 세션이
+       진행 중도 아니면(`session_verdict != "in-progress"`) → `respawn` —
+       이슈의 "push 없이 죽음" 예시.
+    4. 위 어디에도 안 걸리는데 입력 자체가 앞뒤가 안 맞으면(예:
+       `loop_state` 는 있는데 `session_verdict` 가 없거나 인식 불가) →
+       `manual-review` — 침묵 대신 사람 검토로 보낸다.
+    5. 그 외엔 divergence 없음(빈 리스트) — 깨끗한 경우.
+    """
+    verdict = observed.get("session_verdict")
+    known_verdicts = ("normal", "crashed", "stalled", "in-progress")
+
+    if verdict == "crashed":
+        return [{
+            "kind": "session-crashed",
+            "detail": f"role={expected.get('role')} branch={expected.get('branch')}: "
+                       "session_verdict=crashed",
+            "next_action": "respawn",
+        }]
+    if verdict == "stalled":
+        return [{
+            "kind": "session-stalled",
+            "detail": f"role={expected.get('role')} branch={expected.get('branch')}: "
+                       "session_verdict=stalled",
+            "next_action": "resume-watch",
+        }]
+    if (expected.get("expects_pr") and observed.get("pr_number") is None
+            and verdict != "in-progress"):
+        return [{
+            "kind": "pr-expected-missing",
+            "detail": f"role={expected.get('role')} branch={expected.get('branch')}: "
+                       f"expects_pr=True pr_number=None session_verdict={verdict!r}",
+            "next_action": "respawn",
+        }]
+    if verdict is None:
+        if observed.get("loop_state") is not None:
+            # loop_state 는 관측됐는데 session_verdict 가 없다 — 앞뒤가
+            # 안 맞는 입력, 침묵 대신 사람 검토로 보낸다.
+            return [{
+                "kind": "inconsistent-observed-state",
+                "detail": f"role={expected.get('role')} branch={expected.get('branch')}: "
+                           f"session_verdict=None loop_state={observed.get('loop_state')!r}",
+                "next_action": "manual-review",
+            }]
+        return []
+    if verdict not in known_verdicts:
+        return [{
+            "kind": "inconsistent-observed-state",
+            "detail": f"role={expected.get('role')} branch={expected.get('branch')}: "
+                       f"session_verdict={verdict!r} loop_state={observed.get('loop_state')!r}",
+            "next_action": "manual-review",
+        }]
+    return []
+
+
+def _build_expected(entry: dict) -> dict:
+    """로스터 엔트리 → `reconcile()` 의 `expected` 입력. 새 스키마 없음 —
+    `roster_register()` 가 이미 쓰는 필드(`role`, `expects_pr`)와 워크
+    경로에서 도출한 브랜치 이름만 쓴다."""
+    work = entry.get("work")
+    branch = Path(work).name if work else None
+    return {
+        "expects_pr": bool(entry.get("expects_pr")),
+        "role": entry.get("role"),
+        "branch": branch,
+    }
+
+
+def _build_observed(root: Path, entry: dict) -> dict:
+    """로스터 엔트리 → `reconcile()` 의 `observed` 입력. 기존 리더만 쓴다
+    (`session_end_verdict`, `_pr_open_or_merged_for_branch`, `board`,
+    `_is_new_commit`) — 새 `gh` 호출을 추가하지 않는다."""
+    work = entry.get("work")
+    log = entry.get("log")
+    verdict = session_end_verdict(work, Path(log) if log else None) if work else None
+    branch = Path(work).name if work else None
+    pr_number = _pr_open_or_merged_for_branch(root, branch) if branch else None
+    loop_state = None
+    issue = entry.get("issue")
+    role = entry.get("role")
+    if issue is not None and role:
+        subject = f"issue-{issue}"
+        loop_state = board(root).get(subject, {}).get(role, {}).get("loop_state")
+    new_commit = False
+    if work:
+        after_head = _git_head(work)
+        new_commit = _is_new_commit(work, entry.get("before_head"), after_head)
+    return {
+        "session_verdict": verdict,
+        "pr_number": pr_number,
+        "loop_state": loop_state,
+        "new_commit": new_commit,
+    }
+
+
 ROSTER = ROOT / "runs" / "active.json"
 
 
@@ -1771,6 +1884,14 @@ def roster_watchdog(auto_respawn: bool = False) -> int:
     state = _watchdog_state_load()
     respawn_state = _respawn_state_load() if auto_respawn else {}
     for key, e in sorted(d.items()):
+        # 이슈 #492: 같은 틱에서 reconcile() 도 한 번 태운다 — 새 폴러가
+        # 아니라 이 기존 스캔에 올라탄다(ADR 결정 4).
+        divergences = reconcile(_build_expected(e), _build_observed(ROOT, e))
+        if divergences:
+            anomaly_count += len(divergences)
+            print(f"[reconcile] {key}: divergence {len(divergences)}건")
+            for div in divergences:
+                print(f"  - {div['kind']}: {div['detail']} -> {div['next_action']}")
         if not _alive(e.get("pid", 0)):
             if auto_respawn:
                 _auto_respawn_check(key, e, respawn_state)
@@ -1787,6 +1908,32 @@ def roster_watchdog(auto_respawn: bool = False) -> int:
     if not anomaly_count:
         print("이상 신호 없음")
     return anomaly_count
+
+
+def roster_reconcile(issue: int | None = None) -> int:
+    """`spawn.py reconcile [--issue N]` — 이슈-492 step 2 CLI verb.
+
+    로스터(살아있는 것 + 죽은 것 전부, `watchdog --auto-respawn` 의 스캔
+    범위와 같다)를 훑어 엔트리마다 `reconcile()` 을 한 번씩 돌린다.
+    `--issue` 를 주면 그 이슈 번호의 엔트리로만 좁힌다. divergence 한 줄씩
+    찍고, 종료 코드는 divergence 총 개수(0 = 깨끗함) — `roster_watchdog`
+    의 반환값과 같은 관례(spawn.py:1752-1755)."""
+    d = _roster_load()
+    if issue is not None:
+        d = {k: e for k, e in d.items() if e.get("issue") == issue}
+    if not d:
+        print("reconcile: 대상 로스터 엔트리 없음")
+        return 0
+    total = 0
+    for key, e in sorted(d.items()):
+        divergences = reconcile(_build_expected(e), _build_observed(ROOT, e))
+        for div in divergences:
+            total += 1
+            print(f"[reconcile] {key}: {div['kind']}: {div['detail']} "
+                  f"-> next_action={div['next_action']}")
+    if not total:
+        print("reconcile: divergence 없음")
+    return total
 
 
 EVENTS_SUFFIX = ".events.jsonl"
@@ -2587,10 +2734,30 @@ def drive(cwd: str, unattended: bool, limit: int = 12) -> int:
     drive 는 스스로 역할을 고르지 않는다. 자동으로 고를 표가 없으므로 이
     호출은 항상 즉시 멈춘다; 남은 인자는 향후 호출부 호환을 위해 받되 쓰지
     않는다.
+
+    이슈 #492 (ADR): `reconcile()` 이 낸 divergence 를 소비하는 것으로
+    바뀐다 — 로스터를 읽어 엔트리마다 `reconcile()` 을 돌리고 결과와
+    `next_action` 을 출력한다. #120 계약은 그대로다: drive() 는 여전히
+    아무 역할도 스스로 고르지 않고, 무엇을 띄울지는 오케스트레이터의
+    판단으로 남긴다 — 여기서 respawn/resume-watch 를 자동 실행하지 않는다.
     """
-    print("[drive] 다음 역할을 자동으로 고르는 라우팅 표는 없다 — "
-          "오케스트레이터가 보드를 읽고 판단한다. 띄울 게 없다고 보고 멈춘다.",
-          file=sys.stderr)
+    root = Path(cwd).resolve()
+    d = _roster_load()
+    if not d:
+        print("[drive] 돌고 있는 역할 세션 없음 — 보고할 divergence 없음. 멈춘다.",
+              file=sys.stderr)
+        return 0
+    found = False
+    for key, e in sorted(d.items()):
+        divergences = reconcile(_build_expected(e), _build_observed(root, e))
+        for div in divergences:
+            found = True
+            print(f"[drive] {key}: {div['kind']}: {div['detail']} "
+                  f"-> next_action={div['next_action']}", file=sys.stderr)
+    if not found:
+        print("[drive] divergence 없음 — 다음 역할을 자동으로 고르는 라우팅 "
+              "표는 없다(이슈 #120). 오케스트레이터가 보드를 읽고 판단한다. "
+              "띄울 게 없다고 보고 멈춘다.", file=sys.stderr)
     return 0
 
 
@@ -2822,6 +2989,8 @@ def main() -> int:
         return roster_ps()
     if a.role == "watchdog":
         return roster_watchdog(auto_respawn=a.auto_respawn)
+    if a.role == "reconcile":
+        return roster_reconcile(a.issue)
     if a.role == "flows":
         sys.path.insert(0, str((Path(__file__).parent / "gates").resolve()))
         import flows
@@ -3584,6 +3753,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
             "pid": proc.pid, "role": role,
             "issue": issue, "ts": int(time.time()),
             "work": str(cwd), "log": str(log_path),
+            "expects_pr": issue is not None,  # 이슈 #492: reconcile() 의 expected 입력
             "before_head": before_head,  # 이슈 #90 watchdog signal 4 재료
             # `pid`(claude 서브프로세스)는 proc.wait() 리턴과 함께 정상
             # 종료에서도 먼저 죽는다 — push/게이트·소유권 리포트/classify/
