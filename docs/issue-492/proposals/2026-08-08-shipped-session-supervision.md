@@ -51,8 +51,14 @@ Add one pure comparison function to `spawn.py`,
    "dies without pushing → respawn/resume").
 4. Is called from inside `roster_watchdog`'s existing tick (spawn.py:1705)
    — reconciliation rides the same board-read cadence already running
-   every 10-15 min, not a second poller — and its output is what `drive()`
-   consults for "what next" instead of raw `loop_state`.
+   every 10-15 min, not a second poller. Riding that tick alone does not
+   make `drive()` (spawn.py:2502) use it: `drive()` is a separate CLI verb
+   that today reads board `loop_state` directly and would keep doing so
+   unchanged unless it is itself edited to call `reconcile()`'s divergence
+   list before falling back to `loop_state` — this is named explicitly as
+   a required step-2 write-surface change (`spawn.py`'s `drive()` body,
+   not just a new function beside it), not an incidental side effect of
+   adding the reconcile tick.
 
 This is additive: `session_end_verdict`/`fail_closed_downgrade` are the
 observed-state inputs, unchanged. No daemon, no new process — same
