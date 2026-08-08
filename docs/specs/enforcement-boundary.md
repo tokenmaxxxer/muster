@@ -62,6 +62,7 @@ Verdict values:
 | `claims.py` | repo-local | new (#377): opt-in `# CLAIM-CHECK:` marker checker over this repo's own source (role-JSON enum drift, `spec.md`-producer claim); registered in `gates.ALL`, not wired into `gates/ci.py`'s required path in this delivery — promotion to required-check status is a separate follow-up decision per the proposal's own Rationale |
 | `approval_request_shape.py` | contract | `missing_approval_clauses` is a testable extraction of the clause logic already enforced zero-install by `stop-gate.sh` (#411/#318); `has_generator_section` (#363) is presence-only and not wired into a blocking hook — `run.md` instructs its use, not a hook |
 | `open_work.py` | contract, CI-supplement | `build_open_work_query` (#379) builds the lookup query only; the actual open-issue/open-PR check runs manually per `run.md`'s instruction, not via a blocking hook in this delivery |
+| `record_lint.py` | contract | new (issue #517): `lint_record(path)` aggregates every `gates.py` record check plus the four checks lifted out of `record-claim-guard.sh`'s inline mirror against one record's full text; `record-claim-guard.sh` and `gates/ci.py` call into this module instead of duplicating the logic — zero-install (CLI + importable), ships with the plugin |
 
 ## `on-the-record/hooks/*.sh` (plugin-shipped)
 
@@ -82,6 +83,7 @@ Verdict values:
 | `retry-loop-bound.sh` | contract | new (#507): `PreToolUse`/`PostToolUse` on `Write|Edit|MultiEdit|Bash`, bounds identical-refusal retry loops at K/2K denials per `sha256(tool_name, target)` signature (allow-with-context in `[K, 2K)`, deny outright at `>= 2K`); zero-install, ships with the plugin |
 | `call-shape-guard.sh` | contract | new (#512): `PreToolUse`+`Write|Edit|MultiEdit` on `.py` writes, session-side mirror of `gates.py`'s `subprocess_call_shape_divergence` (repo-wide, `git ls-files`-scoped) and `sibling_mention_check` (diff-scoped to the write, checked against the local working-tree branch record) — issue #419 checks, unreachable since `gates/ci.py`'s runner was retired (#460); zero-install, ships with the plugin, root discovered by walking up from `cwd` |
 | `accumulation-claim-guard.sh` | contract | new (#512): `PreToolUse`+`Write|Edit|MultiEdit` on `.py` writes, session-side mirror of `accumulation.py`'s `check_accumulation_claim` (issue #424), strengthened to field-presence (non-empty `## Accumulation` body, not just heading-existence); zero-install, ships with the plugin, root discovered by walking up from `cwd`; if no proposal file exists yet on disk this hook does not block |
+| `record-scaffold.sh` | repo-local | new (issue #517): CLI-invoked (not a `PreToolUse` hook — no natural lifecycle event to hang it off, per a warrant-hunter finding on the phase-1 proposal), generates a `docs/issue-<n>/reports/<role>.md` skeleton with `PLACEHOLDER:` tokens; not wired into `hooks.json` |
 
 ## `.github/workflows/*.yml` (retired, issue #460)
 

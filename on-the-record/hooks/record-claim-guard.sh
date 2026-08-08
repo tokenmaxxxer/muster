@@ -22,6 +22,11 @@
 #
 # Fails closed (trap remaps non-0/2 exit to 2), matching this plugin's
 # house style. Kill switch: ORCHESTRATE_OFF=1.
+#
+# issue #517: the four checks below used to carry their own regex copies
+# here. They now call into gates/record_lint.py's functions — the same
+# ones `record_lint`'s CLI and gates/ci.py use — so there is exactly one
+# place each rule's logic lives.
 trap 'rc=$?; if [ "$rc" != 0 ] && [ "$rc" != 2 ]; then exit 2; fi' EXIT
 set -uo pipefail
 
@@ -29,8 +34,14 @@ case "${ORCHESTRATE_OFF:-}" in ""|0|false|no|off) ;; *) trap - EXIT; exit 0 ;; e
 payload="$(cat 2>/dev/null || true)"
 command -v python3 >/dev/null 2>&1 || exit 2
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+gates_dir="$(cd "$script_dir/../../gates" && pwd)"
+
 IFS='' read -r -d '' GUARD <<'PY' || true
 import json, os, posixpath, re, sys
+
+sys.path.insert(0, os.environ["RCG_GATES_DIR"])
+import record_lint
 
 def deny(msg):
     sys.stderr.write("record-claim-guard: %s\n" % msg)
@@ -76,48 +87,11 @@ if not content.strip():
 
 bad = []
 
-# #310/#331 mirror: unverifiable: escapes need a real reason.
-for m in re.finditer(r"(?im)^\s*[-*]?\s*unverifiable\s*:\s*(.*)$", content):
-    reason = m.group(1).strip()
-    if not reason:
-        bad.append("`unverifiable:` 줄에 이유가 없다 (issue #310) — "
-                    "`unverifiable: <이유>` 형태로 왜 기계 검사가 불가능한지 "
-                    "적어야 한다.")
-
-_CHECKED_CLAIM_LINE = re.compile(
-    r"^\s*[-*]\s*.+—\s*checked:\s*(\S+)\s*—\s*"
-    r"result:\s*(pass|fail|unverifiable)(?::\s*(.+))?\s*$")
-for ln in content.splitlines():
-    cm = _CHECKED_CLAIM_LINE.match(ln)
-    if not cm:
-        continue
-    result, reason = cm.group(2), cm.group(3)
-    if result == "unverifiable" and not (reason and reason.strip()):
-        bad.append("Acceptance verification 의 `unverifiable` 항목에 이유가 "
-                    f"없다 (issue #331): {ln.strip()!r}")
-
-# #333 mirror: bare "N of M"/"N items" counts need derived: or a fence.
-in_fence = False
-_COUNT_RATIO = re.compile(r"\d+\s*(?:of|/)\s*\d+")
-_COUNT_NOUN = re.compile(
-    r"\d+\s+(?:detection\s+)?(?:items?|works?|checks?|cases?|tests?)\b")
-_DERIVED_TAG = re.compile(r"`derived:\s*\S.*?`")
-for line in content.splitlines():
-    stripped = line.strip()
-    if stripped.startswith("```"):
-        in_fence = not in_fence
-        continue
-    if in_fence:
-        continue
-    for pat in (_COUNT_RATIO, _COUNT_NOUN):
-        for cm in pat.finditer(line):
-            tail = line[cm.end():]
-            if _DERIVED_TAG.match(tail.lstrip()):
-                continue
-            bad.append("레코드에 근거 없는 개수 주장 (issue #333): "
-                       f"{line.strip()!r} — 숫자가 코드펜스 재현이나 "
-                       "`derived: ...` 인용 없이 그냥 타이핑되어 있다.")
-            break
+# #310/#331/#333 mirrors: full-text checks, apply directly to the write's
+# content fragment — same functions gates/record_lint.py aggregates.
+bad += record_lint.unverifiable_reason_check(content)
+bad += record_lint.checked_claim_reason_check(content)
+bad += record_lint.bare_count_claim_check(content)
 
 # #330 mirror: a backtick-quoted relative path that resolves nowhere in
 # the working tree is an orphaned reference caught at write time.
@@ -131,22 +105,19 @@ while probe and probe != "/":
         break
     probe = posixpath.dirname(probe)
 if root is not None:
-    _PATH_REF = re.compile(
-        r"`((?:src|test|tests|docs|gates|on-the-record)/[^`\s]+)`")
-    for m in _PATH_REF.finditer(content):
-        ref = m.group(1)
-        if any(ch in ref for ch in ("*", "?", "<", ">")):
-            continue
-        if not os.path.exists(os.path.join(root, ref)):
-            bad.append(f"레코드가 존재하지 않는 경로를 참조한다 (issue #330): "
-                       f"`{ref}` — 리치(reach)가 끊긴 참조다.")
+    bad += record_lint.orphaned_path_reference_check(
+        record_lint.Path(root), content)
 
 if bad:
     deny("\n".join(bad))
 sys.exit(0)
 PY
 
-RCG_PAYLOAD="$payload" python3 -c "$GUARD"
+RCG_PAYLOAD="$payload" RCG_GATES_DIR="$gates_dir" python3 -c "$GUARD"
 rc=$?
-trap - EXIT
+# issue #517 before-landing hunt: do NOT disarm the fail-closed trap here.
+# `import record_lint` (new) can crash for reasons unrelated to a genuine
+# violation (e.g. RCG_GATES_DIR resolving to a bad path) — that crash must
+# still fail closed (exit 2), which only happens if the trap stays armed
+# through this `exit`.
 exit "$rc"
