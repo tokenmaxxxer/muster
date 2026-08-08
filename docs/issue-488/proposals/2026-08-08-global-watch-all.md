@@ -106,6 +106,17 @@ every iteration so new spawns are picked up live.
     `_watch_all` actually consumed for that key (regression guard against
     cross-key offset corruption).
 
+## Open finding (after-proposal hunt)
+`docs/reports/2026-08-08-hunt-global-watch-all.md`: `watch --all` reduces
+the opt-in call from per-spawn to per-conversation but does not make an
+unmonitored session structurally impossible as the issue's phrasing asks
+— nothing gates a spawn on a watcher being armed, and a dead watcher
+process is itself unsupervised. Flagging for the approver rather than
+silently building past it; closing this gap fully would need the
+rejected auto-arm option or a liveness check `_spawn_one` consults. Left
+as approver's call: accept `--all` as the mitigation this proposal scopes
+to, or send back for the auto-arm alternative.
+
 ## Out of scope
 - Auto-arm-per-spawn (rejected above) — not built in this pass.
 - Any change to `roster_watchdog`/`--auto-respawn` behavior.
