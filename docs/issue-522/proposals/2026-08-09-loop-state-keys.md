@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: landed
 files:
   - roles/issue-retrospective.json
   - roles/release-engineering.json

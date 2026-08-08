@@ -16,5 +16,7 @@
   "use_when": "변경이 머지되어 배포할 때",
   "produces": "rollout checklist, rollback plan, go/no-go verdict",
   "write_scope": [],
-  "record_fields": {}
+  "record_fields": {
+    "loop_state": ["idle", "readiness", "rollout", "steady", "incident"]
+  }
 }
