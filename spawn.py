@@ -424,7 +424,47 @@ def _fetch_hint(spec: dict) -> str:
     return "  비공개 레포면 git 자격증명이 필요하다. `gh auth status` 로 확인한다."
 
 
-def role_settings(role: str) -> dict:
+def self_hosted_hooks(cwd: str) -> dict | None:
+    """스폰 대상이 on-the-record 자기 자신이면 그 hooks.json 의 "hooks" 값을,
+    아니면 None 을 돌려준다(이슈 #508).
+
+    자기 자신 판정은 `<cwd>/on-the-record/hooks/hooks.json` 존재 여부다 — 이
+    저장소는 플러그인 매니페스트를 `on-the-record/` 서브디렉터리에 담고
+    있고, 자기 자신을 스폰 대상으로 삼을 때만 그 경로가 cwd 아래 나타난다.
+    체크인된 `.claude/settings.json` 을 쓰지 않는 이유는
+    `require_no_repo_config`(스폰이 임의 대상 레포에 대해 도는 별도 검사)와
+    충돌하기 때문 — 여기서 --settings 임시 파일에 병합해 넣으면 그 검사를
+    아예 건드리지 않는다.
+
+    `${CLAUDE_PLUGIN_ROOT}` 는 컨슈머 설치 경로에서는 Claude CLI 가
+    `--plugin-dir` 로 채우지만, 여기서는 그 경로로 로드하지 않으므로 직접
+    치환한다 — on-the-record 레포 안의 플러그인 루트로.
+    """
+    root = Path(cwd).resolve()
+    hooks_path = root / "on-the-record" / "hooks" / "hooks.json"
+    if not hooks_path.is_file():
+        return None
+    try:
+        raw = hooks_path.read_text()
+    except OSError as e:
+        print(f"self_hosted_hooks: {hooks_path} 를 못 읽어 훅 주입을 건너뛴다: {e}",
+              file=sys.stderr)
+        return None
+    plugin_root = str(hooks_path.parent.parent)
+    text = raw.replace("${CLAUDE_PLUGIN_ROOT}", plugin_root)
+    try:
+        parsed = json.loads(text)
+    except ValueError as e:
+        # 여기서 조용히 None 을 돌려주면 self-hosted 세션이 훅 없이 정상
+        # 종료처럼 보인다 — 깨진 hooks.json 이 "가드가 다 붙었다"로 오독되는
+        # 케이스다(실측: before-landing hunt, issue #508).
+        print(f"self_hosted_hooks: {hooks_path} 파싱 실패, 훅 주입을 건너뛴다: {e}",
+              file=sys.stderr)
+        return None
+    return parsed.get("hooks")
+
+
+def role_settings(role: str, cwd: str | None = None) -> dict:
     """역할의 샌드박스 경계 + 전역 플러그인 차단.
 
     **룰북을 켜는 일은 여기서 하지 않는다.** 그건 `--plugin-dir` 이 한다
@@ -572,6 +612,13 @@ def role_settings(role: str) -> dict:
     # 그렇게 읽어냈다. 그러면 경계가 아니라 권고다.
     sb["allowUnsandboxedCommands"] = False
     s["sandbox"] = sb
+
+    # on-the-record 가 자기 자신을 대상으로 스폰할 때만, 자기 hooks.json 을
+    # 병합해 넣는다 — 컨슈머 설치 경로 밖에서는 늘 inert 였다(이슈 #508).
+    if cwd is not None:
+        injected = self_hosted_hooks(cwd)
+        if injected:
+            s["hooks"] = injected
     return s
 
 
@@ -3148,7 +3195,7 @@ def main() -> int:
         cwd_path = Path(a.cwd)
         if not cwd_path.is_dir():
             sys.exit(f"-C 가 디렉터리가 아니다: {a.cwd}")
-        out = role_settings(a.role)
+        out = role_settings(a.role, a.cwd)
         # MUSTER_ROLE_MODEL / role_model.txt (이슈#93): spawn_cmd 는 이
         # dry-run 경로를 안 타므로(세션을 안 띄우니까) --model 부착 여부가
         # 여기 안 보이면 이슈#31 acceptance 커맨드(`--dry-run`)로는 이 기능을
@@ -3637,7 +3684,7 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
     # run 안에서 두 기록이 어긋난다(룰북 쪽은 plugin_dirs() 가 이미 이
     # 순서로 pull 을 앞에 둔다 — core 도 같은 순서로 맞춘다).
     core_plugins = core_plugin_dirs()
-    s = role_settings(role)
+    s = role_settings(role, cwd)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
         json.dump(s, f)
         settings = f.name
