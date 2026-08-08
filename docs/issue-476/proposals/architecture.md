@@ -51,7 +51,19 @@ pattern (a closed vocabulary a field must be drawn from) already exists twice (`
    implementation role inherits.
 3. **Execution and ground truth.** Runs the cited command in the pinned worktree with a timeout;
    ground truth is the subprocess's own exit code (and, where the record cites specific expected
-   output, a diff against that), never a re-read of the record's prose.
+   output, a diff against that), never a re-read of the record's prose. The cited command is
+   accepted only if it names an identifiable target already present in the diff or repo (a test
+   file path, function name, or module the claim's surrounding text also names) — a command with
+   no such target (a bare literal like `true`, `echo ok`, or any command not traceable to a
+   concrete artifact) is a **hard fail at `claim_scan.py` time**, before execution, on the same
+   footing as a claim with no adjacent command at all. Without this, exit-code-only ground truth
+   is gameable by citing a vacuous always-succeeding command next to the claim — named here as a
+   failure signature the after-proposal hunt surfaced (warrant-hunt, 2026-08-08): a record could
+   satisfy both the trigger's "has an adjacent runnable command" check and the gate's "exit 0"
+   check without exercising anything real. Command-to-target traceability closes that gap; it does
+   not fully eliminate gaming a target-naming heuristic, and is itself a living risk the
+   implementation role inherits (e.g. citing a real test path but running an unrelated command
+   against it) — the vocabulary/heuristic will need iteration, per discovery's own ITWWS note.
 4. **Verdict storage — gate-owned artifact, session-unwritable.** The gate writes
    `.reexecution/<issue>-<role>.json` (exit code, command run, timestamp, worktree SHA) itself,
    as part of the gate run, not as a file the role session edits — the verdict is never staged by
