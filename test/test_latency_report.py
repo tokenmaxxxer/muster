@@ -123,6 +123,55 @@ def test_since_ts_selects_only_gaps_starting_at_or_after_boundary():
     assert after[0]["idle_s"] == 2950  # 4950 - 2000
 
 
+IMPLEMENTATION_PATH = ROOT / "docs" / "issue-505" / "reports" / "implementation.md"
+
+CAUSE_CLASSES = {"a", "b", "c", "d"}
+LOG_CITATION_RE = re.compile(r"[\w.\-/]+\.log:L\d+(-L\d+)?")
+
+
+def parse_slow_session_table(text: str) -> list[dict]:
+    """Issue #505 — parse the slow-session attribution table in
+    docs/issue-505/reports/implementation.md into one dict per row.
+
+    Mirrors compute_idle_gaps's style (#501): a small, tested parser over a
+    markdown table already written for a human reader, rather than a JSON
+    sidecar duplicating the same content (see the proposal's Rationale).
+    """
+    table_start = text.index("| issue | repo | duration_s")
+    table_end = text.index("\n\n", table_start)
+    table = text[table_start:table_end]
+    rows = []
+    for line in table.splitlines()[2:]:  # skip header + separator
+        if not line.strip().startswith("|"):
+            continue
+        cols = [c.strip() for c in line.strip().strip("|").split("|")]
+        rows.append(
+            {
+                "issue": cols[0],
+                "repo": cols[1],
+                "duration_s": float(cols[2]),
+                "cause_class": cols[3],
+                "log_citation": cols[4],
+                "finding": cols[5],
+            }
+        )
+    return rows
+
+
+def test_slow_session_table_has_at_least_8_cited_rows():
+    """Issue #505 acceptance check: >=8 analyzed sessions, every row citing
+    a log file and the line range the attribution was read from."""
+    text = IMPLEMENTATION_PATH.read_text(encoding="utf-8")
+    rows = parse_slow_session_table(text)
+    assert len(rows) >= 8
+    for row in rows:
+        assert row["cause_class"] in CAUSE_CLASSES, row
+        assert LOG_CITATION_RE.search(row["log_citation"]), (
+            f"row for issue {row['issue']} has no path:L\\d+(-L\\d+)? citation: "
+            f"{row['log_citation']!r}"
+        )
+
+
 def test_delivered_breakdown_cites_ledger_and_log_sources():
     """Step-1 acceptance check: every measured row in the delivered
     breakdown cites a ledger/log source, not an unsourced assertion."""
