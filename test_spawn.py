@@ -1007,6 +1007,82 @@ class FailClosedDowngrade(unittest.TestCase):
                                         already_delivered=True),
             "failed-no-commit")
 
+    def test_silent_failure_upgraded_when_already_delivered(self):
+        # issue-484: re-delivery-of-already-landed session — classify()
+        # sees an empty docs-board delta (nothing to do) and calls it
+        # silent-failure, but the branch already carries an open/merged
+        # PR from an earlier phase. Observable state says delivered.
+        self.assertEqual(
+            spawn.fail_closed_downgrade("silent-failure", 3, [], False, [],
+                                        already_delivered=True),
+            "progressed")
+
+    def test_silent_failure_upgraded_when_new_commit_pushed(self):
+        # issue-484: session's real change landed outside docs/issue-*/**
+        # (or netted an empty docs delta) but a new commit was made and
+        # pushed successfully — not a silent failure.
+        self.assertEqual(
+            spawn.fail_closed_downgrade("silent-failure", 3, [], True, [],
+                                        push_succeeded=True),
+            "progressed")
+
+    def test_silent_failure_not_upgraded_without_push_success(self):
+        # a new commit that failed to push (stranded local commit) must
+        # not be read as delivered.
+        self.assertEqual(
+            spawn.fail_closed_downgrade("silent-failure", 3, [], True, [],
+                                        push_succeeded=False),
+            "silent-failure")
+
+    def test_silent_failure_not_upgraded_on_closed_unmerged_pr(self):
+        # regression guard for the after-proposal hunt gap: a branch whose
+        # only PR was closed *without* merging must not count as
+        # already_delivered (caller is responsible for passing False here
+        # via `_pr_open_or_merged_for_branch`, not `_pr_for_branch`).
+        self.assertEqual(
+            spawn.fail_closed_downgrade("silent-failure", 3, [], False, [],
+                                        already_delivered=False),
+            "silent-failure")
+
+    def test_silent_failure_with_uncommitted_changes_not_upgraded(self):
+        # refused-commit-no-push shape (already handled upstream by the
+        # outcome == "uncommitted-work" branch before this function is
+        # ever reached with uncommitted non-empty, but the function itself
+        # must still fail closed if it ever is).
+        self.assertEqual(
+            spawn.fail_closed_downgrade("silent-failure", 3, [], False,
+                                        ["M some/file.py"],
+                                        already_delivered=True),
+            "silent-failure")
+
+
+class PrOpenOrMergedForBranch(unittest.TestCase):
+    def test_returns_none_when_only_pr_is_closed_unmerged(self):
+        from unittest import mock
+        fake = mock.Mock(returncode=0,
+                         stdout=json.dumps([{"number": 7, "state": "CLOSED"}]))
+        with mock.patch.object(spawn.subprocess, "run", return_value=fake):
+            self.assertIsNone(
+                spawn._pr_open_or_merged_for_branch(Path("."), "issue-1/implementation"))
+
+    def test_returns_number_when_open(self):
+        from unittest import mock
+        fake = mock.Mock(returncode=0,
+                         stdout=json.dumps([{"number": 7, "state": "OPEN"}]))
+        with mock.patch.object(spawn.subprocess, "run", return_value=fake):
+            self.assertEqual(
+                spawn._pr_open_or_merged_for_branch(Path("."), "issue-1/implementation"),
+                7)
+
+    def test_returns_number_when_merged(self):
+        from unittest import mock
+        fake = mock.Mock(returncode=0,
+                         stdout=json.dumps([{"number": 7, "state": "MERGED"}]))
+        with mock.patch.object(spawn.subprocess, "run", return_value=fake):
+            self.assertEqual(
+                spawn._pr_open_or_merged_for_branch(Path("."), "issue-1/implementation"),
+                7)
+
 
 class PriorEventDetails(unittest.TestCase):
     """issue #129 root cause 1: `pr-opened` must not re-fire for a PR URL
@@ -5144,6 +5220,55 @@ class WatchFollow(unittest.TestCase):
             rc = spawn._watch(180, "implementation", 5.0, follow=True)
         self.assertEqual(rc, 0)
         self.assertEqual(len(calls), 3, calls)
+
+
+class WatchRegistrationRace(unittest.TestCase):
+    """이슈 #484: 스폰이 막 리턴한 직후 `watch` 가 명부 엔트리를 아직 못
+    찾는 레이스 — #451(끝내 안 나타남)과 달리, 엔트리가 stall_timeout_min
+    안에 나타나면 watch 는 기록-없음으로 죽지 않고 붙어야 한다."""
+
+    def setUp(self):
+        self.td = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.td, ignore_errors=True)
+        self.work = Path(self.td) / "wk"
+        self.work.mkdir()
+        self.events = spawn._events_path(self.work)
+        self.offset = spawn._offset_path(self.work)
+        self.log = Path(str(self.work) + ".session.log")
+        self.log.write_text("")
+        old_idx = spawn.WORKSPACE_INDEX
+        spawn.WORKSPACE_INDEX = Path(self.td) / "workspaces.json"
+        self.addCleanup(setattr, spawn, "WORKSPACE_INDEX", old_idx)
+
+    def test_entry_appearing_within_grace_window_attaches_and_streams(self):
+        from unittest import mock
+        spawn._append_event(self.events, "session-end", "progressed")
+        entry = {"work": str(self.work), "log": str(self.log)}
+        calls = {"n": 0}
+
+        def fake_load():
+            calls["n"] += 1
+            # 처음 두 번은 아직 명부 쓰기가 안 반영된 것처럼 빈 명부 —
+            # 세 번째 폴에서 등록이 나타난다.
+            if calls["n"] >= 3:
+                return {"issue-484/implementation": entry}
+            return {}
+
+        def fake_await_bounded(events_path, offset_path, stall_timeout_min, log_path):
+            print(f"[watch] session-end: progressed")
+            return 0
+
+        with mock.patch.object(spawn, "_workspace_index_load", fake_load), \
+             mock.patch.object(spawn, "_await_bounded", fake_await_bounded):
+            rc = spawn._watch(484, "implementation", 5.0, follow=False)
+        self.assertEqual(rc, 0)
+        self.assertGreaterEqual(calls["n"], 3, calls)
+
+    def test_entry_never_appearing_times_out_and_reports_absence(self):
+        from unittest import mock
+        with mock.patch.object(spawn, "_workspace_index_load", lambda: {}):
+            rc = spawn._watch(484, "implementation", 0.001, follow=False)
+        self.assertEqual(rc, 1)
 
 
 class AwaitBoundedTiming(unittest.TestCase):
