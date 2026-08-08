@@ -82,6 +82,53 @@ def t_duplicate_test_basenames_passes_with_no_collision():
         shutil.rmtree(d)
 
 
+def t_duplicate_test_basenames_skips_gitignored_runs_dir():
+    # issue #529 — runs/ 아래의 세션 체크아웃은 gitignore 되어 있어, 실물
+    # 충돌을 만들더라도 gate 가 잡으면 안 된다. 같은 모양이 runs/ 밖에
+    # 있으면 여전히 잡혀야 한다(gate 가 무력화되지 않았음을 함께 확인).
+    d = _tree({
+        ".gitignore": "runs/\n",
+        "test_a.py": "def t_a(): pass\n",
+        "runs/rulebooks/some-checkout/test_a.py": "def t_dup(): pass\n",
+        "gates/test_b.py": "def t_b(): pass\n",
+        "runs/rulebooks/other-checkout/test_b.py": "def t_dup2(): pass\n",
+    })
+    try:
+        bad = gates.duplicate_test_basenames(d)
+        assert bad == [], bad
+    finally:
+        shutil.rmtree(d)
+
+
+def t_duplicate_test_basenames_still_catches_collision_outside_runs():
+    d = _tree({
+        ".gitignore": "runs/\n",
+        "test_c.py": "def t_c(): pass\n",
+        "gates/test_c.py": "def t_c2(): pass\n",
+        "runs/rulebooks/checkout/test_c.py": "def t_c3(): pass\n",
+    })
+    try:
+        bad = gates.duplicate_test_basenames(d)
+        assert bad and "test_c.py" in bad[0], bad
+        assert "runs/" not in bad[0], bad
+    finally:
+        shutil.rmtree(d)
+
+
+def t_duplicate_test_basenames_no_runs_dir_behaves_identically():
+    # empty-state: .gitignore 는 있지만 runs/ 자체가 없는 트리는 오늘과
+    # 동일하게 동작해야 한다.
+    d = _tree({
+        ".gitignore": "runs/\n",
+        "test_a.py": "def t_a(): pass\n",
+        "gates/test_b.py": "def t_b(): pass\n",
+    })
+    try:
+        assert gates.duplicate_test_basenames(d) == []
+    finally:
+        shutil.rmtree(d)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("t_")]
     for t in tests:

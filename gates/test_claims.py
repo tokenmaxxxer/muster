@@ -80,6 +80,37 @@ def t_producer_exists_fail_when_missing():
         assert any("nonexistent.md" in b for b in bad), bad
 
 
+def t_producer_exists_ignores_gitignored_runs_dir():
+    # issue #529 — a copy under runs/ (gitignored session checkout) must
+    # not satisfy producer-exists; the same filename outside runs/ still
+    # does.
+    with tempfile.TemporaryDirectory() as t:
+        tmp = _init_repo(Path(t))
+        (tmp / ".gitignore").write_text("runs/\n", encoding="utf-8")
+        (tmp / "marker.py").write_text(
+            "# CLAIM-CHECK: producer-exists spec.md\n", encoding="utf-8")
+        runs_dir = tmp / "runs" / "rulebooks" / "checkout"
+        runs_dir.mkdir(parents=True)
+        (runs_dir / "spec.md").write_text("x", encoding="utf-8")
+        _commit_all(tmp)
+        bad = claims.check_claims(tmp)
+        assert any("spec.md" in b for b in bad), bad
+
+        (tmp / "spec.md").write_text("x", encoding="utf-8")
+        assert claims.check_claims(tmp) == []
+
+
+def t_producer_exists_no_runs_dir_behaves_identically():
+    with tempfile.TemporaryDirectory() as t:
+        tmp = _init_repo(Path(t))
+        (tmp / ".gitignore").write_text("runs/\n", encoding="utf-8")
+        (tmp / "marker.py").write_text(
+            "# CLAIM-CHECK: producer-exists nonexistent.md\n", encoding="utf-8")
+        _commit_all(tmp)
+        bad = claims.check_claims(tmp)
+        assert any("nonexistent.md" in b for b in bad), bad
+
+
 def t_malformed_kind_fails_closed():
     with tempfile.TemporaryDirectory() as t:
         tmp = _init_repo(Path(t))

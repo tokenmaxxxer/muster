@@ -40,6 +40,19 @@ Chosen instead: directory-name exclusion pruned during the walk itself, with the
 - Any change to CI wiring, `.gitignore` itself, or how `runs/` is created/populated.
 - Nested/wildcard `.gitignore` patterns beyond simple top-level directory entries (e.g. `**/*.log`, negated patterns) — only top-level directory names are parsed out for exclusion; full gitignore-pattern semantics is what alternative A (`git ls-files`) would cover, and is out of scope per the Rationale.
 
+## Accumulation
+
+`gates/gates.py` already carries several inline `subprocess.run`/`gh` call
+sites (e.g. `subprocess_call_shape_divergence_gate`, `changed_files`,
+`ci_reachable_gates`'s file reads) predating this change; this proposal adds
+no new subprocess/gh call site, only two pure-Python helpers
+(`_excluded_tree_dirs`, `_prune_excluded`) reused by the three fixed gate
+functions. If a future issue needs a fourth or fifth walker excluded from
+gitignored paths, the fix is to call the existing `_excluded_tree_dirs`/
+`_prune_excluded` pair at the new call site — not to hand-roll another
+`.git`-only prune line. No new repeated one-line-edit files (roles/*.json
+shape) are touched by this change.
+
 ## How you'll know it worked
 
 - `python3 -m pytest gates/ -q` run against a fixture-populated `runs/rulebooks/` directory exits 0.

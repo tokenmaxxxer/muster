@@ -939,6 +939,28 @@ def reach_check(work: Path, record_text: str, base: str = BASE) -> list[str]:
 
 _TEST_BASENAME = re.compile(r"^(test_.+|.+_test)\.py$")
 
+_GITIGNORE_TOP_LEVEL_DIR = re.compile(r"^/?([\w.\-]+)/$", re.MULTILINE)
+
+
+def _excluded_tree_dirs(root: Path) -> set[str]:
+    """트리 훑기에서 건너뛸 디렉터리 이름 집합 — `root/.gitignore` 의
+    최상위 디렉터리 항목(`runs/`, `.reexecution/` 같은, 슬래시로 끝나는
+    단순 이름)을 읽어 도출한다 (issue #529). `.gitignore` 가 없으면
+    `.git` 하나만(기존 non-git 테스트 픽스처와 동일한 동작 유지)."""
+    excluded = {".git"}
+    gi = root / ".gitignore"
+    if gi.is_file():
+        try:
+            text = gi.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        excluded.update(_GITIGNORE_TOP_LEVEL_DIR.findall(text))
+    return excluded
+
+
+def _prune_excluded(dirnames: list[str], excluded: set[str]) -> None:
+    dirnames[:] = [d for d in dirnames if d not in excluded]
+
 
 def duplicate_test_basenames(root: Path) -> list[str]:
     """저장소 전체를 훑어, `__init__.py` 없는(= pytest가 패키지 경계 없이
@@ -951,8 +973,9 @@ def duplicate_test_basenames(root: Path) -> list[str]:
     각 PR 단독 검사에서는 안 보이고 merge 후에야 `pytest -q` 수집 자체가
     깨지는 걸로 드러났다."""
     by_basename: dict[str, list[str]] = {}
+    excluded = _excluded_tree_dirs(root)
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d != ".git"]
+        _prune_excluded(dirnames, excluded)
         if "__init__.py" in filenames:
             continue
         rel_dir = os.path.relpath(dirpath, root)
@@ -1166,8 +1189,13 @@ def schema_field_orphans(d: Path, cfg: dict) -> list[str]:
     if not specs_dir.is_dir():
         return []
 
-    code_files = [p for p in root.rglob("*.py")] + [p for p in root.rglob("*.sh")]
-    code_files = [p for p in code_files if ".git" not in p.parts]
+    excluded = _excluded_tree_dirs(root)
+    code_files = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        _prune_excluded(dirnames, excluded)
+        for fn in filenames:
+            if fn.endswith(".py") or fn.endswith(".sh"):
+                code_files.append(Path(dirpath) / fn)
     code_texts = {}
     for p in code_files:
         try:

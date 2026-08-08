@@ -26,6 +26,7 @@ itself a failure — fail closed, never silently skipped.
 from __future__ import annotations
 import glob as globmod
 import json
+import os
 import re
 import subprocess
 import sys
@@ -116,7 +117,12 @@ def _check_producer_exists(repo: Path, args: str) -> str | None:
     filename = args.strip()
     if not filename or "/" in filename or " " in filename:
         return f"파싱 불가: 'producer-exists {args}' 는 파일명 하나가 아니다"
-    matches = [p for p in repo.rglob(filename) if ".git" not in p.parts]
+    excluded = gates._excluded_tree_dirs(repo)
+    matches = []
+    for dirpath, dirnames, filenames in os.walk(repo):
+        gates._prune_excluded(dirnames, excluded)
+        if filename in filenames:
+            matches.append(Path(dirpath) / filename)
     if not matches:
         return f"producer-exists 위반: '{filename}' 이름의 파일이 트리 어디에도 없다"
     return None

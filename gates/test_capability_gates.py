@@ -151,6 +151,60 @@ def t_actual_tree_schema_field_orphans_catches_alive():
     assert any("alive" in b for b in bad), bad
 
 
+def t_schema_field_orphans_ignores_reader_under_gitignored_runs_dir():
+    # issue #529 — a reader planted under a gitignored runs/ checkout must
+    # not count as "the field is read somewhere"; the same reader outside
+    # runs/ still clears the field.
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / ".gitignore").write_text("runs/\n", encoding="utf-8")
+        (d / "docs" / "specs").mkdir(parents=True)
+        (d / "docs" / "specs" / "example-schema.md").write_text(
+            "## 1. Top-level\n\n"
+            "| `decision_queue` | array | see below |\n",
+            encoding="utf-8",
+        )
+        (d / "producer.py").write_text(
+            "decision_queue = []\n",
+            encoding="utf-8",
+        )
+        (d / "runs" / "rulebooks" / "checkout").mkdir(parents=True)
+        (d / "runs" / "rulebooks" / "checkout" / "consumer.py").write_text(
+            "payload = {}\n"
+            "print(len(payload['decision_queue']))\n",
+            encoding="utf-8",
+        )
+        bad = gates.schema_field_orphans(d, {})
+        assert any("decision_queue" in b for b in bad), bad
+
+        (d / "consumer.py").write_text(
+            "payload = {}\n"
+            "print(len(payload['decision_queue']))\n",
+            encoding="utf-8",
+        )
+        bad = gates.schema_field_orphans(d, {})
+        assert bad == [], bad
+
+
+def t_schema_field_orphans_no_runs_dir_behaves_identically():
+    with tempfile.TemporaryDirectory() as tmp:
+        d = Path(tmp)
+        (d / ".gitignore").write_text("runs/\n", encoding="utf-8")
+        (d / "docs" / "specs").mkdir(parents=True)
+        (d / "docs" / "specs" / "example-schema.md").write_text(
+            "## 1. Top-level\n\n"
+            "| `decision_queue` | array | see below |\n",
+            encoding="utf-8",
+        )
+        (d / "producer.py").write_text(
+            "decision_queue = []\n"
+            "decision_queue.append(1)\n",
+            encoding="utf-8",
+        )
+        bad = gates.schema_field_orphans(d, {})
+        assert any("decision_queue" in b for b in bad), bad
+
+
 def _run(fns):
     ok = 0
     for name, fn in fns:
