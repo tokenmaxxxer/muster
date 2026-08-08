@@ -34,13 +34,15 @@ def t_artifact_reference_passes():
     assert acceptance_gate.check_issue_body(310, body) == []
 
 
-def t_gates_workflow_path_passes():
+def t_gates_workflow_path_no_longer_passes():
+    """issue-499: `.github/workflows/` was retired by #460 and is no
+    longer an accepted executable-artifact reference."""
     body = """## Acceptance
 - CI job at `.github/workflows/ci.yml` must be green.
 - empty state: not applicable — CI status has no empty-state case.
 - provenance: executed-live
 """
-    assert acceptance_gate.check_issue_body(310, body) == []
+    assert acceptance_gate.check_issue_body(310, body) != []
 
 
 def t_gate_colon_line_passes():

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: landed
 files:
   - gates/acceptance_gate.py
   - test/test_side_effect_round.py
