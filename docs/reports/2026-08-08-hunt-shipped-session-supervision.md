@@ -53,3 +53,10 @@ behavior is out-of-repo/human judgment and cannot be forced to consult
 ... instead of raw loop_state" as though that closes the loop when `drive()`
 does not read `loop_state` at all today and is not called by
 `roster_watchdog`.
+
+## before-landing — skipped
+
+docs-only, no before-landing dispatch. All files touched by this
+transition (proposal status flip to `landed`, ADR at
+`docs/issue-492/decisions/2026-08-08-reconciliation-step-for-supervision.md`,
+report at `docs/issue-492/reports/architecture.md`) are under `docs/`.

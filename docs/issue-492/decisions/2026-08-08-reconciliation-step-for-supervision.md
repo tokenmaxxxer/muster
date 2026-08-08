@@ -1,13 +1,7 @@
----
-status: landed
-files:
-  - spawn.py
-  - test/test_spawn.py
-  - gates/test_boundary.py
-  - docs/issue-492/reports/architecture.md
----
-
 # ADR: reconciliation step for shipped session supervision (issue-492 step 1)
+
+Phase 2, per role-handoff contract v3 s19. Approved 2026-08-08
+(`APPROVE issue-492/architecture`, single-account mode).
 
 ## Context
 
@@ -151,5 +145,4 @@ delivered piece.
 
 ## What did not work
 
-(none yet — appended during phase-2 build if anything is undone or an
-expectation fails to hold.)
+None — docs-only phase-2 record; no build attempted in this step.
