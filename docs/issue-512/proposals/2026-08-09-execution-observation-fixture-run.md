@@ -62,3 +62,9 @@ recorded in `docs/issue-512/reports/implementation.md` beyond citing it.
 with `loop_state` at a terminal value for this record kind, every
 verdict-bearing sentence carrying an adjacent citation, and the
 independence statement preceding all verdict language.
+
+## Hunt record
+
+docs-only, no before-landing dispatch — the only file this transition
+touches (`docs/issue-512/reports/execution-observation.md`) is under
+`docs/`.
