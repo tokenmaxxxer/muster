@@ -19,3 +19,33 @@ Checked and ruled out as omissions:
 - `gates/pr_reference.check_body` and `flows._plan_from_body` (the functions the proposal says it ports logic from) both exist with the signatures the proposal assumes.
 
 Did not find a build-required path the write set omits within the cap. No reproduction to report.
+
+## before-landing — stance 4: assume the write set cannot carry this work — find the path the build will need that the proposal does not list
+
+Verdict: FINDING — new hook scripts pr-preflight.sh and spec-index-preflight.sh are not executable, so hooks.json's direct command invocation of ${CLAUDE_PLUGIN_ROOT}/hooks/pr-preflight.sh will fail with Permission denied on every Bash tool call, unlike every existing sibling hook script which ships with the executable bit set.
+Kind: silent-failure
+Seed: on-the-record/hooks/hooks.json (staged), on-the-record/hooks/pr-preflight.sh, on-the-record/hooks/spec-index-preflight.sh (untracked, new)
+cap_seconds: 180
+tier: size:>5-files
+diff_stat_lines: ~400-500 across 6 files
+started_at: 2026-08-08T18:00:00+09:00
+ended_at: 2026-08-08T18:12:00+09:00
+
+### Reproduce
+cd on-the-record/hooks
+ls -la pr-preflight.sh spec-index-preflight.sh contract-guard.sh deliverable-guard.sh
+printf '{"tool_name":"Bash","tool_input":{"command":"echo hi"}}' | ./pr-preflight.sh
+echo "exit: $?"
+
+### Observed
+-rwxrwxr-x 1 jwjung jwjung 6955 Aug  8 17:43 contract-guard.sh
+-rwxrwxr-x 1 jwjung jwjung 3919 Aug  8 17:43 deliverable-guard.sh
+-rw-rw-r-- 1 jwjung jwjung 7915 Aug  8 17:49 pr-preflight.sh
+-rw-rw-r-- 1 jwjung jwjung 4243 Aug  8 17:50 spec-index-preflight.sh
+/bin/bash: ./pr-preflight.sh: Permission denied
+exit: 126
+
+Both new hooks lack the executable bit (mode 664) while every sibling .sh file registered the same way in hooks.json (contract-guard.sh, deliverable-guard.sh, self-update.sh, directive.sh, stop-gate.sh) is mode 775. hooks.json wires them as bare command strings, the same mechanism used for the executable siblings, with no bash/interpreter prefix to work around a missing exec bit.
+
+### Expected
+chmod +x on-the-record/hooks/pr-preflight.sh on-the-record/hooks/spec-index-preflight.sh should have been part of the same change that added the files and wired them into hooks.json, so the PreToolUse hooks actually execute instead of erroring out (or being silently skipped, depending on how the harness handles a non-zero/126 exit from a hook command) on every Bash call.

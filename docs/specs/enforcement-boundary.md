@@ -53,6 +53,8 @@ Verdict values:
 | mechanism | verdict | reason |
 |---|---|---|
 | `contract-guard.sh` | contract | new (#441): `PreToolUse`+`Bash`, intercepts `gh pr merge` before it executes; zero-install, ships with the plugin |
+| `pr-preflight.sh` | contract | new (#459): `PreToolUse`+`Bash`, intercepts `gh pr create`/`gh pr edit` before the PR body is set, denying a wrong Closes/plain-`#n` trailer for the phase; ports `pr_reference.check_body`/`flows._plan_from_body` inline (zero-install), ships with the plugin |
+| `spec-index-preflight.sh` | contract | new (#459): `PreToolUse`+`Bash`, intercepts `git commit` before it lands, denying a staged spec-index-tracked file whose content changed without a matching index regen in the same staged set; ports `spec_index.parse_index` inline (zero-install), ships with the plugin |
 | `deliverable-guard.sh` | contract | already shipped; blocks orchestrator-authored deliverables |
 | `directive.sh` | contract | already shipped; `UserPromptSubmit` role directive injection |
 | `stop-gate.sh` | contract | already shipped; `Stop` hook |
