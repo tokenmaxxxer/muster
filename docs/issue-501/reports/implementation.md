@@ -48,12 +48,24 @@ approved via `APPROVE issue-501/implementation` comment on issue #501
 both JiwonJung94).
 
 ## What did not work
-None — the planned cut (codify batching + reusable metric tooling) built
-and tested cleanly on the first pass.
+- Before-landing warrant hunt (stance 3) found the pre-registered
+  before/after metric had no reproducible way to pick the "after" window:
+  `compute_idle_gaps()`/`median_idle_s()` took no time boundary, and
+  nothing recorded when the batching practice was adopted. Fixed by
+  adding a `since_ts` parameter to both functions and a
+  `PRACTICE_ADOPTED_TS` constant (commit 6009fc8, 2026-08-08T12:00:00Z)
+  in `test/test_latency_report.py`, referenced from the handbook section
+  — a future re-run passes `since_ts=PRACTICE_ADOPTED_TS` to select only
+  post-adoption gaps. Re-cleared: `python3 -m pytest
+  test/test_latency_report.py -q` → 6 passed, 0 failed.
 
 ## closed_checks
-- `python3 -m pytest test/test_latency_report.py -q` → 5 passed, 0
+- `python3 -m pytest test/test_latency_report.py -q` → 6 passed, 0
   failed, code_sha HEAD.
+- resolved_finding: before-landing hunt
+  (`docs/reports/2026-08-08-hunt-session-latency-breakdown.md`, stance
+  3, before-landing/step-2 section) — no-boundary before/after metric,
+  fixed via `since_ts`/`PRACTICE_ADOPTED_TS`, re-cleared.
 
 ## Open findings
 None outstanding. The proposal's own limits stand as recorded there: the

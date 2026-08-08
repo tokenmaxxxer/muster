@@ -1057,10 +1057,11 @@ python3 gates/skip_gate.py
 그렇게 하듯(이슈 #247), 승인 경로도 워치독 틱을 기다리지 않는다.
 
 **사전 등록한 지표**: 위 (repo, issue, role) 유휴 갭의 중앙값/상위-8합.
-이 관행이 자리잡은 뒤의 ledger 구간에 `test/test_latency_report.py`의
-`compute_idle_gaps()`/`median_idle_s()`를 다시 돌려 같은 지표를 재계산 —
-이번 세션에서 만든 지금 수치(중앙값 85초, 상위 8합 대부분)가 before,
-이후 재실행분이 after다.
+`test/test_latency_report.py`의 `PRACTICE_ADOPTED_TS`(커밋 6009fc8,
+2026-08-08T12:00:00Z)를 `since_ts`로 넘겨 `compute_idle_gaps()`/
+`median_idle_s()`를 돌리면 재스폰-배칭 관행 채택 이후 시작된 유휴 갭만
+골라 재계산된다 — 이번 세션의 전체-구간 수치(중앙값 85초, 상위 8합
+대부분)가 before, `since_ts=PRACTICE_ADOPTED_TS`로 재실행한 값이 after다.
 
 ## 미해결
 
@@ -1093,10 +1094,13 @@ does this on the crash path without waiting for a watchdog tick (issue
 #247); the approval path holds to the same rule.
 
 **Pre-registered metric**: median and top-8 sum of the same (repo, issue,
-role) idle gaps. Re-run `compute_idle_gaps()`/`median_idle_s()` from
-`test/test_latency_report.py` against a ledger window after this practice
-has taken hold — this session's numbers (median 85s, tail dominated by
-the 4 named issues) are the *before*; the later re-run is the *after*.
+role) idle gaps. Passing `test/test_latency_report.py`'s
+`PRACTICE_ADOPTED_TS` (commit 6009fc8, 2026-08-08T12:00:00Z) as `since_ts`
+to `compute_idle_gaps()`/`median_idle_s()` selects only gaps whose next
+session started after adoption — this session's whole-window numbers
+(median 85s, tail dominated by the 4 named issues) are the *before*; a
+re-run with `since_ts=PRACTICE_ADOPTED_TS` against a later ledger pull is
+the *after*.
 
 ## Open
 
