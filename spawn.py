@@ -2961,26 +2961,30 @@ def issue_workspace(cwd: str, issue: int, role: str) -> str:
                     origin], capture_output=True, text=True)
     # https push 자격증명: 디스크에 토큰을 남기지 않고 env(GH_TOKEN)를 읽는
     # credential helper 를 작업 클론에만 심는다.
+    ex = work / ".git" / "info" / "exclude"
+    lines = [".muster-cache/"]
+    # 이슈 #289 H1: Claude Code 샌드박스는 홈 디렉터리의 이 dotfile 들을
+    # 워크스페이스 루트에 오버레이한다 — 밖에서 보면 없고, 세션 안에서만
+    # `git status`에 untracked 로 잡힌다. `git add -A` 한 번이면
+    # .mcp.json/.gitconfig 같은 자격증명성 파일이 공개 레포에 커밋된다.
+    # .muster-cache/ 와 같은 방식(워크스페이스 로컬 exclude)으로 막는다.
+    lines += [".bashrc", ".bash_profile", ".profile", ".zshrc",
+              ".zprofile", ".gitconfig", ".gitmodules", ".mcp.json",
+              ".claude/", ".idea", ".vscode", ".ripgreprc"]
+    skipped = lines
     try:
-        ex = work / ".git" / "info" / "exclude"
         ex.parent.mkdir(parents=True, exist_ok=True)
         existing = ex.read_text() if ex.exists() else ""
-        lines = [".muster-cache/"]
-        # 이슈 #289 H1: Claude Code 샌드박스는 홈 디렉터리의 이 dotfile 들을
-        # 워크스페이스 루트에 오버레이한다 — 밖에서 보면 없고, 세션 안에서만
-        # `git status`에 untracked 로 잡힌다. `git add -A` 한 번이면
-        # .mcp.json/.gitconfig 같은 자격증명성 파일이 공개 레포에 커밋된다.
-        # .muster-cache/ 와 같은 방식(워크스페이스 로컬 exclude)으로 막는다.
-        lines += [".bashrc", ".bash_profile", ".profile", ".zshrc",
-                  ".zprofile", ".gitconfig", ".gitmodules", ".mcp.json",
-                  ".claude/", ".idea", ".vscode", ".ripgreprc"]
         missing = [ln for ln in lines if ln.rstrip("/") not in existing]
+        skipped = missing
         if missing:
             with ex.open("a") as fh:
                 for ln in missing:
                     fh.write(ln + "\n")
-    except OSError:
-        pass
+    except OSError as e:
+        print(f"경고: 워크스페이스 {work} 의 자격증명 유출 방지 exclude 항목을 "
+              f"쓰지 못했다 ({e}) — 빠진 항목: {', '.join(skipped)}",
+              file=sys.stderr)
     subprocess.run(["git", "-C", str(work), "config", "credential.helper",
                     "!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f"],
                    capture_output=True, text=True)
