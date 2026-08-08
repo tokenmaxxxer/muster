@@ -1332,6 +1332,113 @@ class WorkspaceSyncFailClosed(unittest.TestCase):
             log = self._git(work, "log", "--oneline", br).stdout
             self.assertIn("local unpushed commit", log)
 
+    def test_checkout_starts_fresh_on_stale_branch_merged_into_base(self):
+        # issue-441 shape: a reused workspace's local issue-<n>/<role>
+        # branch is fully absorbed into base (merged + --delete-branch
+        # removed only the remote ref) — checkout must not resume it as-is,
+        # it must delete the stale local ref and branch fresh from base, so
+        # a subsequent commit + ensure_pushed() has something to push
+        # instead of hitting GitHub's "No commits between main and
+        # issue-<n>/<role>".
+        with tempfile.TemporaryDirectory() as td:
+            origin = Path(td) / "origin"
+            work = Path(td) / "work"
+            self._init_repo(origin)
+            (origin / "a.txt").write_text("base")
+            self._git(origin, "add", "a.txt")
+            self._git(origin, "commit", "-q", "-m", "base commit")
+            base_branch = subprocess.run(
+                ["git", "-C", str(origin), "symbolic-ref", "--short", "HEAD"],
+                capture_output=True, text=True).stdout.strip()
+
+            r = subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self._git(work, "config", "user.email", "t@t.t")
+            self._git(work, "config", "user.name", "t")
+
+            issue, role = 999903, "implementation"
+            br = f"issue-{issue}/{role}"
+            # phase-1 round happened, merged into base, remote branch
+            # deleted by --delete-branch — but the reused clone's local
+            # branch ref survives untouched (the actual issue-428 fault).
+            self._git(work, "checkout", "-q", "-b", br)
+            (work / "phase1.txt").write_text("phase 1 work")
+            self._git(work, "add", "phase1.txt")
+            self._git(work, "commit", "-q", "-m", "phase 1 commit")
+            # simulate: PR merged (br's commit lands on base at origin),
+            # remote branch deleted by --delete-branch — via fetch-as-push
+            # into origin's local base_branch ref (git refuses fetching
+            # into the currently-checked-out branch, so detach first).
+            self._git(origin, "checkout", "-q", "--detach")
+            self._git(origin, "fetch", "-q", str(work), f"{br}:{base_branch}")
+            self._git(origin, "checkout", "-q", base_branch)
+            self._git(work, "checkout", "-q", base_branch)
+            self._git(work, "fetch", "-q", "origin")
+            self._git(work, "checkout", "-q", br)
+            # sanity: the stale local branch is 0-ahead of base right now.
+            self.assertEqual(
+                self._git(work, "rev-list", "--count", f"origin/{base_branch}..{br}")
+                .stdout.strip(),
+                "0")
+
+            result = spawn.checkout_issue_branch(str(work), issue, role)
+            self.assertEqual(result, br)
+            head = self._git(work, "symbolic-ref", "--short", "HEAD").stdout.strip()
+            self.assertEqual(head, br)
+            self.assertEqual(
+                self._git(work, "rev-list", "--count", f"origin/{base_branch}..{br}")
+                .stdout.strip(),
+                "0")
+            self.assertEqual(
+                self._git(work, "rev-parse", br).stdout.strip(),
+                self._git(work, "rev-parse", f"origin/{base_branch}").stdout.strip())
+
+            (work / "phase2.txt").write_text("phase 2 work")
+            self._git(work, "add", "phase2.txt")
+            self._git(work, "commit", "-q", "-m", "phase 2 commit")
+            self.assertNotEqual(
+                self._git(work, "rev-list", "--count", f"origin/{base_branch}..{br}")
+                .stdout.strip(),
+                "0")
+
+    def test_checkout_starts_fresh_on_general_stale_zero_ahead_branch(self):
+        # General mechanism case (independent of which issue first exposed
+        # it, per #428 survey's own issue-999 fixture): a local branch that
+        # is exactly base (0 commits ahead) must be replaced with a fresh
+        # branch from base rather than checked out as-is.
+        with tempfile.TemporaryDirectory() as td:
+            origin = Path(td) / "origin"
+            work = Path(td) / "work"
+            self._init_repo(origin)
+            (origin / "a.txt").write_text("base")
+            self._git(origin, "add", "a.txt")
+            self._git(origin, "commit", "-q", "-m", "base commit")
+            base_branch = subprocess.run(
+                ["git", "-C", str(origin), "symbolic-ref", "--short", "HEAD"],
+                capture_output=True, text=True).stdout.strip()
+
+            r = subprocess.run(["git", "clone", "-q", str(origin), str(work)],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self._git(work, "config", "user.email", "t@t.t")
+            self._git(work, "config", "user.name", "t")
+
+            issue, role = 999, "implementation"
+            br = f"issue-{issue}/{role}"
+            # A local branch that never diverged from base at all —
+            # zero-ahead from the start, no merge history involved.
+            self._git(work, "checkout", "-q", "-b", br, base_branch)
+
+            result = spawn.checkout_issue_branch(str(work), issue, role)
+            self.assertEqual(result, br)
+            head = self._git(work, "symbolic-ref", "--short", "HEAD").stdout.strip()
+            self.assertEqual(head, br)
+            self.assertEqual(
+                self._git(work, "rev-list", "--count", f"origin/{base_branch}..{br}")
+                .stdout.strip(),
+                "0")
+
 
 class WorkspaceExcludesHomeDotfiles(unittest.TestCase):
     """이슈 #289 H1: 샌드박스가 홈 dotfile 을 워크스페이스 루트에 오버레이해
