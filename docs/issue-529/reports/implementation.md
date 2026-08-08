@@ -100,7 +100,23 @@ approved via issue comment `APPROVE issue-529/implementation`.
 
 ## Open findings
 
-None open. The post-proposal warrant hunt (recorded during phase 1, see
+None open. Before-landing warrant hunt (stance 0, bypassability) reported one
+finding: `_GITIGNORE_TOP_LEVEL_DIR` requires a trailing `/`, so a `.gitignore`
+directory entry without one (e.g. a hypothetical `build` instead of `build/`)
+would not be pruned — see
+`docs/reports/2026-08-09-hunt-exclude-gitignored-paths-from-tree-scanning-gates.md`.
+Evaluated and not actioned: this is the same limitation the proposal already
+states explicitly under "Out of scope" ("only top-level directory names are
+parsed out for exclusion"; "What will be done" specifies "lines ending in
+`/`"), and the live repo's `.gitignore` (`runs/`, `__pycache__/`,
+`.router.lock`, `.reexecution/`) has every directory entry ending in `/` —
+`.router.lock` is a file, not a directory, so it is correctly outside dir
+pruning either way. No live contamination gap results. If a future
+`.gitignore` entry omits the trailing slash, that is the follow-up alternative
+A (`git ls-files`-based rewrite) already named in the proposal's "Out of
+scope", not a defect in this delivery.
+
+The post-proposal warrant hunt (recorded during phase 1, see
 `docs/issue-529/proposals/2026-08-09-exclude-gitignored-paths-from-tree-scanning-gates.md`'s
 Rationale) already fed into this build: it caught that a fixed exclusion
 list would have omitted `.reexecution/`, which is why the chosen mechanism
