@@ -393,6 +393,57 @@ running/waiting/done 세 그룹 중 하나로 정상 분류된다.
   `.shallow-check` 파일에 결과를 남긴다 — 얕은 상태가 남아있어도 최소한
   보인다.
 
+## 능력/계약 부재 주장은 저장소 범위를 밝힌다 (#415)
+
+역할은 저장소 클론을 하나만 받는다. "능력 X 가 없다"는 주장은 그 클론
+기준일 뿐이다 — 형제 저장소에 이미 구현돼 있을 수 있다(사고 사례:
+`thaki-agent-security-console` 이 형제 저장소에 8개 편집 표면을 이미
+구현한 날, 그걸 못 본 세션이 "부재"로 결론냄). 부재 주장에는 저장소·
+시점을 명시하는 인접 문구를 붙인다 — "as of `<sha>`", "in `<repo>`",
+"checked `<repo path>`". `gates/repo_scope.py::check_repo_scope`가 스코프
+표시가 없는 부재 문장을 기계로 잡는다. 천장: 주장의 진실은 검사하지
+않고, 표시의 존재만 본다 — 고정 어구 목록 밖의 동의어("isn't
+implemented" 류)로 쓴 부재 주장은 이 검사에 안 걸린다(warrant hunt
+확인됨).
+
+## 행동 주장에는 provenance·empty state 를 붙인다 (#416)
+
+`## Acceptance` 절이 실행가능 산출물을 참조하면(`unverifiable:` 로 면제
+되지 않는 한) 두 줄을 추가로 요구한다:
+
+- `empty state: <경로 또는 설명>` (또는 `empty state: not applicable —
+  <이유>`) — 코퍼스가 초기/빈 상태 케이스를 담는지 명시. 사고 사례:
+  8-고루틴/10회 동시성 테스트를 통과한 CAS 수정이 코퍼스에 빈 상태가
+  없어 신규-설치 리그레션을 냄.
+- `provenance: executed-live` | `provenance: executed-unit` | `provenance:
+  read` — 행동 주장이 실제 실행(라이브/유닛)으로 확인됐는지, 읽기로만
+  판단했는지 명시. `read` 를 금지하지는 않지만 보이게 만든다.
+
+둘 다 존재-검사만 한다 — 값이 진실인지는 검사하지 않는다
+(`gates/acceptance_gate.py::check_issue_body`).
+
+## 같은 모양의 재발은 마킹하거나 기계가 잡는다 (#419)
+
+두 가지 좁은 검사: (1) `subprocess_call_shape_divergence` — 같은 명령
+(예: `gh api`)을 부르는 호출부들이 저장소 전체에서 flag 모양이 다르면
+(#388: 한 곳은 `-f`, 다른 곳은 `-X GET`) 잡는다. (2) `sibling_mention_check`
+— 함수/클래스 정의 바로 위에 `# sibling: <다른 함수 이름>` 주석을 붙이면,
+그 함수를 건드리는 변경의 레코드는 `## Siblings` 절에 그 이름을 언급해야
+한다. 마커가 없는 기존 쌍(예: 마킹 전의 `core_root`/`core_version`)은
+전향적 한계로 잡히지 않는다.
+
+## proposal 은 반복되는 변경의 축적 비용을 말한다 (#424)
+
+변경이 두 가지 알려진 축적-비용 모양 중 하나를 건드리면 — (1) 공유
+헬퍼 없이 같은 파일에 인라인 `subprocess`/`gh` 호출 지점이 계속
+늘어난다(`gates/ci.py` 가 실물 사례), (2) `roles/*.json` 처럼 구조가
+같은 파일들에 똑같은 한 줄 수정이 반복된다 — proposal 본문에 `##
+Accumulation` 줄을 넣어, 이런 변경이 N번 더 오면 그 파일/목록이 어떻게
+되는지 명시한다(`gates/accumulation.py::check_accumulation_claim`). 존재-
+검사만 한다; 서술의 정확성은 검사하지 않는다. 이 두 모양 밖의 반복(단일
+발생만 있는 것들)은 이 게이트가 다루지 않는다 — 일반 축적 탐지기는
+#419 가 이미 확립한 이유로 이 저장소에서 오탐 홍수를 낸다.
+
 ## 하지 않는 것
 
 - 보드 기록을 직접 쓰지 않는다 — 그건 역할의 것이다.

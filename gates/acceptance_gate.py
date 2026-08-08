@@ -25,6 +25,13 @@ _ARTIFACT_REF = re.compile(
 )
 _UNVERIFIABLE = re.compile(r"^\s*[-*]?\s*unverifiable\s*:\s*\S",
                             re.IGNORECASE | re.MULTILINE)
+# issue-416: 행동 주장(실행가능 산출물 참조)에 붙는 두 필드. 둘 다 존재-검사만
+# 한다 — 값의 진실은 검사하지 않는다(모듈 docstring/decision doc 에 명시).
+_EMPTY_STATE = re.compile(
+    r"^\s*[-*]?\s*empty state\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
+_PROVENANCE = re.compile(
+    r"^\s*[-*]?\s*provenance\s*:\s*(executed-live|executed-unit|read)\b",
+    re.IGNORECASE | re.MULTILINE)
 
 
 def _acceptance_section(body: str) -> str | None:
@@ -51,12 +58,32 @@ def check_issue_body(issue: int, body: str) -> list[str]:
         return [f"이슈 #{issue} 본문에 '## Acceptance' 절이 없다 — "
                 f"수용기준 없이는 실행가능성을 검사할 수 없고, 검사 불가는 "
                 f"통과가 아니다."]
-    if _ARTIFACT_REF.search(section) or _UNVERIFIABLE.search(section):
+    if _UNVERIFIABLE.search(section):
         return []
-    return [f"이슈 #{issue}의 'Acceptance' 절이 프로즈뿐이다 — 실행가능한 "
-            f"산출물(백틱으로 감싼 test/, gates/, .github/workflows/ 경로, "
-            f"또는 'gate:'/'check:' 줄)을 가리키거나, 검증 불가능한 이유를 "
-            f"'unverifiable: <이유>' 로 명시해야 한다."]
+    if not _ARTIFACT_REF.search(section):
+        return [f"이슈 #{issue}의 'Acceptance' 절이 프로즈뿐이다 — 실행가능한 "
+                f"산출물(백틱으로 감싼 test/, gates/, .github/workflows/ 경로, "
+                f"또는 'gate:'/'check:' 줄)을 가리키거나, 검증 불가능한 이유를 "
+                f"'unverifiable: <이유>' 로 명시해야 한다."]
+    # issue-416: 실행가능 산출물 참조가 있으면(=행동 주장) empty state/provenance
+    # 존재를 추가로 요구한다. unverifiable: 은 위에서 이미 둘 다 면제했다.
+    bad = []
+    if not _EMPTY_STATE.search(section):
+        bad.append(
+            f"이슈 #{issue}의 'Acceptance' 절이 실행가능 산출물을 참조하지만 "
+            f"'empty state: <경로 또는 설명>' 줄이 없다 — 초기/빈 상태가 "
+            f"코퍼스에 있는지 명시해야 한다(또는 "
+            f"'empty state: not applicable — <이유>')."
+        )
+    if not _PROVENANCE.search(section):
+        bad.append(
+            f"이슈 #{issue}의 'Acceptance' 절이 실행가능 산출물을 참조하지만 "
+            f"'provenance: executed-live|executed-unit|read' 줄이 없다 — "
+            f"행동 주장이 실제 실행으로 확인됐는지, 읽기로만 판단했는지 "
+            f"명시해야 한다(읽기(`read`)로 판단했다면 그 사실도 명시적이어야 "
+            f"한다 — 이 게이트는 `read` 를 금지하지 않고 보이게만 만든다)."
+        )
+    return bad
 
 
 def _issue_view_body(repo: Path, issue: int) -> str | None:

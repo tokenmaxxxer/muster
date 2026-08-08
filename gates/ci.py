@@ -468,6 +468,20 @@ def check(repo: Path, pr: int | None = None, issue: int | None = None,
     if pr is not None:
         bad += _checked_ci_claims_bad(repo, pr)
 
+    # issue #419: 재발 검사 두 가지. subprocess_call_shape_divergence 는
+    # record_text 가 필요 없어 항상 돈다. sibling_mention_check 는 바뀐
+    # 레코드 텍스트가 필요해, PR 컨텍스트가 있을 때만(role_scope 와 같은
+    # 조건) — 로컬 단독 호출에서는 어떤 레코드를 볼지 결정할 근거가 없다.
+    bad += gates.subprocess_call_shape_divergence(repo)
+    if pr is not None:
+        branch = _pr_head_ref(repo, pr)
+        detected = _issue_and_role_from_branch(branch) if branch else None
+        if detected is not None:
+            det_issue, det_role = detected
+            record_text, _err = _fetch_ref_file(
+                repo, pr, branch, f"docs/issue-{det_issue}/reports/{det_role}.md")
+            bad += gates.sibling_mention_check(repo, record_text or "")
+
     # ponytail: gates.deps() 와 같은 판정을 반복한다. gates.deps 가 라우터의
     # 디렉터리 배치(d/"work")를 전제해서 그대로 못 부른다. 라우터 은퇴 시
     # gates.deps 를 repo 경로 인자로 바꾸고 이 블록을 그쪽으로 합친다.
