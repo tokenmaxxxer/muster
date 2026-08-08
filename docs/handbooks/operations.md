@@ -742,6 +742,13 @@ The comparison base is the default branch `origin/HEAD` points at. `GATE_BASE` o
 
 ## 머지 게이트 (CI)
 
+> **은퇴함(issue #460, 2026-08-08).** `.github/workflows/plan-aware-closes-gate.yml`
+> 은 삭제됐다. `--closes-only` 부분은 `on-the-record/hooks/contract-guard.sh` +
+> `spawn.py`의 `acceptance_gate` 프리플라이트로 이미 zero-install 대체됐고, 전체
+> 번들 부분은 로컬 `python3 gates/ci.py . --pr <n> --autodetect`로만 돈다. 아래는
+> 삭제 전 CI 형태를 설명하는 역사적 기록이다 — 마이그레이션 표는
+> `docs/specs/enforcement-boundary.md` 참조.
+
 `.github/workflows/plan-aware-closes-gate.yml`(issue #245)이 PR 이벤트마다
 `gates/ci.py --pr <n> --autodetect --closes-only`를 돌려 계획-인지 Closes
 게이트(`gates/pr_reference.py`, issue #228)를 강제한다 — 위 "게이트"와 달리
@@ -804,6 +811,11 @@ warrant hunt가 실측해 이 스텝이 추가됐다. 이 체크는 아직 main�
 
 ## 이슈-번들링 게이트
 
+> **은퇴함(issue #460, 2026-08-08).** `.github/workflows/issue-bundling-gate.yml`
+> 은 삭제됐다. 대체 불가 — 이슈 생성은 GitHub 웹훅 이벤트라 세션 훅이 볼 수 없다.
+> 이제는 로컬 `python3 gates/issue_bundling.py <issue#>`로만 돈다. 아래는 삭제
+> 전 CI 형태를 설명하는 역사적 기록이다.
+
 `.github/workflows/issue-bundling-gate.yml`(issue #328)이 `issues:
 opened` 이벤트마다 `gates/issue_bundling.py <issue-number>`를 돌려,
 서로 무관한 여러 문제가 하나의 이슈로 뭉개졌는지 기계적으로 검사한다 —
@@ -818,6 +830,12 @@ role이 작업할 것"이라는 세 번째 tell은 이슈 텍스트에 구조화
 
 ## 종결 일관성 스윕 (CI)
 
+> **은퇴함(issue #460, 2026-08-08).** `.github/workflows/closure-sweep.yml`은
+> 삭제됐다. 단일-PR 경우는 `contract-guard.sh`로 zero-install 대체됐고,
+> 보드-전체 경우는 기존에 이미 `out of scope — operator decision, 2026-08-07`로
+> 기록된 드롭이며 로컬 `python3 gates/closure_sweep.py`로만 돈다. 아래는 삭제
+> 전 CI 형태를 설명하는 역사적 기록이다.
+
 `.github/workflows/closure-sweep.yml`(issue #383)이 `gates/closure_sweep.py
 --post`를 main 푸시마다, 매일 한 번 스케줄로, 그리고 수동 dispatch로
 돌린다 — 위 closes-gate와 달리 이건 **막지 않는다**: 보드 전체(여러
@@ -829,6 +847,12 @@ subject x role)를 훑어 위반이 있는 이슈에 코멘트만 남긴다. `cl
 `docs/issue-383/decisions/record-evidence-for-closure-sweep.md`.
 
 ## Closure-consistency sweep (CI)
+
+> **Retired (issue #460, 2026-08-08).** `.github/workflows/closure-sweep.yml`
+> was deleted. The single-PR case is now zero-install via `contract-guard.sh`;
+> the board-wide case is the existing `out of scope — operator decision,
+> 2026-08-07` drop, runnable locally as `python3 gates/closure_sweep.py`. What
+> follows describes the CI-era shape as historical record.
 
 `.github/workflows/closure-sweep.yml` (issue #383) runs
 `gates/closure_sweep.py --post` on every push to `main`, daily on a
@@ -843,6 +867,14 @@ delivery merged without one (issue #383, measured against issue #367).
 Rationale: `docs/issue-383/decisions/record-evidence-for-closure-sweep.md`.
 
 ## Merge gate (CI)
+
+> **Retired (issue #460, 2026-08-08).** `.github/workflows/plan-aware-closes-gate.yml`
+> was deleted. The `--closes-only` step is now zero-install via
+> `on-the-record/hooks/contract-guard.sh` + `spawn.py`'s `acceptance_gate`
+> preflight; the full-bundle step is runnable locally as
+> `python3 gates/ci.py . --pr <n> --autodetect`. What follows describes the
+> CI-era shape as historical record — see `docs/specs/enforcement-boundary.md`
+> for the migration table.
 
 `.github/workflows/plan-aware-closes-gate.yml` (issue #245) runs
 `gates/ci.py --pr <n> --autodetect --closes-only` on every PR event to
@@ -914,6 +946,12 @@ body-only check, auto-closed an issue on merge the moment it landed.
 Rationale for both changes:
 `docs/issue-271/decisions/2026-08-04-phase-signal-and-surface-coverage-mechanism.md`.
 
+> **은퇴함(issue #460, 2026-08-08).** `.github/workflows/on-the-record-tests.yml`
+> 은 삭제됐다. 대체는 로컬 `python3 -m pytest`(또는 `pytest -q`)를 손으로 또는
+> 오케스트레이터 루프가 랜딩 전에 돌리는 것 — 세션 훅은 스케줄/PR 이벤트가 아니라
+> 툴-사용 이벤트에서만 발동하므로 이 스위트를 대신 돌릴 훅은 없다. 아래는 삭제
+> 전 CI 형태를 설명하는 역사적 기록이다.
+
 `.github/workflows/on-the-record-tests.yml`(이슈 #290)는 PR 이벤트마다 PR
 head를 체크아웃해 `pytest -q`를 돌린다 — `plan-aware-closes-gate.yml`과
 달리 `ref: main`을 고정하지 않는다(PR 자신의 코드를 실행해야 하므로).
@@ -930,6 +968,13 @@ found`(exit 127)로 스위트를 한 번도 돌리지 않고 실패한다. 또�
 같은 실제 `git commit`을 도는 케이스가 exit 128로 실패한다 — 스위트를
 돌리기 전에 CI 전용 자리표시 identity(`git config --global`)를
 설정해야 한다.
+
+> **Retired (issue #460, 2026-08-08).** `.github/workflows/on-the-record-tests.yml`
+> was deleted. The replacement is locally runnable `python3 -m pytest`
+> (or `pytest -q`), run by hand or by the orchestrator loop before landing —
+> no shipped hook can run this suite, since hooks fire on tool-use events,
+> not on a schedule or PR event. What follows describes the CI-era shape as
+> historical record.
 
 `on-the-record-tests.yml`(issue #290) checks out the PR head on every PR
 event and runs `pytest -q` — unlike `plan-aware-closes-gate.yml`, it does
@@ -1023,6 +1068,12 @@ python3 gates/skip_gate.py
   imitating automatic adjudication is how the ledger starts lying.
 
 ## Issue-bundling gate
+
+> **Retired (issue #460, 2026-08-08).** `.github/workflows/issue-bundling-gate.yml`
+> was deleted with no replacement — issue creation is a GitHub webhook event,
+> unreachable by any Claude Code session hook. It now runs only as
+> `python3 gates/issue_bundling.py <issue#>`. What follows describes the
+> CI-era shape as historical record.
 
 `.github/workflows/issue-bundling-gate.yml` (issue #328) runs
 `gates/issue_bundling.py <issue-number>` on every `issues: opened` event

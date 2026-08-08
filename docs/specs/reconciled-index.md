@@ -22,9 +22,9 @@ updating "Resolved ambiguities" if the edit touches a resolved point.
 | `docs/specs/approvers.md` | `bbcb4e239a5aed872956a01acc04c9431027a1f2df483b53265f72577ba16ab9` |
 | `docs/specs/flows-schema.md` | `cb19ed6d9b209733f0ad3b02ed7e0bb8c395c5bce9a28b3c563b1e3d64bc5623` |
 | `docs/handbooks/on-the-record.md` | `9e314a347f6265950b2eedc791891e329255ee4adf9f6b5ffab5554f2e6e20f1` |
-| `docs/handbooks/operations.md` | `ed1819cac0bf051fac75544e9a4dd0fe01f4b33ee79d0cbbba2b4988351d225e` |
+| `docs/handbooks/operations.md` | `c60d8e137f6b76a83c9a25a6ae014843693a13a984f6f3b4488cacee3c604379` |
 | `docs/handbooks/setup.md` | `df9c710683663f260679d3629ce8733c7f0af60196dbfbaf6b92d8e2205f3e73` |
-| `on-the-record/commands/run.md` | `aefe8e45769d8b5e2267a157a0eb0ade03079b06360703158e04edfcfce540cc` |
+| `on-the-record/commands/run.md` | `d4b8148b2d7292dfe82d6faf2e1a8d3768cfd38a439653a0d09ca74f996a2846` |
 
 ## Resolved ambiguities
 
