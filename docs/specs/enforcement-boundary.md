@@ -60,6 +60,8 @@ Verdict values:
 | `gates.py` | n/a (infrastructure) | router/dispatcher to the modules above |
 | `flows.py` | repo-local | feeds this repo's own status-board UI |
 | `claims.py` | repo-local | new (#377): opt-in `# CLAIM-CHECK:` marker checker over this repo's own source (role-JSON enum drift, `spec.md`-producer claim); registered in `gates.ALL`, not wired into `gates/ci.py`'s required path in this delivery — promotion to required-check status is a separate follow-up decision per the proposal's own Rationale |
+| `approval_request_shape.py` | contract | `missing_approval_clauses` is a testable extraction of the clause logic already enforced zero-install by `stop-gate.sh` (#411/#318); `has_generator_section` (#363) is presence-only and not wired into a blocking hook — `run.md` instructs its use, not a hook |
+| `open_work.py` | contract, CI-supplement | `build_open_work_query` (#379) builds the lookup query only; the actual open-issue/open-PR check runs manually per `run.md`'s instruction, not via a blocking hook in this delivery |
 
 ## `on-the-record/hooks/*.sh` (plugin-shipped)
 
