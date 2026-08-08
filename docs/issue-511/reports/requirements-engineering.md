@@ -211,6 +211,36 @@ escalated):
    trade-off, not silently narrowed (see Open findings below).
 
 ## Open findings
+- **warrant-hunter, before-landing, stance 3 (silent-failure) —**
+  `docs/reports/2026-08-09-hunt-issue-511-multi-axis-impact-classification.md`:
+  `gates/risk_report.py`'s `scan_open_proposals()` trusts each proposal
+  file's `status: proposed` frontmatter with nothing flipping it when the
+  proposal's PR actually merges, reproduced by the hunter this session:
+  ```
+  $ python3 -c "
+  import sys; sys.path.insert(0, 'gates')
+  import risk_report
+  from pathlib import Path
+  p = risk_report.scan_open_proposals(Path('.'))
+  print('open proposals found:', len(p))
+  print('blocked count:', len(risk_report.batch_blocked(p, Path('.'))))"
+  open proposals found: 82
+  blocked count: 40
+  ```
+  Many matched proposal files are already-landed (e.g.
+  `docs/issue-286/proposals/2026-08-07-fix-event-cursor-integrity.md`,
+  merged via PR #404) but still read `status: proposed`. Because
+  `batch_blocked()` reads straight off that stale set,
+  `on-the-record/hooks/impact-guard.sh` denies essentially every
+  2+-`gh pr merge` batch in this repo today, independent of the real
+  batch's actual risk — the guard's "still open right now" precondition
+  is state nothing in the codebase maintains. This is a pre-existing gap
+  in `scan_open_proposals()` (present since issue #319, not introduced by
+  this delivery), but issue #511 is what turns it from a cosmetic report
+  artifact into a live blocking gate, so it now has real teeth. Fixing it
+  (a merge-time or `closure_sweep`-style status flip) is a distinct
+  write-set from this proposal's — the fix belongs to a follow-up issue,
+  not a silent scope-widen here. Recommend the user file one.
 - `docs/specs/standing-decisions.md`'s registry ships empty (no standing
   decisions registered yet) — the proposal scoped populating it as a
   follow-up, not part of #511's acceptance; every write-set still falls
