@@ -13,12 +13,17 @@
     }
   },
   "decides": "요구사항이 검증가능·일관·추적 가능하게 명세되었는가",
-  "use_when": "product 가설이 확정되어 정식 스펙으로 전환할 때",
+  "use_when": "product 가설이 확정되어 정식 스펙으로 전환할 때 (board_condition: a product-discovery record reached a validated verdict AND no requirements-engineering record exists yet turning it into a structured requirements doc)",
   "produces": "structured requirements doc, traceability matrix, ambiguity list resolved",
   "write_scope": [],
+  "report_only": true,
+  "spec": "roles/specs/requirements-engineering.spec.json",
   "record_fields": {
-    "loop_state": [
-      "landed"
-    ]
+    "loop_state": {
+      "progress": ["drafting", "resolving-ambiguity"],
+      "terminal": ["landed"],
+      "refusal": ["hypothesis-not-final"],
+      "error": ["source-unresolvable"]
+    }
   }
 }

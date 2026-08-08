@@ -144,6 +144,21 @@ sample-dependent.
    weaker form; `grep -c "use_when" roles/specs/*.spec.json` covers all 8 spec files (4 batch-1 + 4 batch-2)
    with one `use_when` object each.
 
+## Accumulation
+
+This batch repeats batch-1's per-role file shape (one `roles/specs/<name>.spec.json` + one matching one-line
+edit to `roles/<name>.json` + one shared batch-scoped pytest file) across 4 roles, same as #521 did across 6.
+If a batch-3+ (build family, ops/knowledge family, commercial/risk family, issue-515's Issue E) repeats this
+same shape again, the accumulation is: one more `gates/test_role_spec_shape_batchN.py` per batch (never edits
+to an earlier batch's test file — each batch's own intent stays legible, matching this proposal's own
+constraint) plus N more `roles/specs/*.spec.json` files, all validated by the same unmodified
+`gates/role_spec_shape.py` and `docs/specs/role-spec-template.schema.json` shared infrastructure. No new
+shared helper is warranted yet: `gates/role_spec_shape.py` already takes any spec dict (batch-agnostic), and
+each batch's own `BATCH<N>_ROLES` tuple is 3-6 lines, not an accumulating inline `subprocess`/`gh` pattern. If
+a 4th batch's test file becomes near-identical boilerplate to batch-1/2/3's, that is the trigger to factor a
+shared `roles/specs/*.spec.json` glob-based test (one file replacing all `BATCH<N>` files) — not before, since
+three data points don't yet justify the abstraction and batch-2 (this proposal) is only the second.
+
 ## Rulebook-side alignment plan (per issue-524's scope comment)
 
 Realization is only complete when each target role's own `<role>-rulebook` repo's methodology docs, hooks, and
