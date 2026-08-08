@@ -1885,6 +1885,10 @@ def _board_wide_sweep(root: Path) -> int:
     if skips:
         count += 1
         print(f"[watchdog] closure-sweep: 확인 불가 (gh 실패) {len(skips)}건")
+    # 이슈 #512 요구사항 4: advisory only — 아무것도 막지 않고, anomaly
+    # count 에도 합산하지 않는다 (blocking gate 가 아니다, board 에 보고만).
+    trend = closure_sweep.accumulation_trend(root)
+    print(f"[watchdog] {closure_sweep.format_accumulation_trend(trend)}")
     open_issues = spawn_coverage._list_open_issues(root)
     if open_issues is None:
         count += 1
