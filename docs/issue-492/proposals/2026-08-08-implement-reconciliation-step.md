@@ -86,8 +86,16 @@ Two options considered for that:
   and existing readers (`session_end_verdict`, `_pr_open_or_merged_for_branch`,
   `board`, `_is_new_commit`) into `reconcile()`'s input shape.
 - `roster_register()` call site (`spawn.py:3583`): add `"expects_pr":
-  role in ROLES_THAT_OPEN_PRS` (or an explicit per-role table if roles
-  vary) to the entry dict — additive field, existing consumers unaffected.
+  issue is not None` to the entry dict. Not a per-role table:
+  `ensure_pushed()` (`spawn.py:3259`, called unconditionally for every
+  role at `spawn.py:3799`) opens a PR for *any* role's branch once it has
+  commits ahead of origin, gated only on `issue is not None`, never on
+  which role ran — a static per-role table would silently record
+  `expects_pr=False` for a role outside the table that pushes and then
+  dies before the PR opens, exactly the divergence #492 exists to catch
+  (after-proposal warrant hunt finding, stance 0,
+  `docs/reports/2026-08-08-hunt-implement-reconciliation-step.md`).
+  Additive field, existing consumers unaffected.
 - CLI verb: `if a.role == "reconcile":` branch in `main()` alongside the
   `watchdog` branch, honoring `--issue` to scope to one roster entry (all
   live+dead entries when omitted, matching `watchdog`'s auto_respawn
