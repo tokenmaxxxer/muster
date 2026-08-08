@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: landed
 files:
   - docs/issue-497/reports/defect-verification.md
   - test/test_side_effect_round.py
