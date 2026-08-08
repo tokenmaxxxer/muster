@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: landed
 files:
   - docs/issue-467/decisions/2026-08-08-per-row-delivery-and-batch-split.md
   - docs/issue-467/reports/architecture.md
@@ -7,7 +7,7 @@ files:
 
 ## Scouting
 
-Skipped — see survey.md's Scouting section. No externally-comparable
+Scouting skipped — see survey.md's Scouting section. No externally-comparable
 design decision; this maps existing internal proposals onto two named
 delivery surfaces and splits by session sizing.
 
@@ -134,4 +134,14 @@ only additions to that file (no removed `t_*` functions).
 
 ## What did not work
 
-(none yet — phase 2 not started)
+- First `docs/issue-467/reports/architecture.md` write was refused by
+  `record-fields-gate.sh` (missing what-was-done/why/loop_state/open-
+  findings sections) — added those sections per contract §20.
+- Second write refused by `adr-content-gate.sh` (loop_state left
+  proposed/scope-proposed, so the record read as decision-bearing and
+  needed Context/Decision/Consequences/Alternatives-Considered + a C4
+  diagram) — added those sections and a `mermaid C4Context` block.
+- Third write refused by `sequence-gate.sh`: this proposal's original
+  scouting line ("Skipped — see survey.md's Scouting section") did not
+  match the gate's exact skip-phrase list — changed the wording to
+  "Scouting skipped" to match `SKIP_PHRASES` verbatim.

@@ -31,3 +31,15 @@ $ grep -n "gates/test_boundary.py" docs/issue-467/proposals/2026-08-08-per-row-d
 
 ### Expected
 The proposal should name a path that does not already exist for an unrelated purpose (e.g. `gates/test_disposition_table.py`), or explicitly state how the new disposition-table check coexists with (is added as new functions inside, alongside the existing #441 checks, in) the current `gates/test_boundary.py` without displacing `t_all_gates_modules_recorded` and its siblings. As written, "built once, in whichever batch lands first" gives the first implementer no instruction not to clobber the existing file, and no reviewer signal distinguishes "extended #441's file" from "silently replaced it."
+
+## before-landing — docs-only, no before-landing dispatch
+
+proposal: docs/issue-467/proposals/2026-08-08-per-row-delivery-and-batch-split.md
+
+Phase-2 landing's write set (`git diff --stat` against the proposal-time
+base) is entirely under `docs/` — the ADR
+(`docs/issue-467/decisions/2026-08-08-per-row-delivery-and-batch-split.md`),
+the architecture report
+(`docs/issue-467/reports/architecture.md`), and this proposal's own
+status/scouting-wording/what-did-not-work updates. Per the docs-only
+fast path, the before-landing hunter dispatch is skipped.
