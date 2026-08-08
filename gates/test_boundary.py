@@ -176,7 +176,18 @@ def _run(fns):
 
 
 if __name__ == "__main__":
+    import importlib.util as _ilu
+
+    _mig_spec = _ilu.spec_from_file_location(
+        "test_boundary_workflow_migration",
+        Path(__file__).resolve().parent / "test_boundary_workflow_migration.py",
+    )
+    _migration = _ilu.module_from_spec(_mig_spec)
+    _mig_spec.loader.exec_module(_migration)
+
     tests = [(n, f) for n, f in sorted(globals().items())
+              if n.startswith("t_") and callable(f)]
+    tests += [(n, f) for n, f in sorted(vars(_migration).items())
               if n.startswith("t_") and callable(f)]
     _run(tests)
     sys.exit(0)

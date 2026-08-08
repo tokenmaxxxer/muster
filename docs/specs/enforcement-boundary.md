@@ -62,14 +62,21 @@ Verdict values:
 | `role-test-claim-guard.sh` | contract | new (#457): `Stop`, role-session mirror of `gates/skip_gate.py` (#334) and the stub/full-suite integrity lesson behind #435, applied to the reply's own pasted test output; zero-install, ships with the plugin |
 | `self-update.sh` | contract | already shipped; `SessionStart` plugin refresh |
 
-## `.github/workflows/*.yml` (this repo's own CI)
+## `.github/workflows/*.yml` (retired, issue #460)
 
-| mechanism | verdict | reason |
+The operator ruled (2026-08-08, issue #460) that this repo's own CI red-X
+checks — including its own — are retired: all enforcement lives in the
+shipped hook surface plus locally runnable gate commands. `.github/workflows/`
+is deleted; the table below is the migration record `gates/test_boundary.py`
+(via `test_boundary_workflow_migration.py`) checks against, not a listing of
+files that still exist.
+
+| mechanism | verdict | replacement |
 |---|---|---|
-| `plan-aware-closes-gate.yml` | repo-local | runs against this repo's own PRs; the reusable-workflow form a consumer could call (`consumer-closes-gate.yml`) is not built in this delivery — see the proposal's "second rework note" |
-| `closure-sweep.yml` | repo-local | runs `closure_sweep.py` board-wide against this repo's own board; the board-wide act itself is out of scope for consumers per the operator decision above, so no consumer-facing form is built |
-| `issue-bundling-gate.yml` | repo-local | this repo's own filing hygiene, matches `issue_bundling.py`'s verdict |
-| `on-the-record-tests.yml` | repo-local | runs this repo's own `pytest` suite |
+| `on-the-record-tests.yml` | repo-local, deleted | locally runnable `python3 -m pytest` (or `pytest -q`), run by hand or by the orchestrator loop before landing, per the no-mock "build it, run it" phase-2 bar; no shipped hook can run the suite (hooks fire on tool-use events inside a session, not on a schedule or PR event) |
+| `plan-aware-closes-gate.yml` | repo-local, deleted | `--closes-only` step: zero-install `on-the-record/hooks/contract-guard.sh` + `spawn.py`'s `acceptance_gate` preflight (see `ci.py` row above). Full-bundle step (write_scope/protected-path/deps/`record_checked_claims`): no zero-install replacement; existing `contract, CI-supplement` drop, runnable locally as `python3 gates/ci.py . --pr <n> --autodetect` |
+| `closure-sweep.yml` | repo-local, deleted | single-PR case: zero-install `contract-guard.sh` (see `closure_sweep.py` row above). Board-wide case: existing `out of scope — operator decision, 2026-08-07` drop, runnable locally as `python3 gates/closure_sweep.py` |
+| `issue-bundling-gate.yml` | repo-local, deleted | no replacement possible — issue-creation is a GitHub webhook event, unreachable by any Claude Code session hook; runnable locally as `python3 gates/issue_bundling.py <issue#>` |
 
 ## `spawn.py`
 
