@@ -2196,10 +2196,26 @@ def _watch(issue: int, role: str | None, stall_timeout_min: float,
     # 멈춘다. _await_bounded 는 이벤트 소비 여부와 무관하게 항상 0 을
     # 리턴하므로(stall 도 0), 무엇을 멈출 신호로 볼지는 offset 진행분을
     # 직접 읽어 판단한다 (이슈 #180).
+    # 명부 엔트리가 끝내 나타나지 않으면 이 반복 자체가 무한정 돈다 —
+    # session-end 도, 죽은 wrapper_pid 도 신호가 안 되기 때문이다(이슈
+    # #451, #445 발견 2). `_await_bounded` 는 호출 한 번의 stall 만
+    # 보장하므로, 여기서는 반복에 걸친 무진전 누적 시간을 직접 잰다.
+    stall_limit_s = stall_timeout_min * 60
+    last_progress = time.monotonic()
     while True:
         before = _read_offset(offset_path)
+        try:
+            before_size = log_path.stat().st_size
+        except OSError:
+            before_size = None
         rc = _await_bounded(events_path, offset_path, stall_timeout_min, log_path)
         after = _read_offset(offset_path)
+        try:
+            after_size = log_path.stat().st_size
+        except OSError:
+            after_size = None
+        if after > before or after_size != before_size:
+            last_progress = time.monotonic()
         if after > before:
             lines = events_path.read_text(encoding="utf-8").splitlines()
             ev = json.loads(lines[after - 1])
@@ -2233,6 +2249,12 @@ def _watch(issue: int, role: str | None, stall_timeout_min: float,
             print(f"[watch] 세션 프로세스가 사라졌다(pid {pid}) — session-end "
                   f"없이 끝났다. 크래시로 보고 멈춘다", file=sys.stderr)
             return WATCH_CRASH_RC
+        if time.monotonic() - last_progress >= stall_limit_s:
+            secs = int(time.monotonic() - last_progress)
+            print(f"[watch] follow stall: {secs}초째 진행 없음 — 이벤트도 "
+                  f"로그 변화도 없이 멈춘다. 다시 spawn.py watch --follow 로 "
+                  f"재무장하라", file=sys.stderr)
+            return 0
 
 
 def roster_kill(issue: int, role: str) -> int:

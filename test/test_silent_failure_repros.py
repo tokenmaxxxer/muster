@@ -86,40 +86,27 @@ def test_attempt_1_exclude_write_swallowed_no_warning(tmp_path, origin_and_src, 
 
 
 def test_attempt_2_follow_loop_unbounded_on_absent_roster_entry(tmp_path, monkeypatch):
-    """Attempt 2 (proposal item 2): with a workspace-index entry registered
-    but no matching roster entry (simulated crash-before-registration), the
-    `--follow` loop in _watch() never bounds its wait — confirmed by driving
-    N iterations of the loop's own body (not the real infinite `while True`,
-    which would hang the test suite) and asserting it never reaches a
-    terminal branch."""
+    """Attempt 2 (proposal item 2), updated by the issue-451 fix: with a
+    workspace-index entry registered but no matching roster entry (simulated
+    crash-before-registration) and no events ever appearing, the real
+    `_watch(follow=True)` loop must now bound its wait via the cumulative
+    stall tracker (spawn.py:2199-2242) instead of re-polling forever."""
+    monkeypatch.setattr(spawn, "WORKSPACE_INDEX", tmp_path / "workspaces.json")
+
     work = tmp_path / "work"
-    events_path = spawn._events_path(str(work))
-    offset_path = spawn._offset_path(str(work))
     log_path = tmp_path / "session.log"
-    events_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text("hello\n")
+    spawn._workspace_index_put(99999, "probe", str(work), str(log_path))
 
-    monkeypatch.setattr(spawn, "_roster_load", lambda: {})  # no roster entry at all
+    monkeypatch.setattr(spawn, "_roster_load", lambda: {})  # no roster entry, ever
 
-    terminal_hits = 0
-    STALL_S = 0.05  # keep the repro fast; _await_bounded's own bound still applies
-    for _ in range(5):
-        before = spawn._read_offset(offset_path)
-        rc = spawn._await_bounded(events_path, offset_path, STALL_S / 60, log_path)
-        after = spawn._read_offset(offset_path)
-        if after > before:
-            terminal_hits += 1
-            continue
-        roster_entry = spawn._roster_load().get("issue-99999/probe")
-        pid = roster_entry.get("wrapper_pid") if roster_entry else None
-        if pid is not None and not spawn._alive(pid):
-            terminal_hits += 1  # would be WATCH_CRASH_RC in the real loop
+    STALL_S = 0.05  # keep the real bound fast for the test
+    rc = spawn._watch(99999, "probe", STALL_S / 60, follow=True)
 
-    # REPRODUCED: 5 stall cycles, roster entry absent throughout, and the
-    # loop's own exit conditions (session-end event, or dead wrapper_pid)
-    # never fire — nothing in `_watch(follow=True)` counts these cycles or
-    # caps them. It would keep re-polling forever in the real `while True`.
-    assert terminal_hits == 0
+    # FIXED: the loop no longer spins forever — the cumulative-elapsed-since
+    # -last-progress tracker times it out and returns a stall report, the
+    # same way `_await_bounded()` already does for a single call.
+    assert rc == 0
 
 
 def test_attempt_3_doctor_reprobe_prints_pre_charge_notice(tmp_path, monkeypatch, capsys):
