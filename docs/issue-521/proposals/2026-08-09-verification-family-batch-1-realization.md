@@ -144,6 +144,14 @@ issue's own acceptance bar asks for.
   counting the object's 4 keys (`progress/terminal/refusal/error`), which is `>=3` — this is flagged explicitly
   here since it is a place the acceptance clause's literal Python and the template's intended shape could be
   read two ways; resolved in favor of the object-with->=3-keys reading, consistent with the #515 template.
+  **Warrant-hunter finding (docs/reports/2026-08-09-hunt-verification-family-batch-1-realization.md,
+  after-proposal, stance 0):** `len(dict)` on the 4-bucket object is always 4 regardless of whether
+  `progress`/`refusal`/`error` are ever populated — the check as literally stated can never fail, even for a
+  role that leaves those three buckets empty. Phase 2 must not ship the check in this literal form: it will
+  additionally assert each of the 4 keys is present (`set(d['record_fields']['loop_state']) ==
+  {'progress','terminal','refusal','error'}`) rather than relying on `len(...)>=3` alone, so a dropped or
+  unpopulated bucket is still visible to review even though it wouldn't fail this particular acceptance
+  predicate.
 - `grep -c "use_when" roles/specs/*.spec.json` equals 6 (one `use_when` object per spec file), and each
   `use_when.board_condition` is a predicate over board/issue state, not prose — reviewed at PR review as the
   stated human check (acceptance clause 3's own provenance note).
