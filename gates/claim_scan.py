@@ -80,6 +80,37 @@ def _targets(text: str) -> set[str]:
     return {m.group(0) for m in TARGET_RE.finditer(text) if len(m.group(0)) >= 3}
 
 
+def _dotted_to_file(target: str) -> str | None:
+    """`module.function`/`module.Class.method` 형태의 첫 세그먼트를
+    `module.py` 로 되짚는다. 점 표기 대상이 `_repo_targets()` 가 절대
+    내놓지 않는 형태라 항상 미스매치되는 case(honest2)를 닫는다."""
+    if "/" in target or target.count(".") < 1:
+        return None
+    module = target.split(".", 1)[0]
+    if not module or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", module):
+        return None
+    return f"{module}.py"
+
+
+def _cite_matches(cited: set[str], repo_targets: set[str]) -> bool:
+    if cited & repo_targets:
+        return True
+    for c in cited:
+        derived = _dotted_to_file(c)
+        if derived is None:
+            continue
+        if derived in repo_targets:
+            return True
+        # 중첩 모듈(`pkg/module.py`)을 위한 basename 매치 — 여러 디렉터리에
+        # 같은 이름의 파일이 있으면 어느 걸 가리키는지 모호하므로, 후보가
+        # 정확히 하나일 때만 인정한다(같은 이름의 무관한 diff 파일이 있으면
+        # 매칭시키지 않는다 — before-landing hunt finding).
+        candidates = [rt for rt in repo_targets if rt.endswith("/" + derived)]
+        if len(candidates) == 1:
+            return True
+    return False
+
+
 def scan_text(text: str, repo_targets: set[str] | None = None) -> list[Finding]:
     """`text` 안의 주장 언어를 스캔한다.
 
@@ -102,17 +133,38 @@ def scan_text(text: str, repo_targets: set[str] | None = None) -> list[Finding]:
             continue
         if repo_targets is not None:
             cited = _targets(evidence)
-            if not (cited & repo_targets):
+            if not _cite_matches(cited, repo_targets):
                 findings.append(Finding(
                     claim=m.group(0), line_no=i + 1, line_text=line,
                     reason="근거가 지목하는 대상이 diff/repo 에 없다"))
     return findings
 
 
-def _repo_targets(repo: Path) -> set[str]:
-    """작업 트리 전체 경로 + `git diff` 로 바뀐 경로. 대상 추적성 검사의
-    "repo" 절반 — diff 절반은 호출부가 이미 스캔 중인 텍스트 자체다."""
+class BaseResolutionError(RuntimeError):
+    """`--base` 가 주어졌지만 diff 를 낼 수 없을 때 — whole-repo
+    `git ls-files` 로 조용히 넘어가면 case0 이 다시 열리므로, 호출부가
+    hard-fail 하도록 신호만 던진다(폴백하지 않는다)."""
+
+
+def _repo_targets(repo: Path, base: str | None = None) -> set[str]:
+    """`base` 가 없으면 작업 트리 전체 경로(`git ls-files`) — 기존
+    동작 그대로. `base` 가 있으면 diff-scoped 로 좁힌다
+    (`git diff --name-only <base>...HEAD`, 바뀐 경로만): case0 처럼
+    diff 와 무관한 "실재하지만 무관한" 파일을 인용해 추적성 검사를
+    통과하는 걸 막는다. `base` 가 주어졌는데 diff 커맨드 자체가 실패하면
+    (알 수 없는 ref, shallow clone 등) whole-repo 로 폴백하지 않고
+    `BaseResolutionError` 를 던진다."""
     targets: set[str] = set()
+    if base is not None:
+        r = subprocess.run(
+            ["git", "diff", "--name-only", f"{base}...HEAD"],
+            cwd=repo, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise BaseResolutionError(
+                f"git diff --name-only {base}...HEAD 실패: {r.stderr.strip()}")
+        targets.update(line.strip() for line in r.stdout.splitlines()
+                       if line.strip())
+        return targets
     r = subprocess.run(["git", "ls-files"], cwd=repo, capture_output=True,
                        text=True)
     if r.returncode == 0:
@@ -127,6 +179,11 @@ def main(argv: list[str]) -> int:
         i = argv.index("--repo")
         repo = Path(argv[i + 1]).resolve()
         argv = argv[:i] + argv[i + 2:]
+    base = None
+    if "--base" in argv:
+        i = argv.index("--base")
+        base = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
     if not argv:
         print("claim_scan: 검사할 파일 경로가 필요하다")
         return 2
@@ -136,7 +193,13 @@ def main(argv: list[str]) -> int:
     except OSError as e:
         print(f"claim_scan: {path} 를 읽을 수 없다 ({e})")
         return 2
-    findings = scan_text(text, _repo_targets(repo))
+    try:
+        repo_targets = _repo_targets(repo, base=base)
+    except BaseResolutionError as e:
+        print(f"claim_scan: --base {base} 해석 실패, whole-repo 로 넘어가지 "
+              f"않는다 ({e})")
+        return 2
+    findings = scan_text(text, repo_targets)
     for f in findings:
         print(f"{path}:{f.line_no}: 주장 '{f.claim}' — {f.reason}")
         print(f"    {f.line_text.strip()}")
