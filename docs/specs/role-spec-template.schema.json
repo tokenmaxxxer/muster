@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "docs/specs/role-spec-template.schema.json",
+  "title": "role-spec-template",
+  "description": "Shape every roles/specs/<name>.spec.json must match (issue #515 realization template, realized batch-1 by issue #521). Hand-checked by gates/role_spec_shape.py — this file documents the shape; it is not itself fed to a jsonschema validator (proposal constraint: no new dependency).",
+  "type": "object",
+  "required": [
+    "role",
+    "source_standard",
+    "required_fields",
+    "reference_resolution",
+    "recomputation",
+    "write_scope",
+    "loop_state",
+    "use_when"
+  ],
+  "properties": {
+    "role": {
+      "type": "string",
+      "description": "Role name, matches the sibling roles/<role>.json stem."
+    },
+    "source_standard": {
+      "type": "string",
+      "description": "Free text naming the grounding standard(s) this spec's fields/enums are lifted from (e.g. 'EARL 1.0', 'STRIDE / OWASP Threat Dragon')."
+    },
+    "required_fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "required"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["string", "enum", "ref", "ref[]"] },
+          "enum": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" },
+            "description": "Required and non-empty when type is 'enum'; absent otherwise."
+          },
+          "required": { "type": "boolean" }
+        }
+      }
+    },
+    "reference_resolution": {
+      "type": "object",
+      "required": ["rule", "checked_by"],
+      "properties": {
+        "rule": { "type": "string" },
+        "checked_by": { "type": "string", "description": "Path to the enforcing hook/gate file." }
+      }
+    },
+    "recomputation": {
+      "type": "object",
+      "required": ["rule", "checked_by"],
+      "properties": {
+        "rule": { "type": "string" },
+        "checked_by": { "type": "string", "description": "Path to the enforcing hook/gate file, or 'TBD (follow-up)' when intentionally deferred." }
+      }
+    },
+    "write_scope": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Real globs the role may write outside its own record. Empty array is legal only paired with report_only: true."
+    },
+    "report_only": {
+      "type": "boolean",
+      "description": "Required (true) when write_scope is empty; a role that writes nothing but its own record."
+    },
+    "loop_state": {
+      "type": "object",
+      "required": ["progress", "terminal", "refusal", "error"],
+      "properties": {
+        "progress": { "type": "array", "items": { "type": "string" } },
+        "terminal": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "refusal": { "type": "array", "items": { "type": "string" } },
+        "error": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "use_when": {
+      "type": "object",
+      "required": ["board_condition"],
+      "properties": {
+        "board_condition": {
+          "type": "string",
+          "description": "Mechanically evaluable predicate over board/issue state — not a prose sentence requiring LLM interpretation."
+        }
+      }
+    }
+  }
+}

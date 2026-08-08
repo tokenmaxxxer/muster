@@ -1,0 +1,43 @@
+{
+  "role": "security-threat-model",
+  "source_standard": "STRIDE / OWASP Threat Dragon model schema (https://raw.githubusercontent.com/OWASP/threat-dragon/main/ThreatDragonModels/demo-threat-model.json)",
+  "required_fields": [
+    { "name": "element", "type": "ref", "required": true },
+    {
+      "name": "type",
+      "type": "enum",
+      "enum": [
+        "Spoofing",
+        "Tampering",
+        "Repudiation",
+        "Information Disclosure",
+        "Denial of Service",
+        "Elevation of Privilege"
+      ],
+      "required": true
+    },
+    { "name": "title", "type": "string", "required": true },
+    { "name": "description", "type": "string", "required": true },
+    { "name": "severity", "type": "string", "required": true },
+    { "name": "status", "type": "string", "required": true },
+    { "name": "mitigation", "type": "string", "required": true }
+  ],
+  "reference_resolution": {
+    "rule": "element must resolve to an actual system/data-flow element named elsewhere in the same record — no orphan references (issue-515 invariant 2). severity and status are free text: the Threat Dragon model schema (scout-brief.md, confirmed live fetch, resolving #515's prior open finding) carries these as present fields but does not define a closed vocabulary for either — an invented value list would violate the proposal's no-invented-enum constraint.",
+    "checked_by": "on-the-record/hooks/role-spec-reference-guard.sh"
+  },
+  "recomputation": {
+    "rule": "overall risk verdict is derived per-threat, not asserted as one standalone summary field: each element's residual risk = severity as stated after mitigation is applied, never a role-asserted number independent of the listed threats and their mitigations (issue-515 invariant 4).",
+    "checked_by": "TBD (follow-up — issue-521 out-of-scope note: per-role recomputation enforcement is a follow-up once evidence from real usage shows which roles need it)"
+  },
+  "write_scope": ["docs/issue-<n>/reports/security-threat-model.md"],
+  "loop_state": {
+    "progress": ["modeling"],
+    "terminal": ["landed"],
+    "refusal": ["trust-boundary-undetermined"],
+    "error": ["spec-unreadable"]
+  },
+  "use_when": {
+    "board_condition": "a spec or design doc landed that introduces a new trust boundary, authentication surface, or sensitive-data flow AND no security-threat-model record exists yet for it"
+  }
+}

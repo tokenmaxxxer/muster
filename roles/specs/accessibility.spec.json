@@ -1,0 +1,34 @@
+{
+  "role": "accessibility",
+  "source_standard": "WCAG-EM 2.0 (W3C, https://www.w3.org/TR/wcag-em/) evaluation procedure + ACT Rules Format outcome vocabulary (W3C, https://www.w3.org/TR/act-rules-format/)",
+  "required_fields": [
+    { "name": "scope", "type": "string", "required": true },
+    { "name": "sample", "type": "ref[]", "required": true },
+    { "name": "test", "type": "string", "required": true },
+    {
+      "name": "result",
+      "type": "enum",
+      "enum": ["inapplicable", "passed", "failed", "cantTell", "untested"],
+      "required": true
+    },
+    { "name": "assertedBy", "type": "string", "required": true }
+  ],
+  "reference_resolution": {
+    "rule": "sample entries must resolve to real screens/components/tokens in the repo; test must be bound to a specific WCAG success-criterion ID (e.g. '1.4.3') — no orphan references (issue-515 invariant 2).",
+    "checked_by": "on-the-record/hooks/role-spec-reference-guard.sh"
+  },
+  "recomputation": {
+    "rule": "overall verdict = the worst-case result across all cited sample x test outcomes (failed > cantTell > untested > inapplicable > passed), never a standalone summary field (issue-515 invariant 4). result uses ACT's 5-value outcome enum, not EARL's 4-value one, since ACT is the accessibility-specific profile and the W3C spec frames ACT-EARL compatibility as expressibility, not identity (scout-brief.md).",
+    "checked_by": "TBD (follow-up — issue-521 out-of-scope note: per-role recomputation enforcement is a follow-up once evidence from real usage shows which roles need it)"
+  },
+  "write_scope": ["docs/issue-<n>/reports/accessibility.md"],
+  "loop_state": {
+    "progress": ["sampling", "evaluating"],
+    "terminal": ["landed"],
+    "refusal": ["scope-undeterminable"],
+    "error": ["sample-unreachable"]
+  },
+  "use_when": {
+    "board_condition": "a new interaction pattern or color-token set landed on the branch AND no accessibility record exists yet for it"
+  }
+}

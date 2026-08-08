@@ -12,10 +12,16 @@
     }
   },
   "decides": "결함 실재 — 독립 재현",
-  "use_when": "실행 결과가 다투어질 때 — execution-observation·conformance-review 만으로 결론낼 수 없는, 재현이 어렵거나 다투는 실행 결과 주장, 복잡한 변경. 적대적 독립 재현으로 놓친 것을 찾는다",
+  "use_when": "실행 결과가 다투어질 때 — execution-observation·conformance-review 만으로 결론낼 수 없는, 재현이 어렵거나 다투는 실행 결과 주장, 복잡한 변경. 적대적 독립 재현으로 놓친 것을 찾는다 (board_condition: an execution-observation or conformance-review record's result is disputed by another comment on the same commit sha AND no defect-verification record exists yet for that dispute)",
   "produces": "attempt별 reproduced|not-reproduced + 증거, repro steps/script, environment notes, blocking|advisory finding",
-  "write_scope": [],
+  "write_scope": ["docs/issue-<n>/reports/defect-verification.md"],
+  "spec": "roles/specs/defect-verification.spec.json",
   "record_fields": {
-    "loop_state": ["cleared"]
+    "loop_state": {
+      "progress": ["reproducing"],
+      "terminal": ["cleared"],
+      "refusal": ["cannot-attempt-independent-reproduction"],
+      "error": ["environment-setup-failed"]
+    }
   }
 }

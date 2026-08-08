@@ -1,0 +1,39 @@
+{
+  "role": "secure-coding",
+  "source_standard": "OWASP ASVS (Application Security Verification Standard, https://softwaremill.com/implementing-owasp-asvs/)",
+  "required_fields": [
+    { "name": "requirement_id", "type": "ref", "required": true },
+    {
+      "name": "level",
+      "type": "enum",
+      "enum": ["L1", "L2", "L3"],
+      "required": true
+    },
+    { "name": "cwe", "type": "ref", "required": false },
+    {
+      "name": "verdict",
+      "type": "enum",
+      "enum": ["pass", "fail"],
+      "required": true
+    },
+    { "name": "severity", "type": "string", "required": false }
+  ],
+  "reference_resolution": {
+    "rule": "requirement_id must resolve to an actual ASVS clause; cwe, when present, must resolve to a real CWE identifier — no orphan references (issue-515 invariant 2).",
+    "checked_by": "on-the-record/hooks/role-spec-reference-guard.sh"
+  },
+  "recomputation": {
+    "rule": "level is cumulative per ASVS (L2 implies L1 coverage, L3 implies L1+L2); a role record's overall pass/fail is the worst-case verdict across all cited requirement_id checks at the record's declared level, never a standalone summary field (issue-515 invariant 4).",
+    "checked_by": "TBD (follow-up — issue-521 out-of-scope note: per-role recomputation enforcement is a follow-up once evidence from real usage shows which roles need it)"
+  },
+  "write_scope": ["docs/issue-<n>/reports/secure-coding.md"],
+  "loop_state": {
+    "progress": ["checklisting", "pentesting"],
+    "terminal": ["landed"],
+    "refusal": ["target-level-undeclared"],
+    "error": ["target-unreachable"]
+  },
+  "use_when": {
+    "board_condition": "authentication or input-handling code landed on the branch AND no secure-coding record exists yet for that commit sha"
+  }
+}

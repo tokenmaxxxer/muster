@@ -32,3 +32,30 @@ The stated acceptance check for "loop_state expanded to the 4-bucket shape" cann
 
 ### Expected
 An acceptance check for "loop_state was correctly expanded with real progress/refusal/error states per role" needs to inspect the *contents* of each bucket (e.g. `all(len(v) > 0 for v in d['record_fields']['loop_state'].values())`, or specifically checking that `progress`/`refusal`/`error` are non-empty for the roles the "What will be done" section says should get them), not the key-count of the wrapping object. As written, a role could ship with `loop_state: {progress: [], terminal: ['done'], refusal: [], error: []}` — silently failing to carry the refusal/progress states item 3 promises — and the stated acceptance check would still report success.
+
+## before-landing — stance 0: assume the gate/guard just added or touched in this transition is bypassable — find the bypass
+
+Verdict: FINDING — the reference-resolution guard hook only checks backtick-quoted paths (via record_lint's _PATH_REF regex); any reference to a nonexistent path written in a batch-1 role's record without backticks (or with a path prefix outside the recognized set) passes the reference_resolution gate untouched, so the reference_resolution.rule each of the 6 roles' spec.json declares is trivially unenforced for plain-text references.
+Kind: silent-failure
+Seed: the new PreToolUse hook enforcing reference-resolution for the 6 batch-1 roles' record files, role_spec_shape.py's record_path_role/reference_resolution_check, record_lint.py's _PATH_REF/orphaned_path_reference_check
+cap_seconds: 180
+tier: default (size:>200 lines / >5 files)
+diff_stat_lines: per dispatcher (role_spec_shape.py new, reference-guard hook new, hooks.json wired, 6 spec.json + 6 role.json + schema + enforcement-boundary.md)
+started_at: 2026-08-09T00:00:00Z
+ended_at: 2026-08-09T00:07:00Z
+
+### Reproduce
+Feed the hook two PreToolUse payloads that differ only by whether the nonexistent path reference is backtick-quoted, both targeting the same one of the 6 roles' own record path under `docs/issue-<n>/reports/<role>.md`:
+
+Payload A (reference wrapped in backticks): `tool_input.content` = "Checked `gates/does_not_exist.py` for the rule."
+Payload B (same reference, no backticks): `tool_input.content` = "Checked gates/does_not_exist.py for the rule (no backticks)."
+
+Pipe each JSON payload (with `tool_name: "Write"`, the matching `file_path`, and `cwd` set to repo root) into the reference-resolution guard hook script and capture its exit code.
+
+### Observed
+Payload A: denied, exit 2, with a message reporting that the record references a path that does not exist (issue #330), naming the backtick-quoted `gates/does_not_exist.py`.
+Payload B: same nonexistent path, same target record file, same tool — silently allowed, exit 0. The only difference between the two payloads is the missing backticks around the reference.
+
+### Expected
+A batch-1 role writing an unresolvable path reference into its own record file should be denied regardless of backtick formatting — the spec's reference_resolution.rule names no such formatting exception. As implemented, an author (or an agent under pressure) can trivially defeat the guard by simply not wrapping the path reference in backticks, or by referencing a path outside the recognized prefix set that the underlying regex matches, and the enforcement silently passes content that violates the declared rule.
+</content>

@@ -120,6 +120,16 @@ issue's own acceptance bar asks for.
 6. Verify acceptance clauses locally before opening the PR: `python3 -m pytest gates/ -q -k "spec"` exits 0;
    the per-role `write_scope`/`loop_state` python check exits 0 for all 6; `grep -c "use_when" roles/specs/*.spec.json` equals 6.
 
+## Accumulation
+
+`gates/role_spec_shape.py` is the one shared shape checker for all 6 `roles/specs/*.spec.json` files (and any
+future role's spec) — a 7th, 8th, ... role spec adds a data file, not a code change to the checker. The 6
+`roles/<name>.json` field edits (`write_scope`/`loop_state`/`use_when`) are structurally identical one-line-shape
+edits repeated across 6 files today; if a future batch (#515 follow-up Issues B-E) repeats this same edit shape
+across the remaining ~33 roles, that repetition should promote to a shared migration script under `gates/`
+(e.g. a `--update` mode on `role_spec_shape.py` or a sibling script) rather than continuing as N hand-edited
+JSON files — this batch (6 roles) stays hand-edited since 6 is below where a migration script pays for itself.
+
 ## Out of scope
 
 - Batch-2+ roles (discovery/design, build, ops/knowledge, commercial/risk families) — #515's follow-up Issues

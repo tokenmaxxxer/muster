@@ -13,10 +13,16 @@
     }
   },
   "decides": "화면/토큰이 WCAG를 만족하는가",
-  "use_when": "신규 인터랙션 패턴·색상 토큰 도입 시",
+  "use_when": "신규 인터랙션 패턴·색상 토큰 도입 시 (board_condition: a new interaction pattern or color-token set landed on the branch AND no accessibility record exists yet for it)",
   "produces": "WCAG success-criterion checklist w/ pass/fail per criterion",
-  "write_scope": [],
+  "write_scope": ["docs/issue-<n>/reports/accessibility.md"],
+  "spec": "roles/specs/accessibility.spec.json",
   "record_fields": {
-    "loop_state": ["landed"]
+    "loop_state": {
+      "progress": ["sampling", "evaluating"],
+      "terminal": ["landed"],
+      "refusal": ["scope-undeterminable"],
+      "error": ["sample-unreachable"]
+    }
   }
 }
