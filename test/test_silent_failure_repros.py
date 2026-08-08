@@ -49,10 +49,11 @@ def origin_and_src(tmp_path):
 
 
 def test_attempt_1_exclude_write_swallowed_no_warning(tmp_path, origin_and_src, monkeypatch, capsys):
-    """Attempt 1 (proposal item 1): force the `.git/info/exclude` write in
-    issue_workspace() to fail with OSError and confirm the function still
-    returns a workspace with the credential-leak guard silently skipped and
-    no warning surfaced anywhere (stdout/stderr)."""
+    """Attempt 1 (proposal item 1, fixed per issue #450): force the
+    `.git/info/exclude` write in issue_workspace() to fail with OSError and
+    confirm the function still returns a workspace with the credential-leak
+    guard skipped, but now surfaces a warning naming the workspace and the
+    skipped entries on stderr."""
     origin, src = origin_and_src
     work_base = tmp_path / "work"
     monkeypatch.setenv("MUSTER_WORK_DIR", str(work_base))
@@ -76,11 +77,12 @@ def test_attempt_1_exclude_write_swallowed_no_warning(tmp_path, origin_and_src, 
     # The guard's own entries (issue #289 H1) never landed...
     assert ".mcp.json" not in exclude_text
     assert ".gitconfig" not in exclude_text
-    # ...and nothing told the caller the guard silently didn't take.
-    assert "exclude" not in captured.out.lower()
-    assert "exclude" not in captured.err.lower()
-    # REPRODUCED: issue_workspace() returned a workspace (no sys.exit, no
-    # exception) with the credential-exclude guard skipped and unreported.
+    # ...but the caller is now told the guard didn't take.
+    assert str(work) in captured.err
+    assert ".mcp.json" in captured.err
+    # FIXED: issue_workspace() still returns a workspace (no sys.exit, no
+    # exception), but the skipped credential-exclude guard is now surfaced
+    # as a warning on stderr naming the workspace and the missing entries.
 
 
 def test_attempt_2_follow_loop_unbounded_on_absent_roster_entry(tmp_path, monkeypatch):
