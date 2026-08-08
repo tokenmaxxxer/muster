@@ -31,3 +31,52 @@ Scenario once implemented as specified: branch `issue-58/impl` has an earlier PR
 
 ### Expected
 `already_delivered` should only be true for a PR state that actually represents delivered work (open-not-yet-merged or merged), not any historical PR on the branch — e.g. `--state all` combined with checking the returned PR's actual state (`OPEN`/`MERGED`, not `CLOSED`), or restricting to `--state merged` plus a live-open check. The proposal as written carries this gap into the "drop the gate" change without amending `_pr_for_branch`'s state filter, so implementing it verbatim reproduces the exact silent-failure-masking bug class issue-484 is trying to fix.
+
+## before-landing — stance 2: assume this guard goes silent when its own input is malformed — make it go silent
+
+Verdict: NO FINDING
+Seed: spawn.py `_pr_open_or_merged_for_branch`, `_watch` roster-poll grace-wait, `fail_closed_downgrade` silent-failure-upgrade branch (commit 45473c8)
+cap_seconds: 120
+tier: size:default
+diff_stat_lines: ~260 (3 files)
+started_at: 2026-08-08T10:05:00Z
+ended_at: 2026-08-08T10:24:00Z
+
+Tested three angles directly:
+
+1. `_pr_open_or_merged_for_branch(root, branch)` with a monkeypatched
+   `subprocess.run`:
+   - non-JSON stdout, rc=0 -> returns `None` (fail-closed, correct).
+   - rc != 0 with well-formed JSON stdout -> returns `None` (rc check runs
+     before parsing, correct — no false positive from stray output).
+   - one edge case *did* crash: valid JSON but wrong shape (a dict instead
+     of a list, e.g. `{"number":42,"state":"OPEN"}`) raises
+     `AttributeError: 'str' object has no attribute 'get'` because the
+     `try/except ValueError` around `json.loads` only catches decode
+     failure, not shape mismatch. This is a real gap, but it is not
+     realistically reachable: `gh pr list --json number,state` always
+     returns a JSON array by contract of the `--json` flag; there is no
+     `gh` failure mode that emits a bare JSON object for a list query. Not
+     pursuing as the finding — no plausible caller/attacker gets this
+     shape from `gh` itself, so it doesn't clear the "reproduction that
+     matters" bar even though the crash itself reproduces.
+
+2. `_watch`'s new grace-wait loop against a corrupted `WORKSPACE_INDEX` on
+   disk (mid-write JSON): `_workspace_index_load()` catches `(OSError,
+   ValueError)` and returns `{}`. Confirmed by reading the loop: each poll
+   iteration re-reads via `_workspace_index_load()`, so a corrupt file
+   during the grace window just yields `{}` -> `entry=None` -> loop keeps
+   spinning until `stall_timeout_min*60` elapses -> falls through to the
+   existing "기록 없음" stderr message and `return 1`. The full grace
+   window is consumed, not skipped; nothing hangs or exits early. No
+   defect here.
+
+3. `fail_closed_downgrade`'s new branch has a single call site
+   (`_spawn_one`) that always passes real `bool`s for `already_delivered`/
+   `new_commit`/`push_succeeded` computed from concrete git/gh state — no
+   other caller exists in the repo (`grep -rn fail_closed_downgrade`
+   confirms). "malformed types from a future caller" has no current
+   reproduction; it's speculation about code that doesn't exist yet, which
+   the rules explicitly disqualify.
+
+No finding clears the reproduction bar for this stance.
