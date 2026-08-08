@@ -197,6 +197,49 @@ def t_gate_porting_rows_are_ported_or_justified():
     )
 
 
+GATES_PY = ROOT / "gates" / "gates.py"
+
+
+def t_gates_docstring_states_retroactivity_rule():
+    """#362 acceptance: `gates/gates.py` 의 모듈 docstring 이 소급 금지
+    원칙(작성 시점에 대응할 수 없었던 이유로 나중에 실패시키지 않는다)을
+    명시해야 한다."""
+    text = GATES_PY.read_text(encoding="utf-8")
+    assert "소급" in text and "작성 시점" in text, (
+        f"{GATES_PY} 의 docstring 에 #362 소급 금지 규칙 문구가 없다."
+    )
+
+
+ISSUE_467_DISPOSITION_ROWS = [
+    318, 320, 362, 363, 376, 377, 379, 390, 412, 415, 416, 419, 424,
+]
+
+_ISSUE_467_BATCH_A_CITATIONS = {
+    362: ROOT / "gates" / "test_boundary.py",
+    390: ROOT / "gates" / "test_merge_state_gate.py",
+    412: ROOT / "on-the-record" / "hooks" / "test_self_update_shallow.py",
+}
+
+
+def t_class_b_disposition_rows_cited():
+    """issue-467 ADR: 13개 `deployed-contract+check` 행이 전부 표에 있어야
+    하고, 이미 배달된 배치(A: #362/#390/#412)는 실제 파일 경로 인용이
+    있어야 한다 — 아직 배달 안 된 나머지 10개 행은 표에 있는 것만으로
+    충분하다(뒤 배치가 자기 배달 때 인용을 추가한다)."""
+    missing_citation = []
+    for n in _ISSUE_467_BATCH_A_CITATIONS:
+        assert n in ISSUE_467_DISPOSITION_ROWS, f"#{n} 이 disposition 표에 없다."
+        path = _ISSUE_467_BATCH_A_CITATIONS[n]
+        if not path.is_file():
+            missing_citation.append((n, path))
+    assert not missing_citation, (
+        f"배치 A 행이 인용하는 파일이 없다: {missing_citation}"
+    )
+    assert len(ISSUE_467_DISPOSITION_ROWS) == 13, (
+        "issue-467 disposition 표는 13개 행이어야 한다."
+    )
+
+
 def _run(fns):
     ok = 0
     for name, fn in fns:
