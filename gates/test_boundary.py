@@ -143,26 +143,57 @@ GATE_PORTING_ISSUES = [
 _HOOKS_DIR = ROOT / "on-the-record" / "hooks"
 
 
+# issue #464: "justified" 행이 실제로 처분을 밝히고 있는지 확인하는
+# 어휘 목록 — 행 자체의 텍스트가 이 중 하나를 인용해야 한다(절 제목으로는
+# 통과 못 함 — 절 제목 fallback 은 필러 텍스트를 `### Justified` 절 아래
+# 아무데나 끼워 넣어도 통과시키는 우회를 만든다는 게 issue-464 hunt 에서
+# 확인됐다: docs/reports/2026-08-08-hunt-class-a-orchestrator-loop-wiring.md).
+# 여덟 개 다 UNENFORCED-CLAUSES.md 의 justified 9행 각각이 실제로 쓰고
+# 있는 문구다 — 새 어휘를 추가할 땐 그 행 자체의 실제 처분 서술에서
+# 가져와야 한다.
+_DISPOSITION_VOCAB = ("roster_watchdog", "operator decision", "CI-supplement",
+                      "n/a (infrastructure)", "contract-guard.sh",
+                      "not a blocking check", "nothing to port",
+                      "issue-comment history")
+
+
 def t_gate_porting_rows_are_ported_or_justified():
-    """issue #457 acceptance: 각 16개 카테고리-2 이슈 번호가
-    `on-the-record/hooks/**` 안에 실제로 그 이슈를 언급하는 강제 항목으로
-    존재하거나(포팅), `on-the-record/UNENFORCED-CLAUSES.md` 안에 정당화
-    행으로 존재해야(justify) 한다 — 조용한 공백이 하나도 없어야 한다."""
+    """issue #457 acceptance (issue #464 로 조여짐): 각 16개 카테고리-2
+    이슈 번호가 `on-the-record/hooks/**` 안에 실제로 그 이슈를 언급하는
+    강제 항목으로 존재하거나(포팅), `on-the-record/UNENFORCED-CLAUSES.md`
+    안에 정당화 행으로 존재하고 그 행(또는 그 행이 속한 절 제목)이
+    `_DISPOSITION_VOCAB` 어휘 중 하나를 실제로 인용해야(justify) 한다 —
+    비어있지 않기만 하면 통과하던 이전 검사(issue #457)와 달리, 처분을
+    실제로 밝히지 않는 행은 "정당화 없음"으로 취급한다."""
     hook_text = "\n".join(
         p.read_text(encoding="utf-8") for p in sorted(_HOOKS_DIR.glob("*.sh"))
     )
     unenforced_text = UNENFORCED.read_text(encoding="utf-8")
+    lines = unenforced_text.splitlines()
     missing = []
+    unjustified = []
     for n in GATE_PORTING_ISSUES:
         tag = f"#{n}"
         ported = tag in hook_text
-        justified = re.search(rf"\|\s*{tag}\s*\|", unenforced_text) is not None
-        if not (ported or justified):
-            missing.append(n)
+        row_line = next(
+            (line for line in lines if re.search(rf"\|\s*{tag}\s*\|", line)),
+            None)
+        if row_line is None:
+            if not ported:
+                missing.append(n)
+            continue
+        if not any(kw in row_line for kw in _DISPOSITION_VOCAB):
+            unjustified.append(n)
     assert not missing, (
         f"issue #457 카테고리-2 행이 포팅도 정당화도 안 됐다: {missing} — "
         f"{_HOOKS_DIR}/**.sh 에 강제 항목이 있거나 {UNENFORCED} 에 정당화 "
         "행이 있어야 한다."
+    )
+    assert not unjustified, (
+        f"issue #464 조여진 검사: 이슈 {unjustified} 의 정당화 행이 "
+        f"{_DISPOSITION_VOCAB} 어휘 중 어느 것도 인용하지 않는다 — "
+        f"{UNENFORCED} 에서 처분(mechanism 인용 또는 operator-decision/"
+        "Justified/Deferred 표시)을 명시하는 문구로 고쳐야 한다."
     )
 
 

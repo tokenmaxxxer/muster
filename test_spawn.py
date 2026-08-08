@@ -3110,7 +3110,8 @@ class Watchdog(unittest.TestCase):
             old_stdout = sys.stdout
             sys.stdout = buf
             try:
-                spawn.roster_watchdog()
+                with mock.patch.object(spawn, "_board_wide_sweep", return_value=0):
+                    spawn.roster_watchdog()
             finally:
                 sys.stdout = old_stdout
                 spawn.ROSTER = old_roster
@@ -3132,7 +3133,8 @@ class Watchdog(unittest.TestCase):
             old_stdout = sys.stdout
             sys.stdout = buf
             try:
-                result = spawn.roster_watchdog()
+                with mock.patch.object(spawn, "_board_wide_sweep", return_value=0):
+                    result = spawn.roster_watchdog()
             finally:
                 sys.stdout = old_stdout
                 spawn.ROSTER = old_roster
@@ -3156,12 +3158,118 @@ class Watchdog(unittest.TestCase):
             old_stdout = sys.stdout
             sys.stdout = buf
             try:
-                result = spawn.roster_watchdog()
+                with mock.patch.object(spawn, "_board_wide_sweep", return_value=0):
+                    result = spawn.roster_watchdog()
             finally:
                 sys.stdout = old_stdout
                 spawn.ROSTER = old_roster
                 spawn.WATCHDOG_STATE = old_state
             self.assertEqual(result, 1)
+
+    def test_roster_watchdog_folds_board_wide_sweep_into_anomaly_count(self):
+        with tempfile.TemporaryDirectory() as td:
+            roster_path = Path(td) / "active.json"
+            old_roster = spawn.ROSTER
+            old_state = spawn.WATCHDOG_STATE
+            spawn.ROSTER = roster_path
+            spawn.WATCHDOG_STATE = Path(td) / "watchdog_state.json"
+            buf = io.StringIO()
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                with mock.patch.object(spawn, "_board_wide_sweep", return_value=3):
+                    result = spawn.roster_watchdog()
+            finally:
+                sys.stdout = old_stdout
+                spawn.ROSTER = old_roster
+                spawn.WATCHDOG_STATE = old_state
+            self.assertEqual(result, 3)
+            self.assertNotIn("이상 신호 없음", buf.getvalue())
+
+    def test_board_wide_sweep_reports_and_counts_closure_violations(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "gates").mkdir()
+            fake_cs = mock.MagicMock()
+            fake_cs.find_violations.return_value = (
+                [{"issue": 1, "pr": 2, "role": "implementation",
+                  "kind": "open-pr-on-closed-issue"}], [])
+            fake_cs.format_report.return_value = "issue #1 / PR #2: open-pr-on-closed-issue"
+            fake_sc = mock.MagicMock()
+            fake_sc._list_open_issues.return_value = []
+            fake_sc.find_uncovered.return_value = []
+            with mock.patch.dict(sys.modules,
+                                  {"closure_sweep": fake_cs,
+                                   "spawn_coverage": fake_sc}):
+                buf = io.StringIO()
+                old_stdout = sys.stdout
+                sys.stdout = buf
+                try:
+                    result = spawn._board_wide_sweep(root)
+                finally:
+                    sys.stdout = old_stdout
+            self.assertEqual(result, 1)
+            self.assertIn("closure-sweep: 위반 1건", buf.getvalue())
+
+    def test_board_wide_sweep_reports_and_counts_uncovered_issues(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "gates").mkdir()
+            fake_cs = mock.MagicMock()
+            fake_cs.find_violations.return_value = ([], [])
+            fake_sc = mock.MagicMock()
+            fake_sc._list_open_issues.return_value = [
+                {"number": 500, "createdAt": "2020-01-01T00:00:00Z"}]
+            fake_sc.find_uncovered.return_value = [500]
+            with mock.patch.dict(sys.modules,
+                                  {"closure_sweep": fake_cs,
+                                   "spawn_coverage": fake_sc}):
+                buf = io.StringIO()
+                old_stdout = sys.stdout
+                sys.stdout = buf
+                try:
+                    result = spawn._board_wide_sweep(root)
+                finally:
+                    sys.stdout = old_stdout
+            self.assertEqual(result, 1)
+            self.assertIn("spawn-coverage: 커버되지 않은 이슈", buf.getvalue())
+
+    def test_board_wide_sweep_clean_returns_zero(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "gates").mkdir()
+            fake_cs = mock.MagicMock()
+            fake_cs.find_violations.return_value = ([], [])
+            fake_sc = mock.MagicMock()
+            fake_sc._list_open_issues.return_value = []
+            fake_sc.find_uncovered.return_value = []
+            with mock.patch.dict(sys.modules,
+                                  {"closure_sweep": fake_cs,
+                                   "spawn_coverage": fake_sc}):
+                result = spawn._board_wide_sweep(root)
+            self.assertEqual(result, 0)
+
+    def test_board_wide_sweep_reports_gh_failure_not_as_clean(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "gates").mkdir()
+            fake_cs = mock.MagicMock()
+            fake_cs.find_violations.return_value = (
+                [], [{"subject": "issue-1", "reason": "gh-issue-view-failed"}])
+            fake_sc = mock.MagicMock()
+            fake_sc._list_open_issues.return_value = None
+            with mock.patch.dict(sys.modules,
+                                  {"closure_sweep": fake_cs,
+                                   "spawn_coverage": fake_sc}):
+                buf = io.StringIO()
+                old_stdout = sys.stdout
+                sys.stdout = buf
+                try:
+                    result = spawn._board_wide_sweep(root)
+                finally:
+                    sys.stdout = old_stdout
+            self.assertEqual(result, 2)
+            self.assertIn("gh 실패", buf.getvalue())
 
 
 class SessionEndVerdict(unittest.TestCase):

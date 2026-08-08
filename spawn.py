@@ -31,6 +31,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -1632,6 +1633,37 @@ def watchdog_check_one(key: str, entry: dict, now: float | None = None,
     return anomalies
 
 
+def _board_wide_sweep(root: Path) -> int:
+    """이슈 #464: closure_sweep/spawn_coverage 를 한 틱씩 돌려 보고만 한다
+    (observe-only, roster_watchdog 계약과 동일). 위반/미커버 이슈 수를
+    합쳐서 돌려준다 — gh 실패(skips 있음 / open_issues=None)도 "깨끗함"이
+    아니라 이상 신호 1건으로 센다(조용한 실패가 진행과 구분 안 되는 결함을
+    재현하지 않기 위해)."""
+    sys.path.insert(0, str(root / "gates"))
+    import closure_sweep
+    import spawn_coverage
+    count = 0
+    violations, skips = closure_sweep.find_violations(root)
+    if violations:
+        count += len(violations)
+        print(f"[watchdog] closure-sweep: 위반 {len(violations)}건")
+        print(closure_sweep.format_report(violations))
+    if skips:
+        count += 1
+        print(f"[watchdog] closure-sweep: 확인 불가 (gh 실패) {len(skips)}건")
+    open_issues = spawn_coverage._list_open_issues(root)
+    if open_issues is None:
+        count += 1
+        print("[watchdog] spawn-coverage: 이슈 목록을 읽을 수 없다 (gh 실패) — 판정 불가")
+    else:
+        uncovered = spawn_coverage.find_uncovered(
+            open_issues, board(root), datetime.now(timezone.utc))
+        if uncovered:
+            count += len(uncovered)
+            print(f"[watchdog] spawn-coverage: 커버되지 않은 이슈 {uncovered}")
+    return count
+
+
 def roster_watchdog(auto_respawn: bool = False) -> int:
     """`spawn.py watchdog` — 살아있는 모든 역할 세션을 한 번 스캔해서 이상
     신호를 사람이 읽을 수 있게 출력한다. observe-only: 아무 것도 고치거나
@@ -1648,14 +1680,22 @@ def roster_watchdog(auto_respawn: bool = False) -> int:
     값을 그대로 프로세스 종료 코드로 쓴다(spawn.py:2445) — stdout 파싱 없이
     idle/deadlock/불필요한 작업이 있었는지 종료 코드만으로 알 수 있게 한다.
     `auto_respawn` 의 부작용(재스폰/상한-코멘트)은 이 변경과 무관 — 반환값만
-    바뀐다."""
+    바뀐다.
+
+    이슈 #464: 로스터 스캔과 별도로, 매 틱마다 보드-전체(closure_sweep /
+    spawn_coverage) 스윕도 한 번 돈다 — 로스터가 비어 있어도 건너뛰지
+    않는다(로스터가 빈 상태에서 보드가 방치될 위험이 가장 크다). 위반/미커버
+    이슈는 로스터 이상 신호와 같은 모양으로 출력되고 `anomaly_count`에
+    합산된다. observe-only 계약은 그대로 — 아무것도 고치거나 닫지 않는다."""
+    anomaly_count = _board_wide_sweep(ROOT)
     d = _roster_load()
     if not d:
         print("돌고 있는 역할 세션 없음")
-        return 0
+        if not anomaly_count:
+            print("이상 신호 없음")
+        return anomaly_count
     state = _watchdog_state_load()
     respawn_state = _respawn_state_load() if auto_respawn else {}
-    anomaly_count = 0
     for key, e in sorted(d.items()):
         if not _alive(e.get("pid", 0)):
             if auto_respawn:
