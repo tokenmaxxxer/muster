@@ -1,7 +1,28 @@
 ---
-code_under_review: HEAD
+code_under_review: test_spawn.py
 loop_state: awaiting-verify
 ---
+
+## What was done (2026-08-08 follow-through, final step)
+
+Replaced the SIGKILL acceptance test's synthetic stub with a real-process
+reproduction, per the step-3 observation
+(`docs/issue-492/reports/execution-observation.md`, merged) that flagged
+the original `test_sigkill_acceptance_check` as using a synthetic
+`alive_fn` stub instead of a real `kill -9`.
+
+- `test_spawn.py`, `Reconcile` class: renamed the existing stub test to
+  `test_sigkill_acceptance_check_stub` (kept, unchanged behavior — fast
+  unit case) and added
+  `test_sigkill_acceptance_check_real_process`: spawns a real `sleep 60`
+  subprocess, registers its pid as a session's `session-start` event,
+  sends it a real `SIGKILL` (`proc.kill()`), reaps it, then polls
+  `session_end_verdict()` (no `alive_fn` override — exercises the real
+  `_alive()`/`os.kill(pid, 0)` path) against a fixture-shortened stall
+  bound (`stall_timeout_min = 0.02`, i.e. ~1.2s, for test speed — not the
+  production stall bound) and asserts the terminal state resolves to
+  `crashed` within it, then that `reconcile()` names it `respawn`.
+- Full suite: `python3 -m pytest -q` — 703 passed, 0 failed.
 
 ## What was done
 
