@@ -54,3 +54,7 @@ requirement that expected output be specified/diffed. The design needs either (a
 expected-output binding (not "where the record cites"), or (b) some claim-to-command semantic
 correspondence check, to close this. As written, the regex-plus-exit-code contract is satisfiable
 by a no-op.
+
+## before-landing
+
+Skipped: docs-only, no before-landing dispatch. All paths in this transition's diff are under docs/.
