@@ -37,3 +37,37 @@ A PR whose role record contains an unreproduced/false claim, and for which `reex
 
 ### Expected
 A `fail`/`error` reexecution verdict for a specific PR's claim should block that PR regardless of which files it touched — the proposal itself flags this as unresolved ("or PR-specific scope, decided at implementation time to match the existing scope semantics") but ships the literal `{"gates/"}` example as the illustrative wiring, and the existing `scope` mechanism has no PR-identity concept (only file-path prefixes) to express "this cause applies to PR #N specifically" without a hack such as adding every one of that PR's own file paths as scope entries (workable, but not what's specified, and not exercised by any test the proposal names).
+
+## before-landing — stance 1: assume this change and another plugin's rule cancel each other — find the pair
+
+Verdict: FINDING — `gates/ci.py:_phase2_record_evidence()` (and its sibling `gates/closure_sweep.py:classify()`'s `has_record_evidence` path) treat any non-empty `loop_state` as "closing intent" evidence that waives the phase-2 "Closes #issue" requirement — a rule that predates this diff and was written when the enum's non-"landed" values (`scope-proposed`/`scope-approved`/`in-progress`) all meant "still ongoing." This diff adds `refused`/`not-needed`/`cannot-verify` to the same enum, values whose entire purpose (per gates.py's new `record_refusal_reasoned()`) is to declare that work was explicitly NOT delivered. Because `_phase2_record_evidence` deliberately ignores the *value* of `loop_state` (only checks non-empty, per issue #284's design comment "loop_state 의 값은 보지 않는다"), a merged phase-2 PR whose record says `loop_state: refused` now silently satisfies the "must close the issue" CI check and the closure-sweep evidence check — the refusal-declaring record cancels the very enforcement that #284 built specifically to make sure delivery was real. Nobody updated `_phase2_record_evidence`/`closure_sweep.classify` to exclude the new refusal states when this diff added them.
+Kind: composition
+Seed: git diff origin/main...HEAD (gates/gates.py record_refusal_reasoned + roles/*.json loop_state enum additions) vs gates/ci.py:_phase2_record_evidence and gates/closure_sweep.py has_record_evidence, both pre-existing and unmodified by this diff
+cap_seconds: 180
+tier: size:large
+diff_stat_lines: 1198 insertions across 17 files
+started_at: 2026-08-08T10:21:50Z
+ended_at: 2026-08-08T10:33:00Z
+
+### Reproduce
+```
+python3 -c "
+import sys; sys.path.insert(0, 'gates')
+import gates
+text = '''---
+loop_state: refused
+reason: could not verify claim
+---
+body
+'''
+fm = gates.record_frontmatter(text)
+print(bool(fm.get('loop_state','').strip()))
+"
+```
+(run from repo root; `gates/ci.py:_phase2_record_evidence` performs exactly this `bool(fm.get("loop_state","").strip())` check on line 282, and its result gates whether the "Closes #issue" CI requirement in `gates/ci.py` around line 414 is waived; `gates/closure_sweep.py:classify()` uses the same boolean, sourced identically, to decide whether a merged-PR-with-open-issue counts as a violation.)
+
+### Observed
+`True` — a record whose `loop_state` explicitly declares the work was refused (never delivered) is treated identically to a record declaring `loop_state: landed`, satisfying both the CI closes-check waiver and the closure-sweep delivery-evidence check.
+
+### Expected
+A refusal state (`refused`/`not-needed`/`cannot-verify`) should not count as "closing intent" evidence — if anything it should mean the opposite (no delivery occurred, the issue should stay open, closing the PR without `Closes #issue` should still be flagged). `_phase2_record_evidence` and `closure_sweep`'s `has_record_evidence` computation need to special-case (or exclude) the new refusal states, the same way `_terminal_loop_state()` was updated elsewhere in this diff to keep `landed` last in the enum.

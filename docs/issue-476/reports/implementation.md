@@ -130,15 +130,32 @@ Basis: `docs/issue-476/proposals/implementation.md`
 
 ## Open findings
 
-None.
+Before-landing warrant hunt (stance 1, `docs/reports/2026-08-08-hunt-implementation.md`,
+"before-landing" section) found: `gates/ci.py:_phase2_record_evidence()`
+and `gates/closure_sweep.py`'s `has_record_evidence` path check only
+`loop_state` non-emptiness, not its value (issue #284's deliberate
+design). This diff's H2 refusal states (`refused`/`not-needed`/
+`cannot-verify`) now satisfy that same non-empty check, so a merged
+phase-2 PR whose record explicitly declares no delivery occurred
+silently waives the "Closes #issue" CI requirement — the opposite of
+what a refusal state should mean. `gates/ci.py` and
+`gates/closure_sweep.py` are outside this proposal's frozen write set
+(`docs/issue-476/proposals/implementation.md`'s `files:` list); fixing
+them is scope-exceeded for this build and is not done here.
 
 ## Next steps
 
-None — proposal's write set is complete, tests pass, no open findings.
-Step 4 (execution-observation / conformance-review — measuring the
-issue's pre-registered metrics against threshold) is explicitly out of
-scope for this proposal and is the next step in the issue's plan.
+Follow-up issue/proposal needed: teach `_phase2_record_evidence()` and
+`closure_sweep`'s evidence check to exclude the new refusal states
+(treat `refused`/`not-needed`/`cannot-verify` as NOT closing-intent
+evidence), so a refused/not-needed/cannot-verify record does not
+silently waive the Closes-issue requirement. Step 4
+(execution-observation / conformance-review — measuring the issue's
+pre-registered metrics against threshold) remains the issue's own next
+step and is unaffected by this finding.
 
 ## Resolution path
 
-N/A — no open findings.
+The open finding above resolves via a new proposal scoped to
+`gates/ci.py`/`gates/closure_sweep.py`, filed against issue #476 (or a
+follow-up issue) once triaged by the user/orchestrator.
