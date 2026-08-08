@@ -71,3 +71,66 @@ print(bool(fm.get('loop_state','').strip()))
 
 ### Expected
 A refusal state (`refused`/`not-needed`/`cannot-verify`) should not count as "closing intent" evidence — if anything it should mean the opposite (no delivery occurred, the issue should stay open, closing the PR without `Closes #issue` should still be flagged). `_phase2_record_evidence` and `closure_sweep`'s `has_record_evidence` computation need to special-case (or exclude) the new refusal states, the same way `_terminal_loop_state()` was updated elsewhere in this diff to keep `landed` last in the enum.
+
+## after-proposal — stance 0: assume the gate just touched (gates/claim_scan.py, per the proposal below) is bypassable — find the bypass.
+
+Verdict: FINDING — the proposal's own `--base` design silently falls back to permissive whole-repo `git ls-files` targets whenever the diff command errors (bad ref, shallow clone, wrong merge-base), reopening case0 (the exact bug `--base` exists to close) with no error signal.
+Kind: design-error
+Seed: docs/issue-490/proposals/implementation.md ("What will be done" #1: "`_repo_targets(repo, base=None)`: when `base` is given, source targets from `git diff --name-only <base>...HEAD` (falling back to the existing whole-repo `git ls-files` behavior if the diff command itself errors, e.g. unknown ref — fail toward the current behavior, never toward zero targets/spurious false-rejects).")
+cap_seconds: 60
+tier: default
+diff_stat_lines: docs-only (survey.md + proposal.md)
+started_at: 2026-08-08T00:00:00Z
+ended_at: 2026-08-08T00:05:00Z
+
+### Reproduce
+```
+git diff --name-only nonexistent-ref...HEAD
+```
+run inside this repo (or any repo where `--base` is given a ref that doesn't resolve — a typo, a stale branch name, or a shallow clone that lacks the base commit, which is common in CI checkouts).
+
+### Observed
+```
+fatal: 애매한 인자 'nonexistent-ref...HEAD': 알 수 없는 리비전 또는 작업 폴더에 없는 경로.
+경로와 리비전을 구분하려면 다음과 같이 '--'를 사용하십시오:
+'git <명령> [<리비전>...] -- [<파일>...]'
+```
+i.e. the diff subprocess exits non-zero. Per the proposal text, `_repo_targets()` is designed to catch exactly this and fall back to whole-repo `git ls-files` — the same target set case0 exploited (a fabricated claim citing any real-but-unrelated tracked file passes with 0 findings). No warning, no distinct exit code, nothing that would let a caller (or the human reading `claim_scan`'s output) know diff-scoping silently failed and the check reverted to its known-bypassable mode. Since the proposal explicitly rules out a caller (CI shallow clone, wrong base spec, refname typo) surfacing this, `--base` is a bypass whenever the ref it's given doesn't resolve — attacker-controlled or not, any mundane CI misconfiguration reopens case0 with the gate reporting success.
+
+### Expected
+When `--base` is supplied but the diff command fails, `_repo_targets()`/`main()` should not silently degrade to the pre-fix permissive whole-repo set — it should either hard-fail loudly (distinct from a clean pass) or at minimum print/log that diff-scoping was requested but not honored, so a case0-shaped fabrication under a broken `--base` doesn't pass with 0 findings and no indication the intended check never ran.
+
+## before-landing — stance 1: assume the gate just touched is bypassable — find the bypass.
+
+Verdict: FINDING — the dotted-form resolver's basename-suffix fallback (`_cite_matches`'s `any(rt.endswith("/" + derived))`) matches a dotted citation against *any* diffed file with the same basename, regardless of directory/package, so citing an untouched module's function (e.g. `pkgB.utils.f`) is accepted as valid evidence as long as an unrelated file with the same basename (e.g. `pkgA/utils.py`) is in the diff-scoped repo_targets. This reopens case0 (citing something real-but-unrelated) specifically for dotted/module-style citations, even with `--base` diff-scoping in place.
+Kind: composition
+Seed: git diff 452afe1 -- gates/claim_scan.py gates/test_claim_scan.py (the new `_dotted_to_file`/`_cite_matches` basename-suffix fallback)
+cap_seconds: 120
+tier: default
+diff_stat_lines: 21-200
+started_at: 2026-08-08T00:00:00Z
+ended_at: 2026-08-08T00:20:00Z
+
+### Reproduce
+```
+# repo with pkgA/utils.py and pkgB/utils.py both existing at base_ref2,
+# then only pkgA/utils.py is modified in the child commit (pkgB/utils.py untouched):
+git diff --name-only base_ref2...HEAD   # -> pkgA/utils.py   (pkgB/utils.py NOT in diff)
+
+# claim body (claim2.md):
+#   I verified pkgB.utils.f is safe.
+#
+#   Verify: python3 -c "import pkgB.utils; utils.f()"
+
+python3 gates/claim_scan.py claim2.md --repo <repo> --base base_ref2
+```
+
+### Observed
+```
+claim_scan: claim2.md — 주장 근거/추적성 이상 없음
+EXIT=0
+```
+Gate passes (exit 0) even though `pkgB.utils` was never touched by the diff — only the unrelated `pkgA/utils.py` was.
+
+### Expected
+The claim cites `pkgB.utils.f`, a module that is not in the diff-scoped `repo_targets`; the gate should reject it (exit 1, "근거가 지목하는 대상이 diff/repo 에 없다") since `pkgB/utils.py` was never changed. Instead the basename-only fallback (`derived="utils.py"` matching any diffed path ending in `/utils.py`) silently accepts an unrelated file as "evidence" for a completely different, untouched module.
