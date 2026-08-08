@@ -40,9 +40,19 @@ path, not just name the mismatch.
 - Must follow this directory's existing hook contract: `ORCHESTRATE_OFF`
   kill switch, `CLAUDE_ROLE` early-exit for spawned role sessions
   (mirroring `decision-queue-stopgate.sh`), fail-closed trap, and the
-  `hookSpecificOutput.additionalContext` / `{"decision":"block"}`
-  vocabulary already used by `decision-queue-stopgate.sh` — no new output
-  shape invented.
+  `{"decision":"block"}` vocabulary already used by
+  `decision-queue-stopgate.sh` for the 2K abort. Note (warrant-hunt
+  finding, after-proposal transition, `docs/reports/2026-08-08-hunt-retry-loop-bound.md`):
+  every existing `additionalContext` emitter in this repo
+  (`decision-queue-stopgate.sh`, `stop-gate.sh`, `role-test-claim-guard.sh`)
+  is a `Stop`-event hook, not `PreToolUse` — the K-th allow-with-context
+  nudge is a new usage of `hookSpecificOutput.additionalContext` on
+  `PreToolUse` for this repo, not a copy of an existing PreToolUse
+  precedent. Phase 2 must verify against the Claude Code hook schema
+  (Claude Code docs, `PreToolUse` supports `hookSpecificOutput` with
+  `permissionDecision`/`permissionDecisionReason` as well as
+  `additionalContext`) rather than assuming `decision-queue-stopgate.sh`'s
+  shape transfers unmodified.
 - K and 2K must be visible/tunable, not magic numbers buried in the
   script (an env var default, so a consumer repo can adjust without
   editing the hook).
