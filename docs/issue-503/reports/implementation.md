@@ -100,3 +100,47 @@ None — phase 2 complete. Commit, push, open PR against main with
 ## Resolution path
 
 N/A — no open findings.
+
+## Follow-up: spec-index drift on PR #504, and how it bypassed #459's preflight
+
+`d7aa723` staged `on-the-record/commands/run.md` (a file tracked in
+`docs/specs/reconciled-index.md`) without regenerating the index in the
+same commit, leaving `test_spec_index.py::t_baseline_repo_passes` red on
+main-tip pytest. Fixed by running
+`python3 gates/spec_index.py --update` and staging the resulting
+`docs/specs/reconciled-index.md` row (recorded hash
+`32262bac5f21…` → `87d6bce07c09…`) in this follow-up commit.
+
+**How the commit got past #459's spec-index-preflight gate — finding, not
+just a fix.** `on-the-record/hooks/spec-index-preflight.sh` is a
+PreToolUse-on-Bash hook shipped as a file inside the plugin tree
+(`on-the-record/hooks/`), but a shipped hook file is inert until a
+consuming repo's `.claude/settings.json` actually registers it under
+`hooks.PreToolUse`. This repo's `.claude/settings.json` and
+`.claude/settings.local.json` carry no `PreToolUse` entry referencing
+`spec-index-preflight.sh` (checked directly: no match for
+`spec-index|preflight|PreToolUse` in either file). So every `git commit`
+in this session — including `d7aa723` — went straight to git with no
+deny-before-effect check in the loop; the only thing that caught the
+drift was `test_spec_index.py`'s after-the-fact CI-supplement check,
+exactly the "runs on the working tree after a commit has already landed"
+gap the hook's own header comment says it exists to close.
+
+This is a real gap, not a one-off: #459 shipped the hook file and its
+own unit tests (`on-the-record/hooks/test_spec_index_preflight.py`) but
+apparently no step that installs/verifies the hook registration in a
+consuming repo's settings — so the deny-before-effect guarantee #459
+describes does not actually hold in this repo today. Flagging as a
+finding for a future issue rather than fixing here: wiring
+`.claude/settings.json` is an operational-surface file change (falls
+under contract v3's "operational-surface file needs a docs/handbooks/
+touch in the same commit" rule) and is outside this issue's frozen write
+set.
+
+Also observed, out of scope for this fix: two more pytest failures
+(`gates/test_capability_gates.py::t_actual_tree_schema_field_orphans_catches_alive`,
+`gates/test_duplicate_test_basenames.py::t_duplicate_test_basenames_passes_on_current_tree`)
+are caused by a gitignored `runs/rulebooks/**` runtime checkout present in
+this working tree (verified absent, and both tests green, on a clean
+`origin/main` worktree) — pre-existing local environment state, not
+something this branch's diff touches or introduces.
