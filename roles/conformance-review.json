@@ -13,10 +13,16 @@
     }
   },
   "decides": "산출물 vs 명세 일치",
-  "use_when": "implementation 커밋이 랜딩된 후, 요구사항 대비 감사가 필요할 때. 빌더 의도는 안 읽는다",
+  "use_when": "implementation 커밋이 랜딩된 후, 요구사항 대비 감사가 필요할 때. 빌더 의도는 안 읽는다 (board_condition: an implementation commit landed on the branch AND no conformance-review record exists yet for this commit sha)",
   "produces": "요구사항별 Present|Surface|Absent|Incorrect|Unverifiable, 인용된 증거",
-  "write_scope": [],
+  "write_scope": ["docs/issue-<n>/reports/conformance-review.md"],
+  "spec": "roles/specs/conformance-review.spec.json",
   "record_fields": {
-    "loop_state": ["reported"]
+    "loop_state": {
+      "progress": ["auditing"],
+      "terminal": ["reported"],
+      "refusal": ["spec-ambiguous"],
+      "error": ["subject-unreadable"]
+    }
   }
 }

@@ -1,0 +1,33 @@
+{
+  "role": "conformance-review",
+  "source_standard": "EARL 1.0 Schema (W3C, https://www.w3.org/TR/EARL10-Schema/)",
+  "required_fields": [
+    { "name": "subject", "type": "ref", "required": true },
+    { "name": "test", "type": "ref", "required": true },
+    {
+      "name": "result",
+      "type": "enum",
+      "enum": ["passed", "failed", "cantTell", "inapplicable", "untested"],
+      "required": true
+    },
+    { "name": "assertedBy", "type": "string", "required": true }
+  ],
+  "reference_resolution": {
+    "rule": "test must resolve to the actual conformance criterion (a spec section, requirement, or lint rule) being checked, not a vague description; subject must resolve to a real repo path or commit sha.",
+    "checked_by": "on-the-record/hooks/role-spec-reference-guard.sh"
+  },
+  "recomputation": {
+    "rule": "overall verdict = the worst-case result across all cited test entries (failed > cantTell > inapplicable > untested > passed), never a standalone summary field asserted independently of the cited results (issue-515 invariant 4).",
+    "checked_by": "TBD (follow-up — issue-521 out-of-scope note: per-role recomputation enforcement is a follow-up once evidence from real usage shows which roles need it)"
+  },
+  "write_scope": ["docs/issue-<n>/reports/conformance-review.md"],
+  "loop_state": {
+    "progress": ["auditing"],
+    "terminal": ["reported"],
+    "refusal": ["spec-ambiguous"],
+    "error": ["subject-unreadable"]
+  },
+  "use_when": {
+    "board_condition": "an implementation commit landed on the branch AND no conformance-review record exists yet for this commit sha"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "role": "execution-observation",
+  "source_standard": "EARL 1.0 Schema (W3C, https://www.w3.org/TR/EARL10-Schema/)",
+  "required_fields": [
+    { "name": "subject", "type": "ref", "required": true },
+    { "name": "test", "type": "ref", "required": true },
+    {
+      "name": "result",
+      "type": "enum",
+      "enum": ["passed", "failed", "cantTell", "inapplicable", "untested"],
+      "required": true
+    },
+    { "name": "assertedBy", "type": "string", "required": true },
+    { "name": "mode", "type": "string", "required": false }
+  ],
+  "reference_resolution": {
+    "rule": "subject and test must each resolve to a repo path, commit sha, or a command actually run — no orphan references (issue-515 invariant 2).",
+    "checked_by": "on-the-record/hooks/role-spec-reference-guard.sh"
+  },
+  "recomputation": {
+    "rule": "overall verdict = the worst-case result across all cited test entries (failed > cantTell > inapplicable > untested > passed), never a standalone summary field asserted independently of the cited results (issue-515 invariant 4).",
+    "checked_by": "TBD (follow-up — issue-521 out-of-scope note: per-role recomputation enforcement is a follow-up once evidence from real usage shows which roles need it)"
+  },
+  "write_scope": ["docs/issue-<n>/reports/execution-observation.md"],
+  "loop_state": {
+    "progress": ["running", "collecting-evidence"],
+    "terminal": ["handed-off"],
+    "refusal": ["execution-not-possible"],
+    "error": ["environment-setup-failed"]
+  },
+  "use_when": {
+    "board_condition": "an executable artifact landed on the branch AND no execution-observation record exists yet for this commit sha"
+  }
+}

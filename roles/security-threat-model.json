@@ -13,10 +13,16 @@
     }
   },
   "decides": "신뢰 경계의 위협 표면",
-  "use_when": "스펙에 신뢰 경계·인증·민감데이터가 걸릴 때",
+  "use_when": "스펙에 신뢰 경계·인증·민감데이터가 걸릴 때 (board_condition: a spec or design doc landed that introduces a new trust boundary, authentication surface, or sensitive-data flow AND no security-threat-model record exists yet for it)",
   "produces": "STRIDE table, mitigation list per threat, residual risk note",
-  "write_scope": [],
+  "write_scope": ["docs/issue-<n>/reports/security-threat-model.md"],
+  "spec": "roles/specs/security-threat-model.spec.json",
   "record_fields": {
-    "loop_state": ["landed"]
+    "loop_state": {
+      "progress": ["modeling"],
+      "terminal": ["landed"],
+      "refusal": ["trust-boundary-undetermined"],
+      "error": ["spec-unreadable"]
+    }
   }
 }

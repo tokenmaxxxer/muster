@@ -1,0 +1,40 @@
+{
+  "role": "defect-verification",
+  "source_standard": "ISO/IEC/IEEE 29119-3 Incident Report (clause 7.12, Annex A.2.15) + Bugmon reproduction precedent",
+  "required_fields": [
+    {
+      "name": "verdict",
+      "type": "enum",
+      "enum": ["reproduced", "not-reproduced"],
+      "required": true
+    },
+    { "name": "repro_steps", "type": "string", "required": true },
+    { "name": "evidence", "type": "ref[]", "required": true },
+    { "name": "severity", "type": "string", "required": true },
+    { "name": "status", "type": "string", "required": true },
+    {
+      "name": "finding_type",
+      "type": "enum",
+      "enum": ["blocking", "advisory"],
+      "required": true
+    }
+  ],
+  "reference_resolution": {
+    "rule": "every evidence[] entry must resolve to an existing repo path, commit sha, or line-anchored citation of the reproduction log — no orphan references (issue-515 invariant 2). severity and status are free text: 29119-3 clause 7.12/Annex A.2.15 names 'originator's severity assessment' and 'status' as required fields but defines no closed vocabulary for either (scout-brief.md), so type: enum with an invented value list would violate the proposal's no-invented-enum constraint.",
+    "checked_by": "on-the-record/hooks/role-spec-reference-guard.sh"
+  },
+  "recomputation": {
+    "rule": "verdict is derived from whether repro_steps, executed against the cited evidence, actually reproduces the defect — never asserted as a standalone field with no attached repro log (issue-515 invariant 4). No closed vocabulary exists for repro_steps content itself per 29119-3/Bugmon, so it stays free text.",
+    "checked_by": "TBD (follow-up — issue-521 out-of-scope note: per-role recomputation enforcement is a follow-up once evidence from real usage shows which roles need it)"
+  },
+  "write_scope": ["docs/issue-<n>/reports/defect-verification.md"],
+  "loop_state": {
+    "progress": ["reproducing"],
+    "terminal": ["cleared"],
+    "refusal": ["cannot-attempt-independent-reproduction"],
+    "error": ["environment-setup-failed"]
+  },
+  "use_when": {
+    "board_condition": "an execution-observation or conformance-review record's result is disputed by another comment on the same commit sha AND no defect-verification record exists yet for that dispute"
+  }
+}
