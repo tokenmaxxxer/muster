@@ -3032,7 +3032,28 @@ def checkout_issue_branch(cwd: str, issue: int, role: str) -> str:
         return subprocess.run(["git", "-C", cwd, *a], capture_output=True, text=True)
     _fetch_or_halt(cwd, "브랜치 체크아웃")
     if git("rev-parse", "--verify", "-q", br).returncode == 0:
-        r = git("checkout", br)
+        # 재사용 워크스페이스의 로컬 브랜치가 base 에 완전히 흡수된 채로
+        # 남아있을 수 있다 (머지 후 --delete-branch 는 원격만 지운다, 로컬
+        # ref 는 그대로 살아남는다 — 실측: issue-441, issue-428 survey 의
+        # issue-999 픽스처). 그 상태로 그냥 checkout 하면 이후 커밋이 없는
+        # 한 origin 대비 0-ahead 브랜치로 PR 을 열게 되어 "No commits
+        # between main and issue-<n>/<role>" 로 조용히 실패한다. base 대비
+        # 커밋이 하나도 없으면 (완전 흡수) 로컬 ref 를 지우고 base 에서
+        # 새로 판다 — 진행 중 작업(유니크 커밋 있음)은 오늘과 동일하게
+        # 그대로 재사용한다.
+        base = _base(cwd)
+        ahead = git("rev-list", "--count", f"{base}..{br}")
+        if ahead.returncode == 0 and ahead.stdout.strip() == "0":
+            print(f"[spawn] {br} 는 {base} 에 완전히 흡수돼 커밋이 없다 — "
+                  f"로컬 브랜치를 지우고 새로 판다.", file=sys.stderr)
+            # -B 는 br 이 현재 체크아웃된 브랜치여도(재사용 워크스페이스가
+            # 이미 그 위에 있는 경우) 지우지 않고 그대로 재설정한다 —
+            # `branch -D` 는 체크아웃된 브랜치는 못 지운다.
+            r = git("checkout", "-B", br, base)
+            if r.returncode != 0:   # base 없음(원격 없음 등) — 현 HEAD 에서라도 재설정
+                r = git("checkout", "-B", br)
+        else:
+            r = git("checkout", br)
     elif git("rev-parse", "--verify", "-q", f"origin/{br}").returncode == 0:
         # rev-parse --verify -q br 는 로컬 ref 만 본다 — 워크스페이스가 새로
         # 클론된 직후라면 origin 에는 이미 있는 브랜치도 로컬엔 없어, 여기서
