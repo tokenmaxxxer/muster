@@ -61,6 +61,7 @@ Verdict values:
 | `record-claim-guard.sh` | contract | new (#457): `PreToolUse`+`Write|Edit|MultiEdit`, session-side write-time mirror of `gates.py`'s record-claim-integrity checks (#310/#330/#331/#332/#333); zero-install, ships with the plugin |
 | `role-test-claim-guard.sh` | contract | new (#457): `Stop`, role-session mirror of `gates/skip_gate.py` (#334) and the stub/full-suite integrity lesson behind #435, applied to the reply's own pasted test output; zero-install, ships with the plugin |
 | `self-update.sh` | contract | already shipped; `SessionStart` plugin refresh |
+| `decision-queue-stopgate.sh` | contract | new (#466): `Stop` hook, surfaces aged `decision_queue` items (>=1h nudge, >=4h block); zero-install, ships with the plugin |
 
 ## `.github/workflows/*.yml` (retired, issue #460)
 
