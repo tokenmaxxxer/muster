@@ -3581,6 +3581,89 @@ class SessionEndVerdict(unittest.TestCase):
                 "in-progress")
 
 
+class Reconcile(unittest.TestCase):
+    """이슈-492 step 2: `reconcile(expected, observed)` — 순수 비교 함수.
+    ADR: docs/issue-492/decisions/2026-08-08-reconciliation-step-for-supervision.md
+    프로포절: docs/issue-492/proposals/2026-08-08-implement-reconciliation-step.md
+    """
+
+    def test_crashed_is_respawn(self):
+        expected = {"expects_pr": False, "role": "implementation", "branch": "b"}
+        observed = {"session_verdict": "crashed", "pr_number": None,
+                    "loop_state": None, "new_commit": False}
+        out = spawn.reconcile(expected, observed)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["next_action"], "respawn")
+
+    def test_stalled_is_resume_watch(self):
+        expected = {"expects_pr": False, "role": "implementation", "branch": "b"}
+        observed = {"session_verdict": "stalled", "pr_number": None,
+                    "loop_state": None, "new_commit": False}
+        out = spawn.reconcile(expected, observed)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["next_action"], "resume-watch")
+
+    def test_expects_pr_missing_not_in_progress_is_respawn(self):
+        expected = {"expects_pr": True, "role": "implementation", "branch": "b"}
+        observed = {"session_verdict": "normal", "pr_number": None,
+                    "loop_state": None, "new_commit": True}
+        out = spawn.reconcile(expected, observed)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["next_action"], "respawn")
+
+    def test_expects_pr_missing_but_still_in_progress_is_clean(self):
+        # 아직 진행 중이면 PR 이 없는 게 divergence 가 아니다.
+        expected = {"expects_pr": True, "role": "implementation", "branch": "b"}
+        observed = {"session_verdict": "in-progress", "pr_number": None,
+                    "loop_state": None, "new_commit": False}
+        self.assertEqual(spawn.reconcile(expected, observed), [])
+
+    def test_clean_case_is_empty(self):
+        expected = {"expects_pr": True, "role": "implementation", "branch": "b"}
+        observed = {"session_verdict": "normal", "pr_number": 42,
+                    "loop_state": "done", "new_commit": True}
+        self.assertEqual(spawn.reconcile(expected, observed), [])
+
+    def test_inconsistent_input_is_manual_review(self):
+        # loop_state 는 있는데 session_verdict 가 없거나 인식 불가 — 침묵
+        # 대신 manual-review.
+        expected = {"expects_pr": False, "role": "implementation", "branch": "b"}
+        observed = {"session_verdict": None, "pr_number": None,
+                    "loop_state": "in-review", "new_commit": False}
+        out = spawn.reconcile(expected, observed)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["next_action"], "manual-review")
+
+    def test_sigkill_acceptance_check(self):
+        # 이슈-492 acceptance (a): kill -9 로 죽은 세션 프로세스 →
+        # session_end_verdict 는 침묵하지 않고 terminal state 를 낸다,
+        # reconcile() 은 그걸 respawn 으로 이름 붙인다(침묵 아님).
+        with tempfile.TemporaryDirectory() as td:
+            work = Path(td) / "w"
+            Path(str(work) + ".events.jsonl").write_text(
+                json.dumps({"type": "session-start",
+                            "detail": {"pid": 111, "ts": 1}}) + "\n")
+            verdict = spawn.session_end_verdict(
+                str(work), log_path=None, alive_fn=lambda pid: False)
+            self.assertEqual(verdict, "crashed")
+            expected = {"expects_pr": False, "role": "implementation", "branch": "b"}
+            observed = {"session_verdict": verdict, "pr_number": None,
+                        "loop_state": None, "new_commit": False}
+            out = spawn.reconcile(expected, observed)
+            self.assertEqual(len(out), 1)
+            self.assertEqual(out[0]["next_action"], "respawn")
+
+    def test_vanish_without_push_acceptance_check(self):
+        # 이슈-492 acceptance (b): PR 을 기대한 세션이 push 없이 죽음 →
+        # reconciliation 이 divergence 를 이름 붙이고 respawn/resume.
+        expected = {"expects_pr": True, "role": "implementation", "branch": "b"}
+        observed = {"session_verdict": "crashed", "pr_number": None,
+                    "loop_state": None, "new_commit": False}
+        out = spawn.reconcile(expected, observed)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["next_action"], "respawn")
+
+
 class AutoRespawnClaim(unittest.TestCase):
     """이슈 #132: crashed 한정 최대 2회 재스폰, claim-before-spawn, 상한 코멘트."""
 
