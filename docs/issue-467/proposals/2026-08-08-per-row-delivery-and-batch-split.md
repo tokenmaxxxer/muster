@@ -90,11 +90,22 @@ already-merged proposal):
   pattern-recurrence check — pairing them keeps `gates/gates.py`'s edits
   in one PR instead of two sessions touching the same file.
 
-Each batch's follow-up issue also carries the new `gates/test_boundary.py`
-disposition-table check (built once, in whichever batch lands first, then
-extended per batch): a table of the 13 `#N` -> (`run.md` section, check
-file path) pairs, with a test asserting every row's named check file
-exists and every row's `#N` tag appears in `run.md`.
+Each batch's follow-up issue also extends `gates/test_boundary.py` — an
+**existing, live file** already carrying issue-441's boundary-coverage
+checks (`t_all_gates_modules_recorded` and 8 siblings) and issue-457's
+gate-porting check (`t_gate_porting_rows_are_ported_or_justified`,
+test_boundary.py:146). The class-B disposition-table check is a **new
+function added alongside those**, not a replacement or a new file — same
+pattern #457 used to add its own table to this same file. First-landing
+batch adds the function (e.g. `t_class_b_disposition_rows_cited`) plus a
+13-row `ISSUE_467_DISPOSITION_ROWS` table (mirroring
+`GATE_PORTING_ISSUES`'s shape at test_boundary.py:139); each subsequent
+batch's row(s) were already present in that table from the first landing,
+so later batches only need their own check file to start existing, not
+further edits to `test_boundary.py`. The follow-up issue for whichever
+batch lands first must state explicitly that it is adding to
+`gates/test_boundary.py`, not overwriting it, and its PR diff must show
+only additions to that file (no removed `t_*` functions).
 
 ## Out of scope
 
