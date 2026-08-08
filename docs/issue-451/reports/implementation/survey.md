@@ -75,3 +75,8 @@ counter vs. re-using `_await_bounded`'s per-call clock) is an
 implementation-time decision within this bugfix, not a design choice
 requiring proposal-level alternatives — there is exactly one existing
 contract (`stall_timeout_min`) to honor and one place to check it.
+
+## Warrant-hunter dispatch
+
+docs-only, no after-proposal dispatch — every path touched by this
+transition (survey.md, the proposal file) is under `docs/`.
