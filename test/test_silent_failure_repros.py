@@ -142,18 +142,12 @@ def test_attempt_3_doctor_reprobe_prints_pre_charge_notice(tmp_path, monkeypatch
     assert "소액 과금" in captured.err
 
 
-def test_attempt_4_bundling_gate_is_documented_comment_only(tmp_path):
-    """Attempt 4 (proposal item 4): trace whether issue-bundling-gate's
-    workflow only ever posts a comment (never blocks a PR/merge), and
-    whether that's a hidden defect or documented, intentional scope."""
-    workflow = Path(__file__).resolve().parent.parent / ".github" / "workflows" / "issue-bundling-gate.yml"
-    text = workflow.read_text()
-    assert "issues:\n    types: [opened]" in text or "types: [opened]" in text
-    # NOT REPRODUCED as a silent/hidden defect: the workflow's own header
-    # comment states plainly that GitHub Actions cannot block issue
-    # creation, that posting a comment is the closest enforcement point for
-    # an issues:opened event, and that branch-protection required-check
-    # registration doesn't apply because there's no PR to block at this
-    # trigger. The comment-only behavior is documented, not decorative.
-    assert "GitHub Actions는 이슈" in text
-    assert "생성 자체를 막을 수 없다" in text
+# Attempt 4 (proposal item 4) retired: issue-bundling-gate.yml, the workflow
+# this test read, was deleted by #460/#463 with no replacement possible
+# (docs/specs/enforcement-boundary.md:87 migration-table entry — repo-local,
+# runnable via `python3 gates/issue_bundling.py <issue#>`). The comment-only,
+# non-blocking behavior it pinned was intrinsic to GitHub Actions' inability
+# to block issue creation; the local CLI replacement has no comment-only
+# surface to inherit that assertion. The general "every deleted workflow has
+# a named replacement or recorded drop" guarantee remains covered by
+# gates/test_boundary.py + test_boundary_workflow_migration.py.
