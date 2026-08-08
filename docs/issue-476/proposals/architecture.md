@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: landed
 files:
   - docs/issue-476/reports/architecture/survey.md
   - docs/issue-476/reports/architecture/scout-brief.md
