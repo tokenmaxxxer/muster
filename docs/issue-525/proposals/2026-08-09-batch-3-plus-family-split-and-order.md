@@ -176,8 +176,11 @@ sessions in another repo from here).
 - All three `Sources:` lists in the scout-briefs are non-empty and every
   named standard/framework in "What will be done" traces to one of them.
 - The family split accounts for all 33 roles named in the survey with no
-  omission and no duplicate — `grep -o` for each role name across the three
-  scout-briefs' must-bes sections returns exactly one match per role.
+  omission and no duplicate — the union of the three families' role lists in
+  "What will be done" is set-equal to the survey's 33-role list (role names may
+  legitimately recur across a scout-brief's must-bes/gap-notes/cross-reference
+  prose more than once; the check is set-equality of family-list membership,
+  not a raw `grep -o` occurrence count over brief text).
 - The 8-sub-batch enumeration under "What will be done" is reviewed at PR review
   as this proposal's answer to "order not pre-committed" and "may split delivery
   into multiple PRs."
