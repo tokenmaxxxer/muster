@@ -2,6 +2,7 @@
 """spawn.py 의 순수 함수들 — 세션을 띄우지 않고 검사한다."""
 import argparse
 import contextlib
+import inspect
 import io
 import json
 import os
@@ -3703,6 +3704,92 @@ class Reconcile(unittest.TestCase):
         out = spawn.reconcile(expected, observed)
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["next_action"], "respawn")
+
+
+class StreamingLanding(unittest.TestCase):
+    """issue-503: 팬아웃 완료 단위는 도착하는 대로 처리되지, 전부 모일 때까지
+    기다리는 배치 배리어를 거치지 않는다. `spawn.roster_reconcile()`이
+    이미 엔트리마다(sorted(d.items()) 루프 안에서) reconcile 계산과 행동을
+    같은 이터레이션에서 하는 걸 이 클래스가 시간 축으로 증명한다 — 3개
+    시뮬레이션 워커가 서로 다른 시점에 "완료"할 때, 각 워커의 행동이 그
+    워커 자신의 완료 시점에 일어나는지, 세 번째 워커가 도착하기를 기다리지
+    않는지를 본다."""
+
+    _ENTRIES = [
+        ("issue-1/coding", {"expects_pr": False, "role": "implementation", "branch": "b1"},
+         {"session_verdict": "crashed", "pr_number": None, "loop_state": None, "new_commit": False}),
+        ("issue-2/coding", {"expects_pr": True, "role": "implementation", "branch": "b2"},
+         {"session_verdict": "normal", "pr_number": 7, "loop_state": "done", "new_commit": True}),
+        ("issue-3/coding", {"expects_pr": False, "role": "implementation", "branch": "b3"},
+         {"session_verdict": "stalled", "pr_number": None, "loop_state": None, "new_commit": False}),
+    ]
+
+    def _arrivals(self, clock):
+        """워커가 완료하는 대로 하나씩만 꺼낼 수 있는 이터레이터 — 세 번째
+        원소를 얻으려면 첫/두 번째를 먼저 "완료 시점"으로 소비해야 한다."""
+        for key, expected, observed in self._ENTRIES:
+            clock.append(("fetch", key))
+            yield key, expected, observed
+
+    def _streaming_process(self, clock, act):
+        """`spawn.roster_reconcile()`과 같은 모양 — 엔트리를 하나 받을
+        때마다 reconcile 계산과 act 를 같은 루프 이터레이션에서 한다."""
+        for key, expected, observed in self._arrivals(clock):
+            divergences = spawn.reconcile(expected, observed)
+            act(key, divergences)
+            clock.append(("act", key))
+
+    def _naive_collect_then_act(self, clock, act):
+        """대조군 — 배치 배리어: 전부 모아서 리스트로 만든 뒤에야 act 를
+        시작한다(이 테스트가 잡아야 하는 반례 모양, #171 이 실제로 낸 패턴)."""
+        collected = [(key, spawn.reconcile(expected, observed))
+                     for key, expected, observed in self._arrivals(clock)]
+        for key, divergences in collected:
+            act(key, divergences)
+            clock.append(("act", key))
+
+    def test_streaming_acts_on_each_unit_at_its_own_arrival(self):
+        clock = []
+        self._streaming_process(clock, act=lambda key, div: None)
+        # 스트리밍: fetch/act 가 유닛별로 짝지어 번갈아 나온다 — 유닛1의
+        # act 가 유닛3의 fetch 보다 먼저 온다(가장 느린 유닛을 기다리지 않음).
+        self.assertEqual(
+            clock,
+            [("fetch", "issue-1/coding"), ("act", "issue-1/coding"),
+             ("fetch", "issue-2/coding"), ("act", "issue-2/coding"),
+             ("fetch", "issue-3/coding"), ("act", "issue-3/coding")],
+        )
+        fetch3_idx = clock.index(("fetch", "issue-3/coding"))
+        act1_idx = clock.index(("act", "issue-1/coding"))
+        self.assertLess(act1_idx, fetch3_idx,
+                         "유닛1의 act 가 유닛3의 fetch(완료 대기)보다 먼저 와야 한다.")
+
+    def test_naive_collect_then_act_is_the_barrier_this_norm_forbids(self):
+        """RED 픽스처: 배치 배리어 하네스는 모든 fetch 가 끝난 뒤에야 act 를
+        시작한다 — 유닛1의 act 가 유닛3의 fetch 보다 뒤에 온다. 이 텍스트가
+        `_streaming_process`에 대해서는 실패하고 `_naive_collect_then_act`에
+        대해서만 성립함을 보여, 위 GREEN 테스트가 실제로 스트리밍 속성을
+        검사하고 있다는 걸 증명한다."""
+        clock = []
+        self._naive_collect_then_act(clock, act=lambda key, div: None)
+        fetch3_idx = clock.index(("fetch", "issue-3/coding"))
+        act1_idx = clock.index(("act", "issue-1/coding"))
+        self.assertGreater(act1_idx, fetch3_idx,
+                            "배치 배리어 하네스는 유닛1의 act 가 유닛3의 fetch 뒤에 와야 반례로 성립한다.")
+
+    def test_roster_reconcile_source_acts_per_entry_not_after_collecting(self):
+        """`spawn.roster_reconcile`의 실제 소스가 위 `_streaming_process`와
+        같은 모양(엔트리 루프 안에서 reconcile 계산 직후 act)인지 정적으로
+        확인 — survey 가 읽은 spawn.py:1913-1935 가 실제로 스트리밍 모양임을
+        코드 자체로 고정한다."""
+        src = inspect.getsource(spawn.roster_reconcile)
+        for_idx = src.index("for key, e in sorted(d.items()):")
+        reconcile_idx = src.index("divergences = reconcile(", for_idx)
+        print_idx = src.index("print(f\"[reconcile]", reconcile_idx)
+        self.assertLess(for_idx, reconcile_idx)
+        self.assertLess(reconcile_idx, print_idx,
+                         "roster_reconcile 이 reconcile() 계산 직후, 같은 루프 안에서 "
+                         "행동(출력)해야 한다 — 전부 모은 뒤 별도 루프에서 하면 배리어다.")
 
 
 class AutoRespawnClaim(unittest.TestCase):

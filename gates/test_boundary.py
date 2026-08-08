@@ -272,6 +272,52 @@ def t_issue_492_reconcile_pieces_present():
     assert not missing, f"issue-492 reconcile manifest 행 미충족: {missing}"
 
 
+_STREAMING_LANDING_SECTION_RE = re.compile(
+    r"^### 스트리밍 랜딩이 기본이다\n(.*?)(?=^### |\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def t_run_md_streaming_landing_is_default_norm():
+    """issue-503: run.md 가 "완료 단위마다 즉시 처리 — 배치 배리어는
+    이름 붙인 단위 간 의존성이 있을 때만 예외"라는 처분을 실제로
+    서술하는 절을 가져야 한다. issue-464 hunt
+    (docs/reports/2026-08-08-hunt-class-a-orchestrator-loop-wiring.md)
+    가 잡은 우회 모양을 반복하지 않도록, 마커 문구가 아무데나(예: 반려된
+    대안을 설명하는 절 안)에 등장하는 것으로는 통과시키지 않는다 — 절
+    헤더로 그 절 본문을 잘라내 그 본문 자체가 처분(기본값 + 예외 조건)을
+    서술하는지 확인한다."""
+    text = RUN_MD.read_text(encoding="utf-8")
+    m = _STREAMING_LANDING_SECTION_RE.search(text)
+    assert m, "run.md 에 '### 스트리밍 랜딩이 기본이다' 절이 없다(#503)."
+    body = m.group(1)
+    # issue-503 before-landing hunt (docs/reports/2026-08-08-hunt-streaming-per-unit-landing-norm.md):
+    # 세 개의 독립된 부분 문자열 존재만 보면, 이 절이 스트리밍-기본 규범을
+    # 뒤집어 반박하는 프로즈("배치 배리어가 기본이어야 하고 이름 붙인 예외는
+    # 불필요하다" 류) 안에 세 문구가 우연히 다 등장해도 통과한다. 이를
+    # 막기 위해, "완료한 단위마다 즉시 처리한다" 처분 문장이 실제로
+    # "배치 배리어는 기본이 아니다"와 "이름 붙인" 예외 조건을 같은 문장
+    # 또는 인접 문장에 긍정형으로 담고 있는지 하나의 정규식으로 고정한다.
+    disposition_re = re.compile(
+        r"완료한 단위마다 즉시 처리한다.{0,80}배치 배리어는\s*기본이\s*아니다",
+        re.DOTALL,
+    )
+    assert disposition_re.search(body), (
+        "스트리밍 랜딩 절이 '완료한 단위마다 즉시 처리한다 … 배치 배리어는 "
+        "기본이 아니다'라는 처분을 긍정형 문장으로 서술하지 않는다 — 부분 "
+        "문자열만 등장하는 것으로는 통과하지 않는다(#503 before-landing hunt)."
+    )
+    exception_re = re.compile(
+        r"배치 배리어는 예외적으로만 정당하다.{0,60}이름 붙인.{0,20}단위 간.{0,20}실제 의존성",
+        re.DOTALL,
+    )
+    assert exception_re.search(body), (
+        "스트리밍 랜딩 절이 '배치 배리어는 예외적으로만 정당하다 … 이름 붙인 "
+        "단위 간 실제 의존성'이라는 예외 조건을 긍정형 문장으로 명시하지 "
+        "않는다(#503 before-landing hunt)."
+    )
+
+
 def _run(fns):
     ok = 0
     for name, fn in fns:
