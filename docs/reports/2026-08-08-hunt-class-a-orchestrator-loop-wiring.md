@@ -61,3 +61,35 @@ both files on both sides of that mismatch (`gates/test_boundary.py`,
 are already in the frozen write set — this is an incomplete edit plan
 inside listed files, not a path outside the write set, so it does not
 satisfy this stance's bar.
+
+## before-landing — stance 0: assume the gate just touched is bypassable — find the bypass
+
+Verdict: FINDING — `t_gate_porting_rows_are_ported_or_justified` accepts a row with zero disposition content because it checks `row_text + section_heading_text` for the vocabulary, and every existing "Justified" section's heading already literally contains the word "Justified" — so any row's own reason text can be replaced with meaningless filler and the gate still passes, as long as it stays under that heading.
+Kind: silent-failure
+Seed: gates/test_boundary.py `t_gate_porting_rows_are_ported_or_justified` (lines ~156-201), `_DISPOSITION_VOCAB` (lines 152-153)
+cap_seconds: 180
+tier: default
+diff_stat_lines: ~211 across 4 non-doc files
+started_at: 2026-08-08T00:00:00Z
+ended_at: 2026-08-08T00:05:00Z
+
+### Reproduce
+```
+cp -r /home/jwjung/.tokenmaxxxer/work/on-the-record-issue-464-implementation /tmp/scratchcopy/repo
+cd /tmp/scratchcopy/repo
+python3 - <<'PYEOF'
+p = "on-the-record/UNENFORCED-CLAUSES.md"
+text = open(p, encoding="utf-8").read()
+old = "| #407 | `gates/landing_readiness.py` | advisory scope-overlap/checks judgment already recorded as `contract, CI-supplement` in `docs/specs/enforcement-boundary.md` — not folded into a session-side hook in this delivery. |"
+new = "| #407 | `gates/landing_readiness.py` | totally unrelated text with zero actual disposition content whatsoever, no keywords at all here |"
+text = text.replace(old, new)
+open(p, "w", encoding="utf-8").write(text)
+PYEOF
+python3 -m pytest gates/test_boundary.py -k porting_rows -q
+```
+
+### Observed
+`1 passed, 5 deselected` — the gate reports success even though issue #407's row now says "totally unrelated text with zero actual disposition content whatsoever, no keywords at all here", i.e. it documents no real disposition at all.
+
+### Expected
+The gate should fail (issue #407 flagged as `unjustified`) once its own row text carries no disposition information — the tightened check (issue #464) was supposed to close exactly this hole (accepting a non-empty-but-meaningless row), but because it falls back to matching the *section heading* text (e.g. `### Justified — ...`) instead of requiring the vocabulary to appear in the row itself, any row parked under one of the four "Justified"/"Deferred" headings passes regardless of its own content — the row-level check is bypassable by simply keeping the row under an already-qualifying heading.

@@ -12,9 +12,7 @@ session are reached with zero installation. What follows is not.
 
 | mechanism | verdict | reason |
 |---|---|---|
-| `closure_sweep.py` | contract (single-PR case) / **out of scope — operator decision, 2026-08-07** (board-wide case) | single-PR closing-keyword act folds into `contract-guard.sh`; board-wide drift detection over already-merged PRs is a retrospective scan the operator ruled out of scope for issue #441 |
 | `landing_readiness.py` | contract, CI-supplement | advisory scope-overlap/checks judgment; not folded into `contract-guard.sh` in this delivery, remains CI-only where installed |
-| `spawn_coverage.py` | **out of scope — operator decision, 2026-08-07** | "an issue was filed but no session ever started" is an absence-over-time signal, structurally identical to `closure_sweep.py` board-wide; ruled out of scope by the same decision |
 
 <!-- gate-porting-additions (issue #457) — the table above is the #452
      spec-verdict extract `gates/test_boundary.py` matches exactly against
@@ -45,10 +43,10 @@ cannot compute.
 | issue | source | reason |
 |---|---|---|
 | #312 | `gates/ci.py` | phase-is-an-issue-property + `APPROVE issue-<n>/<role>` comment resolution needs GitHub issue-comment history, not local diff state. |
-| #369 | `gates/ci.py` | the gate workflow always checks out `main`; the consumer-facing single-PR portion of this concern is already folded into `contract-guard.sh` per `docs/specs/enforcement-boundary.md`'s `closure_sweep.py` row — the remaining board-wide drift detection is out of scope per the operator's 2026-08-07 decision recorded there. |
-| #383 | `gates/closure_sweep.py` | `has_record_evidence` needs the closing PR's merged record, i.e. GitHub PR/issue state beyond one local session's tree. |
+| #369 | `gates/ci.py` | the consumer-facing single-PR portion is folded into `contract-guard.sh`; the board-wide drift-detection portion is now covered by `spawn.py:roster_watchdog()`'s per-tick `closure_sweep.find_violations()` call, running in the orchestrator (issue #464). |
+| #383 | `gates/closure_sweep.py` | board-wide case now covered: `spawn.py:roster_watchdog()` calls `closure_sweep.find_violations()` each tick, reusing its `has_record_evidence`-aware classification and its `gh`-failure `skips` reporting (issue #464). |
 | #388 | `gates/ci.py` | `gh api` POST-vs-GET distinction for "no record" vs "API blocked" needs a live `gh` call whose failure mode a static hook cannot reproduce faithfully; the read-only lookups this needs are already covered where reachable by `contract-guard.sh`. |
-| #325 | `gates/spawn_coverage.py` | "an issue was filed but no session ever started" is a board-wide absence-over-time signal — structurally the same as `closure_sweep.py`'s board-wide case, ruled out of scope by the same 2026-08-07 operator decision (`docs/specs/enforcement-boundary.md`). |
+| #325 | `gates/spawn_coverage.py` | board-wide case now covered: `spawn.py:roster_watchdog()` calls `spawn_coverage.find_uncovered()` each tick, including on an empty live roster, reporting `gh`-list failures rather than treating them as clean (issue #464). |
 | #407 | `gates/landing_readiness.py` | advisory scope-overlap/checks judgment already recorded as `contract, CI-supplement` in `docs/specs/enforcement-boundary.md` — not folded into a session-side hook in this delivery. |
 
 ### Justified — non-blocking by design, not a gate
