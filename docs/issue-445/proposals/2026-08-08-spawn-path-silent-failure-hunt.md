@@ -1,7 +1,8 @@
 ---
-status: proposed
+status: landed
 files:
   - docs/issue-445/reports/defect-verification.md
+  - test/test_silent_failure_repros.py
 ---
 
 ## Intent
@@ -82,4 +83,13 @@ are filed as follow-up issues per the splitting rules.
 
 ## What did not work
 
-(none yet — appended during phase 2 build, if anything breaks)
+- First draft of `test_attempt_1_exclude_write_swallowed_no_warning`'s
+  fixture called `_git("clone", ..., str(src))` without the `cwd=` kwarg
+  the local `_git()` helper requires — `TypeError` at fixture setup, fixed
+  by passing `cwd=tmp_path`.
+- First draft of attempt 3's repro called `require_doctor(version="2.0.0")`
+  (an explicit version) expecting it to trigger the live auto-probe; it
+  instead hit the explicit-version branch, which halts and tells the
+  caller to run `spawn.py doctor` manually without ever calling `doctor()`
+  — the auto-probe only fires on `require_doctor(version=None)`. Fixed by
+  driving the `None` path and mocking `_claude_version()` instead.
