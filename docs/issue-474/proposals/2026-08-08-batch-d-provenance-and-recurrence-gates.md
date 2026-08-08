@@ -2,7 +2,7 @@
 status: proposed
 files:
   - gates/repo_scope.py
-  - gates/test_repo_scope_gate.py
+  - test_repo_scope_gate.py
   - docs/specs/survey-conventions.md
   - gates/acceptance_gate.py
   - gates/test_acceptance_gate.py
@@ -99,8 +99,9 @@ the same stated reason.
 ## What will be done
 
 1. **#415** — `gates/repo_scope.py::check_repo_scope(text: str) -> list[Violation]`
-   per `docs/issue-415/proposals/implementation.md` item 1; `gates/test_repo_scope_gate.py`
-   with the three fixtures from that proposal's item 2 (unscoped absence
+   per `docs/issue-415/proposals/implementation.md` item 1; `test_repo_scope_gate.py`
+   (repo root, matching #415's own approved proposal exactly — not
+   `gates/test_repo_scope_gate.py`) with the three fixtures from that proposal's item 2 (unscoped absence
    claim flags; scoped claim does not; file-anchored claim does not);
    `docs/specs/survey-conventions.md` gets the "Capability and contract
    claims are repo-scoped" section (create if absent). Record must restate
@@ -170,7 +171,7 @@ the same stated reason.
 
 ## How you'll know it worked
 
-- `python3 gates/test_repo_scope_gate.py`, `python3 gates/test_acceptance_gate.py`,
+- `python3 test_repo_scope_gate.py` (repo root), `python3 gates/test_acceptance_gate.py`,
   `python3 gates/test_setup_failure_propagates.py`, and
   `python3 gates/test_accumulation.py` each pass standalone (no `gh`
   calls, network-free, matching every existing gate test's convention).
