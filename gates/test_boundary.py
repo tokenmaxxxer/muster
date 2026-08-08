@@ -218,6 +218,9 @@ _ISSUE_467_BATCH_A_CITATIONS = {
     362: ROOT / "gates" / "test_boundary.py",
     390: ROOT / "gates" / "test_merge_state_gate.py",
     412: ROOT / "on-the-record" / "hooks" / "test_self_update_shallow.py",
+    318: ROOT / "gates" / "test_approval_request_shape.py",
+    363: ROOT / "gates" / "test_approval_request_shape.py",
+    379: ROOT / "gates" / "test_open_work.py",
 }
 
 _ISSUE_467_BATCH_C_CITATIONS = {
@@ -229,9 +232,10 @@ _ISSUE_467_BATCH_C_CITATIONS = {
 
 def t_class_b_disposition_rows_cited():
     """issue-467 ADR: 13개 `deployed-contract+check` 행이 전부 표에 있어야
-    하고, 이미 배달된 배치(A: #362/#390/#412, C: #320/#376/#377)는 실제
-    파일 경로 인용이 있어야 한다 — 아직 배달 안 된 나머지 행은 표에
-    있는 것만으로 충분하다(뒤 배치가 자기 배달 때 인용을 추가한다)."""
+    하고, 이미 배달된 배치(A: #362/#390/#412, B: #318/#363/#379,
+    C: #320/#376/#377)는 실제 파일 경로 인용이 있어야 한다 — 아직 배달
+    안 된 나머지 행은 표에 있는 것만으로 충분하다(뒤 배치가 자기 배달
+    때 인용을 추가한다)."""
     missing_citation = []
     for n in {**_ISSUE_467_BATCH_A_CITATIONS, **_ISSUE_467_BATCH_C_CITATIONS}:
         assert n in ISSUE_467_DISPOSITION_ROWS, f"#{n} 이 disposition 표에 없다."
