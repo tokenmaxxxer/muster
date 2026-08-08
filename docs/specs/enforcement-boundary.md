@@ -56,7 +56,7 @@ Verdict values:
 | `issue_bundling.py` | repo-local | this org's own filing hygiene; `run.md` states no such obligation on a consumer's role sessions |
 | `skip_gate.py` | repo-local | wraps this repo's own CI invocation of its own test suite |
 | `spec_index.py` | repo-local | checks this repo's own `docs/specs/` set, not a consumer's |
-| `risk_report.py` | n/a (infrastructure) | non-blocking classifier feeding `gates.py`'s review surface, not itself a clause |
+| `risk_report.py` | contract | issue #511: `batch_blocked()`'s four-axis dominant-axis rule is enforced zero-install via `on-the-record/hooks/impact-guard.sh`, which denies a batch-merge Bash command; `classify()`/`report()` remain the non-blocking review-surface feed they always were |
 | `gates.py` | n/a (infrastructure) | router/dispatcher to the modules above |
 | `flows.py` | repo-local | feeds this repo's own status-board UI |
 | `claims.py` | repo-local | new (#377): opt-in `# CLAIM-CHECK:` marker checker over this repo's own source (role-JSON enum drift, `spec.md`-producer claim); registered in `gates.ALL`, not wired into `gates/ci.py`'s required path in this delivery — promotion to required-check status is a separate follow-up decision per the proposal's own Rationale |
@@ -77,6 +77,7 @@ Verdict values:
 | `role-test-claim-guard.sh` | contract | new (#457): `Stop`, role-session mirror of `gates/skip_gate.py` (#334) and the stub/full-suite integrity lesson behind #435, applied to the reply's own pasted test output; zero-install, ships with the plugin |
 | `self-update.sh` | contract | already shipped; `SessionStart` plugin refresh |
 | `decision-queue-stopgate.sh` | contract | new (#466): `Stop` hook, surfaces aged `decision_queue` items (>=1h nudge, >=4h block); zero-install, ships with the plugin |
+| `impact-guard.sh` | contract | new (#511): `PreToolUse`+`Bash`, denies a Bash command batching 2+ `gh pr merge` calls when the target repo's own open proposals include one requiring individual approval (`docs/specs/impact-classification.md`'s dominant-axis rule); zero-install, ships with the plugin |
 | `report-framing-check.sh` | contract | new (#320): `Stop`, checks a PR/board report turn's `last_assistant_message` for the four semantic-effect framing elements (resolved problem, prior cost, newly possible, still broken); zero-install, ships with the plugin, appended to the existing `Stop` array (declared first by `stop-gate.sh`) |
 | `retry-loop-bound.sh` | contract | new (#507): `PreToolUse`/`PostToolUse` on `Write|Edit|MultiEdit|Bash`, bounds identical-refusal retry loops at K/2K denials per `sha256(tool_name, target)` signature (allow-with-context in `[K, 2K)`, deny outright at `>= 2K`); zero-install, ships with the plugin |
 | `call-shape-guard.sh` | contract | new (#512): `PreToolUse`+`Write|Edit|MultiEdit` on `.py` writes, session-side mirror of `gates.py`'s `subprocess_call_shape_divergence` (repo-wide, `git ls-files`-scoped) and `sibling_mention_check` (diff-scoped to the write, checked against the local working-tree branch record) — issue #419 checks, unreachable since `gates/ci.py`'s runner was retired (#460); zero-install, ships with the plugin, root discovered by walking up from `cwd` |
