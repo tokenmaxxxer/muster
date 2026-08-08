@@ -15,7 +15,7 @@
   "decides": "독자가 알아야 할 것을 어떻게 구조화할지",
   "use_when": "외부 공개 문서가 필요할 때",
   "produces": "doc outline, draft, target-reader note",
-  "write_scope": ["docs/**"],
+  "write_scope": ["docs/guides/**", "docs/issue-<n>/guides/**"],
   "record_fields": {
     "loop_state": [
       "landed"
