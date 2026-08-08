@@ -81,6 +81,23 @@ the pre-registered rule: the traceability check now requires a
 known — which is the shape the sandbox test exercises (case0's cited
 file is real but not part of the diff under test).
 
+**Base-resolution failure must fail loud, not fall back silent.**
+After-proposal warrant hunt (stance 0, `docs/reports/
+2026-08-08-hunt-implementation.md`) found that "fall back to whole-repo
+`git ls-files` whenever the diff command errors" (an earlier draft of
+this section) reopens case0 itself under any unresolved `--base` (typo,
+shallow CI clone missing the base commit, stale ref) — the exact gap
+`--base` exists to close, with no signal it happened. Revised: when
+`--base` is supplied but `git diff --name-only <base>...HEAD` exits
+non-zero, `_repo_targets()` does not fall back to `git ls-files` — it
+signals failure to the caller, and `main()` treats that as a hard error
+(prints the git error, exits 2, same fail-closed posture
+`reexecution_gate.py`'s `ERROR` verdict already uses for worktree-add
+failure) rather than silently scanning under the permissive whole-repo
+set. `--base` omitted entirely still uses whole-repo `git ls-files`
+unchanged (constraints section, existing no-base call shape preserved)
+— only a *supplied-but-broken* `--base` is the new hard-fail case.
+
 **How honest2 is fixed.** Considered AST/text symbol resolution
 (survey.md alternative 2, rejected for parsing cost and its own
 false-negative surface). Chosen: when a cited target doesn't literally
@@ -94,10 +111,12 @@ mismatch the pilot found, without asserting the function itself exists.
 
 1. `gates/claim_scan.py`:
    - `_repo_targets(repo, base=None)`: when `base` is given, source
-     targets from `git diff --name-only <base>...HEAD` (falling back to
-     the existing whole-repo `git ls-files` behavior if the diff command
-     itself errors, e.g. unknown ref — fail toward the current
-     behavior, never toward zero targets/spurious false-rejects).
+     targets from `git diff --name-only <base>...HEAD`; when that
+     command itself errors (unknown ref, shallow clone), raise/signal
+     failure rather than falling back to whole-repo `git ls-files` —
+     `main()` turns that into a hard error (exit 2), per the
+     base-resolution-failure rationale above. `base` omitted keeps the
+     existing whole-repo `git ls-files` behavior unchanged.
    - Add a target-resolution helper used wherever cited targets are
      checked against `repo_targets`: for each cited string not found
      verbatim, also try `"<module>.py"` derived from a leading
@@ -133,8 +152,9 @@ mismatch the pilot found, without asserting the function itself exists.
 ## How you'll know it worked
 
 - `python3 gates/test_claim_scan.py` — all tests pass, including the two
-  new case0/honest2 pairs and every pre-existing case (fab/null-shaped
-  coverage stays green).
+  new case0/honest2 pairs, a case verifying an unresolvable `--base`
+  hard-fails instead of falling back to whole-repo targets, and every
+  pre-existing case (fab/null-shaped coverage stays green).
 - Manual/documented trace in the phase-2 record: case0's exact pilot
   shape (`Repro: python3 gates/claim_scan.py --help`, cited file real
   but out-of-diff) produces >=1 finding when diff-scoped; honest2's
