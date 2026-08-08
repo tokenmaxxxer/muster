@@ -73,6 +73,14 @@ Verdict values:
 |---|---|---|
 | `spawn.py` | contract | not marketplace-shipped, but every caller (including consumers) runs this exact file directly — no per-consumer copy to go stale; carries `require_board`/`require_no_repo_config`/`require_acceptance_gate` preflights |
 
+## Consumer-readable extract
+
+`on-the-record/UNENFORCED-CLAUSES.md` (issue #452) is the derived,
+gate-checked extract of this file's `contract, CI-supplement` and
+`out of scope — operator decision` rows, shipped inside the deployed
+`on-the-record/` tree so a consumer session can read it zero-install.
+`gates/test_boundary.py` fails the build if it drifts from this file.
+
 ## Reachable vs. unreached by the zero-install baseline
 
 See `docs/issue-441/proposals/2026-08-07-contract-enforcement-boundary.md`
