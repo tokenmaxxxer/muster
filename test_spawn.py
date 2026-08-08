@@ -3634,10 +3634,10 @@ class Reconcile(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["next_action"], "manual-review")
 
-    def test_sigkill_acceptance_check(self):
-        # 이슈-492 acceptance (a): kill -9 로 죽은 세션 프로세스 →
-        # session_end_verdict 는 침묵하지 않고 terminal state 를 낸다,
-        # reconcile() 은 그걸 respawn 으로 이름 붙인다(침묵 아님).
+    def test_sigkill_acceptance_check_stub(self):
+        # 이슈-492 acceptance (a), 빠른 유닛 버전: synthetic alive_fn 스텁으로
+        # 죽은 pid 를 흉내낸다. 실제 kill -9 재현은
+        # test_sigkill_acceptance_check_real_process 참고.
         with tempfile.TemporaryDirectory() as td:
             work = Path(td) / "w"
             Path(str(work) + ".events.jsonl").write_text(
@@ -3652,6 +3652,47 @@ class Reconcile(unittest.TestCase):
             out = spawn.reconcile(expected, observed)
             self.assertEqual(len(out), 1)
             self.assertEqual(out[0]["next_action"], "respawn")
+
+    def test_sigkill_acceptance_check_real_process(self):
+        # 이슈-492 acceptance (a), 실측: 실제 서브프로세스를 세션으로 등록하고
+        # 진짜 kill -9 로 죽인 뒤, session_end_verdict() 가 (synthetic
+        # alive_fn 없이, 진짜 _alive()/os.kill 로) 침묵하지 않고 terminal
+        # state 를 내는지, reconcile() 이 그걸 respawn 으로 이름 붙이는지
+        # 확인한다. docs/issue-492/reports/execution-observation.md 가 지적한
+        # 대로, 실제 프로세스 없이 스텁으로만 통과하던 취약점을 메운다.
+        proc = subprocess.Popen(["sleep", "60"])
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                work = Path(td) / "w"
+                Path(str(work) + ".events.jsonl").write_text(
+                    json.dumps({"type": "session-start",
+                                "detail": {"pid": proc.pid, "ts": 1}}) + "\n")
+
+                self.assertTrue(spawn._alive(proc.pid))
+
+                proc.kill()  # SIGKILL
+                proc.wait(timeout=5)  # reap: 좀비 상태로는 os.kill(pid, 0) 이 여전히 성공한다
+
+                stall_timeout_min = 0.02  # 픽스처 전용 단축 — 실제 스톨 상한값이 아니라 테스트 속도용
+                deadline = time.time() + stall_timeout_min * 60
+                verdict = None
+                while time.time() < deadline:
+                    verdict = spawn.session_end_verdict(str(work), log_path=None)
+                    if verdict == "crashed":
+                        break
+                    time.sleep(0.05)
+
+                self.assertEqual(verdict, "crashed")
+                expected = {"expects_pr": False, "role": "implementation", "branch": "b"}
+                observed = {"session_verdict": verdict, "pr_number": None,
+                            "loop_state": None, "new_commit": False}
+                out = spawn.reconcile(expected, observed)
+                self.assertEqual(len(out), 1)
+                self.assertEqual(out[0]["next_action"], "respawn")
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
 
     def test_vanish_without_push_acceptance_check(self):
         # 이슈-492 acceptance (b): PR 을 기대한 세션이 push 없이 죽음 →
