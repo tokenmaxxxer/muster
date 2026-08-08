@@ -51,18 +51,59 @@ if not isinstance(cmd, str):
 
 if not re.search(r"\bgh\s+pr\s+merge\b", cmd):
     sys.exit(0)
+
+# Target-repo resolution (issue #443): a `gh pr merge` command may target a
+# repo other than this hook process's own cwd, via a leading `cd <path> &&`
+# prefix, a `-R`/`--repo owner/repo` flag, or a full PR URL argument. Each
+# form is resolved to either a local cwd override (real checkout, full fix)
+# or a `-R owner/repo` flag passed straight to `gh` (no local checkout,
+# approvers.md unreadable — explicit unreached below).
+target_cwd = None
+target_repo_flag = None  # "owner/repo" string, used with gh -R when no local checkout
+
+cd_m = re.match(r"^\s*cd\s+(\S+)\s*&&", cmd)
+if cd_m:
+    target_cwd = cd_m.group(1)
+
 rest = re.split(r"\bgh\s+pr\s+merge\b", cmd, maxsplit=1)[1]
-num_m = re.search(r"(?<!\S)(\d+)(?!\S)", rest)
-if not num_m:
-    # `gh pr merge` with no explicit number merges the PR for the current
-    # branch — can't resolve that without a repo checkout, which this
-    # zero-install hook does not assume. Recorded honestly as unreached
-    # rather than guessed at.
-    sys.exit(0)
-pr = num_m.group(1)
+
+url_m = re.search(r"github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)", rest)
+repo_flag_m = re.search(r"(?:-R|--repo)[= ]([^\s/]+/[^\s/]+)", rest)
+
+if url_m:
+    pr = url_m.group(2)
+    # An explicit repo selector (URL or -R/--repo) always wins over an
+    # incidental `cd <path> &&` prefix — `gh` itself honors -R/URL over cwd
+    # repo inference, and a `cd` path has no guaranteed correlation to the
+    # flagged repo, so any `target_cwd` is discarded here rather than
+    # trusted to also be that repo's checkout (issue #443 before-landing
+    # hunt: cd+flag combo was silently judging the cd repo and dropping
+    # the flag).
+    target_cwd = None
+    target_repo_flag = url_m.group(1)
+elif repo_flag_m:
+    num_m = re.search(r"(?<!\S)(\d+)(?!\S)", rest)
+    if not num_m:
+        sys.exit(0)  # -R/--repo present but no explicit PR number — unreached, same rationale as below
+    pr = num_m.group(1)
+    target_cwd = None
+    target_repo_flag = repo_flag_m.group(1)
+else:
+    num_m = re.search(r"(?<!\S)(\d+)(?!\S)", rest)
+    if not num_m:
+        # `gh pr merge` with no explicit number merges the PR for the current
+        # branch — can't resolve that without a repo checkout, which this
+        # zero-install hook does not assume. Recorded honestly as unreached
+        # rather than guessed at.
+        sys.exit(0)
+    pr = num_m.group(1)
 
 def gh_json(*args):
-    r = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=20)
+    extra = ["-R", target_repo_flag] if target_repo_flag else []
+    r = subprocess.run(
+        ["gh", *args, *extra],
+        capture_output=True, text=True, timeout=20, cwd=target_cwd,
+    )
     if r.returncode != 0:
         return None
     try:
@@ -83,7 +124,15 @@ issue = int(closes_m.group(2)) if closes_m else (plain_refs[0] if plain_refs els
 if issue is None:
     sys.exit(0)  # no issue reference at all — pr_reference.py's own scope, not this hook's new ground
 
-approvers_path = os.path.join(os.getcwd(), "docs", "specs", "approvers.md")
+if target_repo_flag and target_cwd is None:
+    # -R/--repo or a full URL with no local `cd` checkout: the target repo
+    # is known, but docs/specs/approvers.md for it cannot be read from the
+    # local filesystem (zero-install hook, no API-fetch capability — see
+    # proposal Rationale). The phase-2 determination needs approvers.md, so
+    # this stays an explicit unreached/fail-open exit rather than a guess.
+    sys.exit(0)
+
+approvers_path = os.path.join(target_cwd or os.getcwd(), "docs", "specs", "approvers.md")
 approvers = set()
 if os.path.isfile(approvers_path):
     for line in open(approvers_path, encoding="utf-8"):
