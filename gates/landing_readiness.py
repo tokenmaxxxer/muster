@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import ci  # noqa: E402
+import reexecution_gate  # noqa: E402
 
 READY = "READY"
 BLOCKED_ON_PR = "BLOCKED_ON_PR"
@@ -54,6 +55,24 @@ def classify(pr_state: str, checks: str, has_record: bool, has_approval: bool,
         if scope is None or any(f.startswith(tuple(scope)) for f in pr_files):
             return BLOCKED_ON_SCOPE, cause.get("reason", "unnamed cause")
     return READY, None
+
+
+def reexecution_blocking_cause(root: Path, issue: int, role: str
+                                ) -> dict | None:
+    """`.reexecution/<issue>-<role>.json` 의 verdict 를 `blocking_causes` 한
+    항목으로 바꾼다. `pass` 면 None(원인 없음). `fail`/`error` 면 그 PR
+    자신의 레코드 경로로 스코프된 원인 — `gates/` 같은 고정 접두어가 아니라
+    `docs/issue-<n>/reports/<role>.md` 로 스코프해야, 그 파일을 이 PR이
+    항상 건드리기 때문에 원인이 실제로 이 PR을 덮는다(after-proposal hunt
+    가 재현한 gates/-스코프 bypass 를 닫는 지점, ADR §6)."""
+    verdict = reexecution_gate.read_verdict(root, issue, role)
+    if verdict is None or verdict.kind == reexecution_gate.PASS:
+        return None
+    record_path = f"docs/issue-{issue}/reports/{role}.md"
+    return {
+        "reason": f"reexecution_gate: {verdict.kind} — {verdict.detail}",
+        "scope": frozenset({record_path}),
+    }
 
 
 def _pr_list(root: Path) -> list[dict] | None:
@@ -113,7 +132,12 @@ def main() -> int:
             issue, role = detected
             has_record = ci._phase2_record_evidence(root, n, branch, issue)
             has_approval = role in ci._approved_roles_on_issue(root, issue)
-        kind, reason = classify("OPEN", checks, has_record, has_approval, files, ())
+        causes = ()
+        if detected is not None:
+            cause = reexecution_blocking_cause(root, issue, role)
+            causes = (cause,) if cause else ()
+        kind, reason = classify("OPEN", checks, has_record, has_approval, files,
+                                causes)
         suffix = f" ({reason})" if reason else ""
         print(f"PR #{n}: {kind}{suffix}")
     return 0
