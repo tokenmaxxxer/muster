@@ -28,6 +28,8 @@ def t_prose_only_acceptance_blocks():
 def t_artifact_reference_passes():
     body = """## Acceptance
 - `gates/test_acceptance_gate.py` run and shown passing.
+- empty state: not applicable — regression test, no empty-state case.
+- provenance: executed-unit
 """
     assert acceptance_gate.check_issue_body(310, body) == []
 
@@ -35,6 +37,8 @@ def t_artifact_reference_passes():
 def t_gates_workflow_path_passes():
     body = """## Acceptance
 - CI job at `.github/workflows/ci.yml` must be green.
+- empty state: not applicable — CI status has no empty-state case.
+- provenance: executed-live
 """
     assert acceptance_gate.check_issue_body(310, body) == []
 
@@ -42,6 +46,8 @@ def t_gates_workflow_path_passes():
 def t_gate_colon_line_passes():
     body = """## Acceptance
 - gate: acceptance_gate
+- empty state: not applicable — gate invocation has no empty-state case.
+- provenance: executed-unit
 """
     assert acceptance_gate.check_issue_body(310, body) == []
 
@@ -62,6 +68,8 @@ def t_missing_acceptance_section_blocks():
 def t_acceptance_heading_case_and_level_insensitive():
     body = """### acceptance
 - `test/foo.py` passes.
+- empty state: not applicable — regression test, no empty-state case.
+- provenance: executed-unit
 """
     assert acceptance_gate.check_issue_body(310, body) == []
 
@@ -75,6 +83,41 @@ No artifact here, just prose.
 """
     bad = acceptance_gate.check_issue_body(310, body)
     assert bad, "an artifact reference outside the Acceptance section must not count"
+
+
+def t_artifact_reference_without_empty_state_or_provenance_blocks():
+    body = """## Acceptance
+- `gates/test_acceptance_gate.py` run and shown passing.
+"""
+    bad = acceptance_gate.check_issue_body(416, body)
+    assert bad, "artifact reference with no empty state/provenance must block"
+    assert any("empty state" in b for b in bad), bad
+    assert any("provenance" in b for b in bad), bad
+
+
+def t_empty_state_and_provenance_present_passes():
+    body = """## Acceptance
+- `gates/test_acceptance_gate.py` run and shown passing.
+- empty state: `gates/test_acceptance_gate.py::t_missing_acceptance_section_blocks`
+- provenance: executed-unit
+"""
+    assert acceptance_gate.check_issue_body(416, body) == []
+
+
+def t_unverifiable_exempts_empty_state_and_provenance():
+    body = """## Acceptance
+unverifiable: this is a subjective UX judgment with no mechanical check.
+"""
+    assert acceptance_gate.check_issue_body(416, body) == []
+
+
+def t_empty_state_not_applicable_passes():
+    body = """## Acceptance
+- `gates/test_acceptance_gate.py` run and shown passing.
+- empty state: not applicable — pure read-only query, no "nothing exists yet" case.
+- provenance: executed-unit
+"""
+    assert acceptance_gate.check_issue_body(416, body) == []
 
 
 def _run(fns):

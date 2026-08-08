@@ -925,6 +925,146 @@ def duplicate_test_basenames_gate(d: Path, cfg: dict) -> list[str]:
     return duplicate_test_basenames(d / "work")
 
 
+# issue #419 — 같은 명령이 서로 다른 인자 모양으로 반복될 때(#388: 같은
+# `gh api` 명령의 한 곳은 `-f`, 다른 곳은 `-X GET`), 텍스트가 다르지만
+# 구조적으로 같은 재발을 잡는다. 관찰된 패턴에서만 발동하는 좁은 flag —
+# 아무 두 호출의 차이가 아니라, 의미를 바꾸는 것으로 알려진 특정 flag 만.
+_SEMANTIC_FLAGS = {"-X", "--method", "-f", "--field"}
+
+
+def _call_flag_set(call: "ast.Call") -> set[str] | None:
+    import ast
+    if not call.args:
+        return None
+    first = call.args[0]
+    if not isinstance(first, ast.List):
+        return None
+    elts = []
+    for e in first.elts:
+        if isinstance(e, ast.Constant) and isinstance(e.value, str):
+            elts.append(e.value)
+        else:
+            return None  # 동적으로 만든 인자 — 정적으로 못 읽는다, 커버리지를 주장하지 않는다
+    if not elts:
+        return None
+    return {a for a in elts if a in _SEMANTIC_FLAGS}
+
+
+def subprocess_call_shape_divergence(work: Path) -> list[str]:
+    """저장소 전체(diff 아님, `duplicate_test_basenames` 와 같은 전-트리
+    관례)를 훑어, 같은 명령(첫 두 argv 요소, 예: `("gh","api")`)을 부르는
+    `subprocess.run`/`check_output`/`Popen` 호출을 그룹짓고, 그룹 안에서
+    의미를 바꾸는 flag(`_SEMANTIC_FLAGS`)의 존재/부재가 갈리면 flag."""
+    import ast
+    calls_by_cmd: dict[tuple[str, str], list[tuple[str, int, frozenset]]] = {}
+    p = subprocess.run(["git", "-C", str(work), "ls-files", "*.py"],
+                       capture_output=True, text=True)
+    files = p.stdout.splitlines() if p.returncode == 0 else []
+    for rel in files:
+        f = work / rel
+        try:
+            src = f.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(src)
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            is_subproc = (
+                (isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name)
+                 and fn.value.id == "subprocess"
+                 and fn.attr in ("run", "check_output", "check_call", "Popen"))
+                or (isinstance(fn, ast.Name) and fn.id in ("run", "check_output",
+                                                            "check_call", "Popen")))
+            if not is_subproc:
+                continue
+            flags = _call_flag_set(node)
+            if flags is None or not node.args or not isinstance(node.args[0], ast.List):
+                continue
+            elts = [e.value for e in node.args[0].elts
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+            if len(elts) < 2:
+                continue
+            cmd = (elts[0], elts[1])
+            calls_by_cmd.setdefault(cmd, []).append(
+                (rel, node.lineno, frozenset(flags)))
+    bad = []
+    for cmd, calls in calls_by_cmd.items():
+        if len(calls) < 2:
+            continue
+        flagsets = {c[2] for c in calls}
+        if len(flagsets) > 1:
+            sites = ", ".join(f"{rel}:{lineno}" for rel, lineno, _ in calls)
+            bad.append(
+                f"명령 {' '.join(cmd)!r} 의 호출부들이 flag 모양이 다르다"
+                f"({sites}) — 같은 명령이 서로 다른 의미로 호출되는, #388 과 "
+                f"같은 모양의 재발일 수 있다.")
+    return bad
+
+
+def subprocess_call_shape_divergence_gate(d: Path, cfg: dict) -> list[str]:
+    return subprocess_call_shape_divergence(d / "work")
+
+
+_SIBLING_MARKER = re.compile(
+    r"^\s*#\s*sibling\s*:\s*([\w.]+)\s*$", re.MULTILINE)
+_DEF_LINE = re.compile(r"^\s*(?:async\s+)?(?:def|class)\s+(\w+)", re.MULTILINE)
+_SIBLINGS_SECTION = re.compile(
+    r"^##\s*Siblings\s*$(.*?)(?=^##\s|\Z)", re.M | re.S)
+
+
+def _marked_defs(text: str) -> list[str]:
+    """`# sibling: <name>` 주석 바로 다음 줄의 `def`/`class` 이름들."""
+    names = []
+    lines = text.splitlines()
+    for i, ln in enumerate(lines):
+        if _SIBLING_MARKER.match(ln):
+            for nxt in lines[i + 1:]:
+                if nxt.strip() == "" or nxt.strip().startswith("#"):
+                    continue
+                m = re.match(r"^\s*(?:async\s+)?(?:def|class)\s+(\w+)", nxt)
+                if m:
+                    names.append(m.group(1))
+                break
+    return names
+
+
+def sibling_mention_check(work: Path, record_text: str) -> list[str]:
+    """diff 가 건드린 파일 중 `# sibling: <name>` 마커가 붙은 함수/클래스가
+    있으면, 바뀐 레코드의 `## Siblings` 섹션이 그 이름을 언급해야 한다.
+
+    마커가 아예 없으면(회고적으로 마킹되지 않은 기존 쌍) `[]` — 이건 이
+    검사의 명시된 전향적(prospective) 한계다."""
+    try:
+        files = changed_files(work)
+    except RuntimeError:
+        return []
+    m = _SIBLINGS_SECTION.search(record_text or "")
+    section_body = m.group(1) if m else ""
+    bad = []
+    for rel in files:
+        f = work / rel
+        if not f.is_file() or not rel.endswith(".py"):
+            continue
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for name in _marked_defs(text):
+            if name not in section_body:
+                bad.append(
+                    f"{rel} 의 `{name}` 이 `# sibling:` 로 표시됐지만, 바뀐 "
+                    f"레코드의 `## Siblings` 섹션에 언급되지 않았다.")
+    return bad
+
+
+def sibling_mention_check_gate(d: Path, cfg: dict) -> list[str]:
+    work = d / "work"
+    record_text = cfg.get("record_text", "") if cfg else ""
+    return sibling_mention_check(work, record_text)
+
+
 ALL = {"writeset": writeset, "deps": deps,
        "record_enums": record_enums,
        "record_wellformed": record_wellformed,
@@ -933,7 +1073,9 @@ ALL = {"writeset": writeset, "deps": deps,
        "record_fulfils_diff": record_fulfils_diff,
        "duplicate_test_basenames": duplicate_test_basenames_gate,
        "requirement_registry": requirement_registry,
-       "record_checked_claims": record_checked_claims}
+       "record_checked_claims": record_checked_claims,
+       "subprocess_call_shape_divergence": subprocess_call_shape_divergence_gate,
+       "sibling_mention_check": sibling_mention_check_gate}
 
 
 def check(names: list[str], d: Path, cfg: dict) -> list[str]:

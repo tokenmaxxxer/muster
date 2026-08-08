@@ -2338,6 +2338,7 @@ def _core_candidates() -> list[tuple[str, Path]]:
     ]
 
 
+# sibling: core_version
 def core_root() -> Path:
     """tokenmaxxxer-core 체크아웃 루트. 없으면 멈춘다.
 
@@ -2379,6 +2380,7 @@ def core_root() -> Path:
         "  네트워크를 확인하거나 체크아웃을 두고 $TOKENMAXXXER_CORE 로 가리켜라.")
 
 
+# sibling: core_root
 def core_version() -> str:
     """core_root() 가 실제로 고를 체크아웃이 **무엇인지** — 읽기 전용, pull 도
     clone 도 하지 않는다. checkout_version() 의 core 쪽 대칭 — 로컬 오버라이드를

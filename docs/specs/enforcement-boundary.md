@@ -49,6 +49,8 @@ Verdict values:
 | `acceptance_gate.py` | contract | enforced zero-install via `spawn.py` preflight (`require_acceptance_gate`), before a phase-2 session starts |
 | `landing_readiness.py` | contract, CI-supplement | advisory scope-overlap/checks judgment; not folded into `contract-guard.sh` in this delivery, remains CI-only where installed |
 | `spawn_coverage.py` | **contract, orchestrator-loop** | "an issue was filed but no session ever started" is now checked each `spawn.py:roster_watchdog()` tick via `find_uncovered()`, including on an empty live roster, reversing the 2026-08-07 out-of-scope ruling for this row per issue #464's ADR |
+| `repo_scope.py` | repo-local | issue #415: flags an unscoped capability/contract absence claim in issue/record prose; ships as a standalone script/pytest module, not wired into any zero-install preflight or `contract-guard.sh` |
+| `accumulation.py` | repo-local | issue #424: flags a proposal touching a named accumulation-prone shape (inline subprocess/gh call-site growth, `roles/*.json`-style repeated one-line edits) with no `## Accumulation` line; checks this repo's own proposal-authoring practice, not wired into any consumer-reachable preflight |
 | `issue_bundling.py` | repo-local | this org's own filing hygiene; `run.md` states no such obligation on a consumer's role sessions |
 | `skip_gate.py` | repo-local | wraps this repo's own CI invocation of its own test suite |
 | `spec_index.py` | repo-local | checks this repo's own `docs/specs/` set, not a consumer's |
