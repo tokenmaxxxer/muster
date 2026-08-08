@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import flows
 import gates
 import pr_reference
+import record_lint
 import spawn
 import spec_index
 
@@ -458,13 +459,15 @@ def check(repo: Path, pr: int | None = None, issue: int | None = None,
             bad.append(f"PR #{pr} 의 head 브랜치를 읽을 수 없다 (fail closed)")
         else:
             bad += gates.role_scope(repo, branch)
-    bad += gates.record_enums(repo, {})
-    bad += gates.record_wellformed_in(repo)
-    bad += gates.record_no_tool_residue_in(repo)
+    # issue #517: routed through gates/record_lint.py's re-exports — same
+    # function objects as gates.py, not a second copy.
+    bad += record_lint.record_enums(repo, {})
+    bad += record_lint.record_wellformed_in(repo)
+    bad += record_lint.record_no_tool_residue_in(repo)
     bad += gates.record_fulfils_diff(repo, {})
     bad += spec_index.check(repo)
     bad += gates.requirement_registry(repo, {})
-    bad += gates.record_checked_claims(repo, {})
+    bad += record_lint.record_checked_claims(repo, {})
     if pr is not None:
         bad += _checked_ci_claims_bad(repo, pr)
 
