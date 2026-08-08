@@ -24,7 +24,7 @@ updating "Resolved ambiguities" if the edit touches a resolved point.
 | `docs/handbooks/on-the-record.md` | `9e314a347f6265950b2eedc791891e329255ee4adf9f6b5ffab5554f2e6e20f1` |
 | `docs/handbooks/operations.md` | `c60d8e137f6b76a83c9a25a6ae014843693a13a984f6f3b4488cacee3c604379` |
 | `docs/handbooks/setup.md` | `df9c710683663f260679d3629ce8733c7f0af60196dbfbaf6b92d8e2205f3e73` |
-| `on-the-record/commands/run.md` | `3417072d2678fc59918b1051affcd9bb9c96e6e409d8f152bdf4d99ad9a61e6b` |
+| `on-the-record/commands/run.md` | `60096942d1e1501a0239d0d9b21a33fc6ce10af7093273e9f33a3a93a14fa344` |
 
 ## Resolved ambiguities
 

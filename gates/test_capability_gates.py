@@ -139,10 +139,16 @@ def t_actual_tree_ci_reachable_gates_catches_writeset_and_record_enums():
     assert any("gates.record_enums" in b for b in bad), bad
 
 
-def t_actual_tree_schema_field_orphans_catches_decision_queue():
+def t_actual_tree_schema_field_orphans_catches_alive():
+    """`decision_queue` was the orphaned field when this test was written,
+    but issue-466's `decision-queue-stopgate.sh` (landed on main since) now
+    reads it, so it's no longer orphaned — a real fix, not a regression.
+    `alive` (also in `docs/specs/flows-schema.md`) remains unread outside
+    its producer/test, so it stays a stable fixture for "the gate catches a
+    real orphaned field in the actual tree"."""
     root = Path(__file__).resolve().parent.parent
     bad = gates.schema_field_orphans(root, {})
-    assert any("decision_queue" in b for b in bad), bad
+    assert any("alive" in b for b in bad), bad
 
 
 def _run(fns):
