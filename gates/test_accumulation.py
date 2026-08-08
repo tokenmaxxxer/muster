@@ -69,6 +69,27 @@ def t_shape5_roles_json_touch_without_accumulation_line_flags():
         shutil.rmtree(d)
 
 
+def t_shape1_heading_only_no_body_still_flags():
+    # issue #512 requirement 3: heading-existence used to be enough to
+    # pass; after the field-presence strengthening, an empty body must
+    # still flag.
+    d = _repo({"gates/ci.py": "import subprocess\n" + _CI_PY_WITH_7TH_CALL})
+    try:
+        bad = accumulation.check_accumulation_claim(d, "## Accumulation\n\n## Out of scope\nx\n")
+        assert bad, "an empty ## Accumulation body must still flag (issue #512)"
+    finally:
+        shutil.rmtree(d)
+
+
+def t_shape1_heading_with_body_passes():
+    d = _repo({"gates/ci.py": "import subprocess\n" + _CI_PY_WITH_7TH_CALL})
+    try:
+        body = "## Accumulation\nAfter N more, ci.py grows one gh call per row.\n## Out of scope\nx\n"
+        assert accumulation.check_accumulation_claim(d, body) == []
+    finally:
+        shutil.rmtree(d)
+
+
 def t_non_git_directory_fails_closed_not_silently_empty():
     # before-landing warrant hunt (stance: malformed-input-goes-silent):
     # a non-git `work` directory must not silently return [] — that would

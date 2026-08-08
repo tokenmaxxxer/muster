@@ -3,7 +3,10 @@
 
   python3 -m pytest gates/test_closure_sweep.py
 """
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -101,6 +104,46 @@ class MainExitCode(unittest.TestCase):
         joined = "\n".join(buf)
         self.assertIn("확인 불가", joined)
         self.assertNotIn("위반 없음", joined)
+
+
+class AccumulationTrend(unittest.TestCase):
+    """issue #512 requirement 4: watchdog-tick advisory trend measurement."""
+
+    def _repo(self, files):
+        d = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        for path, content in files.items():
+            f = d / path
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(content)
+        subprocess.run(["git", "add", "-A"], cwd=d, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t.com", "-c", "user.name=t",
+                        "commit", "-q", "-m", "init"], cwd=d, check=True)
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        return d
+
+    def test_empty_state_produces_valid_no_data_artifact(self):
+        d = self._repo({"README.md": "hello\n"})
+        trend = closure_sweep.accumulation_trend(d)
+        self.assertFalse(trend["has_prior"])
+        self.assertEqual(trend["current"], {"shape1_sites": 0, "shape5_files": 0})
+        self.assertNotIn("delta", trend)
+        report = closure_sweep.format_accumulation_trend(trend)
+        self.assertIn("no prior tick data", report)
+
+    def test_second_tick_reports_delta_against_first(self):
+        d = self._repo({"README.md": "hello\n"})
+        closure_sweep.accumulation_trend(d)
+        (d / "roles").mkdir()
+        (d / "roles" / "x.json").write_text("{}\n")
+        subprocess.run(["git", "-C", str(d), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(d), "-c", "user.email=t@t.com",
+                        "-c", "user.name=t", "commit", "-q", "-m", "add"], check=True)
+        trend = closure_sweep.accumulation_trend(d)
+        self.assertTrue(trend["has_prior"])
+        self.assertEqual(trend["delta"]["shape5_files"], 1)
+        report = closure_sweep.format_accumulation_trend(trend)
+        self.assertIn("shape5_files=1", report)
 
 
 if __name__ == "__main__":

@@ -31,7 +31,19 @@ import re
 import subprocess
 from pathlib import Path
 
-_ACCUMULATION_HEADING = re.compile(r"^##\s*Accumulation\b", re.M | re.I)
+# issue #512 requirement 3: heading-existence isn't enough — the section
+# must carry at least one non-blank line before the next `##` heading or
+# EOF. Still presence-only (contract §14): a filled line is not checked
+# for whether its prediction is correct.
+_ACCUMULATION_HEADING = re.compile(
+    r"^##\s*Accumulation\s*$(.*?)(?=^##\s|\Z)", re.M | re.I | re.S)
+
+
+def _has_filled_accumulation(body: str) -> bool:
+    m = _ACCUMULATION_HEADING.search(body or "")
+    if not m:
+        return False
+    return any(line.strip() for line in m.group(1).splitlines())
 
 # 모양 1: 이미 이만큼 인라인 subprocess/gh 호출이 있으면 "공유 헬퍼 없는
 # 반복"으로 본다 — gates/ci.py의 실물 6곳 중 최소 3곳 이상이면(#419가 쓴
@@ -125,7 +137,7 @@ def check_accumulation_claim(work: Path, body: str) -> list[str]:
         changed = p_all.stdout.splitlines()
     if not (_touches_shape_1(work, changed) or _touches_shape_5(changed)):
         return []
-    if _ACCUMULATION_HEADING.search(body or ""):
+    if _has_filled_accumulation(body):
         return []
     return [
         "변경이 축적-비용 모양(공유 헬퍼 없는 인라인 subprocess/gh 호출 "

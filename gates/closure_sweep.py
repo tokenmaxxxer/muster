@@ -20,6 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pr_reference  # noqa: E402
 import spawn  # noqa: E402
 import ci  # noqa: E402
+import accumulation  # noqa: E402
+
+_ACCUMULATION_TREND_STATE = "runs/accumulation_trend.json"
 
 OPEN_PR_ON_CLOSED_ISSUE = "open-pr-on-closed-issue"
 MERGED_DELIVERY_ISSUE_OPEN = "merged-delivery-issue-open"
@@ -143,6 +146,70 @@ def format_report(violations: list[dict]) -> str:
 def _violations_digest(violations: list[dict]) -> str:
     key = sorted((v["issue"], v["pr"], v["kind"]) for v in violations)
     return hashlib.sha256(json.dumps(key).encode("utf-8")).hexdigest()[:12]
+
+
+def _current_accumulation_counts(root: Path) -> dict:
+    """이슈 #512 요구사항 4: 병합된 트리(diff 아님)에서 모양 1/5 인스턴스
+    수를 센다 — `accumulation.py`가 검사에 쓰는 것과 같은 두 모양(inline
+    subprocess/gh 호출, roles/*.json)만, 일반 중복 탐지기는 재도입하지
+    않는다 (#419/#424 오탐 홍수 거부 재확인)."""
+    p = subprocess.run(["git", "-C", str(root), "ls-files", "*.py"],
+                       capture_output=True, text=True)
+    py_files = p.stdout.splitlines() if p.returncode == 0 else []
+    shape1_sites = 0
+    for rel in py_files:
+        f = root / rel
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        shape1_sites += accumulation._inline_subprocess_call_count(text)
+
+    p5 = subprocess.run(["git", "-C", str(root), "ls-files", "roles/*.json"],
+                        capture_output=True, text=True)
+    shape5_files = len(p5.stdout.splitlines()) if p5.returncode == 0 else 0
+    return {"shape1_sites": shape1_sites, "shape5_files": shape5_files}
+
+
+def accumulation_trend(root: Path) -> dict:
+    """워치독 틱(issue #512 요구사항 4)마다 도는 advisory 측정 — 병합된
+    트리를 훑어 모양 1/5 인스턴스 수를 세고, 직전 틱과 비교한 변화량을
+    보고한다. 아무것도 막지 않는다(count report, blocking gate 아님).
+
+    직전 틱 데이터가 없으면(첫 실행, 또는 `runs/` 이 비어있는 새 fixture
+    저장소) `has_prior: False`인 유효한 "no data" artifact 를 낸다 — 예외를
+    던지지 않는다."""
+    state_path = root / _ACCUMULATION_TREND_STATE
+    prior = None
+    if state_path.is_file():
+        try:
+            prior = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            prior = None
+
+    current = _current_accumulation_counts(root)
+    result = {"current": current, "has_prior": prior is not None}
+    if prior is not None:
+        result["prior"] = prior
+        result["delta"] = {
+            k: current[k] - prior.get(k, 0) for k in current
+        }
+
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(current), encoding="utf-8")
+    return result
+
+
+def format_accumulation_trend(trend: dict) -> str:
+    c = trend["current"]
+    if not trend.get("has_prior"):
+        return (f"accumulation-trend: no prior tick data (first run) — "
+                f"shape1_sites={c['shape1_sites']} shape5_files={c['shape5_files']}")
+    d = trend["delta"]
+    return (f"accumulation-trend: shape1_sites={c['shape1_sites']} "
+           f"({'+' if d['shape1_sites'] >= 0 else ''}{d['shape1_sites']}), "
+           f"shape5_files={c['shape5_files']} "
+           f"({'+' if d['shape5_files'] >= 0 else ''}{d['shape5_files']})")
 
 
 def post_sweep_comments(root: Path, violations: list[dict]) -> list[int]:
