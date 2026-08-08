@@ -59,6 +59,7 @@ Verdict values:
 | `risk_report.py` | n/a (infrastructure) | non-blocking classifier feeding `gates.py`'s review surface, not itself a clause |
 | `gates.py` | n/a (infrastructure) | router/dispatcher to the modules above |
 | `flows.py` | repo-local | feeds this repo's own status-board UI |
+| `claims.py` | repo-local | new (#377): opt-in `# CLAIM-CHECK:` marker checker over this repo's own source (role-JSON enum drift, `spec.md`-producer claim); registered in `gates.ALL`, not wired into `gates/ci.py`'s required path in this delivery — promotion to required-check status is a separate follow-up decision per the proposal's own Rationale |
 
 ## `on-the-record/hooks/*.sh` (plugin-shipped)
 
@@ -74,6 +75,7 @@ Verdict values:
 | `role-test-claim-guard.sh` | contract | new (#457): `Stop`, role-session mirror of `gates/skip_gate.py` (#334) and the stub/full-suite integrity lesson behind #435, applied to the reply's own pasted test output; zero-install, ships with the plugin |
 | `self-update.sh` | contract | already shipped; `SessionStart` plugin refresh |
 | `decision-queue-stopgate.sh` | contract | new (#466): `Stop` hook, surfaces aged `decision_queue` items (>=1h nudge, >=4h block); zero-install, ships with the plugin |
+| `report-framing-check.sh` | contract | new (#320): `Stop`, checks a PR/board report turn's `last_assistant_message` for the four semantic-effect framing elements (resolved problem, prior cost, newly possible, still broken); zero-install, ships with the plugin, appended to the existing `Stop` array (declared first by `stop-gate.sh`) |
 
 ## `.github/workflows/*.yml` (retired, issue #460)
 
