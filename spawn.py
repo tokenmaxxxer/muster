@@ -999,6 +999,27 @@ def _pr_for_branch(root: Path, branch: str) -> int | None:
     return int(out) if r.returncode == 0 and out.isdigit() else None
 
 
+def _pr_open_or_merged_for_branch(root: Path, branch: str) -> int | None:
+    """`_pr_for_branch`의 `--state all` 은 머지 없이 닫힌 PR 도 "있음"으로
+    센다 — outcome-derivation 의 already_delivered 판정에 그대로 쓰면
+    실패한 세션을 delivered 로 오분류한다(issue #484 after-proposal
+    hunt). 여기서는 OPEN/MERGED 만 "배달됨"으로 센다.
+    """
+    r = subprocess.run(["gh", "pr", "list", "--head", branch, "--state", "all",
+                        "--json", "number,state"],
+                       cwd=root, capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    try:
+        prs = json.loads(r.stdout)
+    except ValueError:
+        return None
+    for pr in prs:
+        if pr.get("state") in ("OPEN", "MERGED"):
+            return pr.get("number")
+    return None
+
+
 def _issue_comments(root: Path, number: int) -> tuple[list[dict], bool]:
     """`number` 앞으로 달린 코멘트. GitHub 는 이슈든 PR 이든 같은
     `/issues/<n>/comments` 로 대화 코멘트를 낸다 — PR 리뷰 코멘트가 아니라
@@ -1435,7 +1456,8 @@ def session_end_verdict(work: str, log_path: Path | None, now: float | None = No
 
 def fail_closed_downgrade(outcome: str, issue: int | None, blocked: list,
                           new_commit: bool, uncommitted: list,
-                          already_delivered: bool = False) -> str:
+                          already_delivered: bool = False,
+                          push_succeeded: bool = False) -> str:
     """`classify()` 뒤에 붙는 별도 단계 — git 상태로 `progressed` 를
     검증한다. `classify()` 자체는 손대지 않는다: git 상태를 모르고, 기존
     계약(rc/result/delta/blocked)과 기존 테스트를 그대로 둔다.
@@ -1455,7 +1477,23 @@ def fail_closed_downgrade(outcome: str, issue: int | None, blocked: list,
     — 브랜치에 이미 PR 이 있다는 사실을 호출부에서 확인해 넘긴다. 미커밋
     변경이 남아있으면(더러운 트리) 여전히 다운그레이드한다: "이미 배달됨" 이
     "이번 세션이 남긴 새 변경도 안전하다"를 의미하지 않는다.
+
+    `silent-failure` 업그레이드 (issue #484): `classify()` 는 docs 보드
+    델타만 보므로, 이미 배달된 작업 위에 재실행되어 아무것도 할 게 없던
+    세션이나 docs 밖(코드) 커밋만 남긴 세션은 델타가 비어 `silent-failure`
+    로 잡힌다. 여기서도 `already_delivered`/`new_commit`+push-성공 사실은
+    `classify()` 의 원판정과 무관하게 그대로 유효하므로, 같은 신호로
+    `silent-failure` 를 끌어올린다 — `progressed` 경로의 다운그레이드
+    로직과 대칭이지만 방향이 반대다.
     """
+    if outcome == "silent-failure" and issue is not None and not blocked:
+        if uncommitted:
+            return outcome
+        if already_delivered:
+            return "progressed"
+        if new_commit and push_succeeded:
+            return "progressed"
+        return outcome
     if outcome != "progressed" or issue is None:
         return outcome
     if blocked:
@@ -2208,9 +2246,7 @@ WATCH_CRASH_RC = 2  # `--follow`가 session-end 없이 pid 사망을 감지했�
                     # docs/issue-224/decisions/watch-crash-exit-code.md).
 
 
-def _watch(issue: int, role: str | None, stall_timeout_min: float,
-           follow: bool = False) -> int:
-    idx = _workspace_index_load()
+def _lookup_roster_entry(idx: dict, issue: int, role: str | None):
     if role:
         key = f"issue-{issue}/{role}"
         entry = idx.get(key)
@@ -2221,6 +2257,27 @@ def _watch(issue: int, role: str | None, stall_timeout_min: float,
                      + ", ".join(k.split("/", 1)[1] for k, _ in matches))
         key = matches[0][0] if matches else None
         entry = matches[0][1] if matches else None
+    return key, entry
+
+
+def _watch(issue: int, role: str | None, stall_timeout_min: float,
+           follow: bool = False) -> int:
+    idx = _workspace_index_load()
+    key, entry = _lookup_roster_entry(idx, issue, role)
+    if entry is None:
+        # 등록 레이스(이슈 #484): 스폰이 막 리턴했지만 명부 쓰기가 아직
+        # 반영되지 않았을 수 있다 — #451 의 "끝내 안 나타남"과는 구분되는
+        # 경우로, 같은 stall_timeout_min 한도 안에서 _await_bounded 와
+        # 동일한 백오프로 잠깐 재시도한다. 한도 안에 나타나면 계속
+        # 진행하고, 끝내 안 나타나면 오늘의 기록-없음 처리로 떨어진다.
+        limit_s = stall_timeout_min * 60
+        start = time.monotonic()
+        poll_s = 0.05
+        while entry is None and time.monotonic() - start < limit_s:
+            time.sleep(poll_s)
+            poll_s = min(poll_s * 2, 2.0)
+            idx = _workspace_index_load()
+            key, entry = _lookup_roster_entry(idx, issue, role)
     if entry is None:
         print(f"[watch] issue-{issue}{'/' + role if role else ''}: 기록 없음 — "
               f"아직 스폰된 적이 없다", file=sys.stderr)
@@ -3640,13 +3697,15 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
               f"{push_result['reason']}", file=sys.stderr)
     new_commit = issue is not None and _is_new_commit(cwd, before_head, after_head)
     already_delivered = False
-    if issue is not None and outcome == "progressed" and not blocked and not new_commit:
+    push_succeeded = push_result is not None and push_result["status"] not in (
+        "push-rejected", "pr-create-failed")
+    if issue is not None and not blocked and not new_commit:
         branch = subprocess.run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
                                 capture_output=True, text=True).stdout.strip()
         if branch:
-            already_delivered = _pr_for_branch(Path(cwd), branch) is not None
+            already_delivered = _pr_open_or_merged_for_branch(Path(cwd), branch) is not None
     downgraded = fail_closed_downgrade(outcome, issue, blocked, new_commit, uncommitted,
-                                       already_delivered)
+                                       already_delivered, push_succeeded)
     if downgraded != outcome:
         if downgraded == "progressed-dirty-tree":
             print(f"[{role}] 페일-클로즈드: progressed 로 자기보고 했고 새 "
@@ -3655,6 +3714,14 @@ def _spawn_one(cwd: str, role: str, task: str, unattended: bool,
                   f"{outcome} 를 progressed-dirty-tree 로 표기한다. 기대한 것: "
                   f"이 세션이 끝나기 전에 트리까지 clean. 관찰한 것: 커밋은 "
                   f"있으나 더러운 트리.",
+                  file=sys.stderr)
+        elif outcome == "silent-failure" and downgraded == "progressed":
+            reason = ("이미 브랜치에 open/merged PR 이 있다" if already_delivered
+                      else "새 커밋이 push 됐다")
+            print(f"[{role}] silent-failure 로 자기보고 됐지만 관측된 git/PR "
+                  f"상태가 배달을 보여준다({reason}) — {outcome} 를 progressed "
+                  f"로 끌어올린다. 기대한 것: docs 보드 델타로 성공을 포착. "
+                  f"관찰한 것: 델타는 없지만 실제로는 배달됨.",
                   file=sys.stderr)
         else:
             print(f"[{role}] 페일-클로즈드: progressed 로 자기보고 했지만 "
