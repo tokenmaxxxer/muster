@@ -22,7 +22,7 @@ updating "Resolved ambiguities" if the edit touches a resolved point.
 | `docs/specs/approvers.md` | `bbcb4e239a5aed872956a01acc04c9431027a1f2df483b53265f72577ba16ab9` |
 | `docs/specs/flows-schema.md` | `cb19ed6d9b209733f0ad3b02ed7e0bb8c395c5bce9a28b3c563b1e3d64bc5623` |
 | `docs/handbooks/on-the-record.md` | `9e314a347f6265950b2eedc791891e329255ee4adf9f6b5ffab5554f2e6e20f1` |
-| `docs/handbooks/operations.md` | `c60d8e137f6b76a83c9a25a6ae014843693a13a984f6f3b4488cacee3c604379` |
+| `docs/handbooks/operations.md` | `403a12733091db45e3c1e463f6611a95814ecc3c69b56eccb72cf5b9ff46a6b9` |
 | `docs/handbooks/setup.md` | `df9c710683663f260679d3629ce8733c7f0af60196dbfbaf6b92d8e2205f3e73` |
 | `on-the-record/commands/run.md` | `32262bac5f219b0a39b62fda256c942a539535bfab6c91e7c3ffd0307ab9c957` |
 

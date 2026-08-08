@@ -1040,6 +1040,29 @@ ran" (#334). Before claiming completion, also check for skips:
 python3 gates/skip_gate.py
 ```
 
+## 재스폰 배칭 — 승인과 재스폰을 한 사이클에 (이슈 #501)
+
+측정(2026-08-08, `runs/ledger.jsonl` 123행): 같은 (repo, issue, role)
+쌍의 세션 간 유휴 시간 합이 388.9분으로, 세션 내 non-model 오버헤드
+(84.0분)의 4.6배이고 세션 내 model 작업 시간(527.7분)의 63.6%에
+달한다 — 중앙값은 85초로 대부분은 이미 빠르지만, 상위 8개
+(issue 171/472/484/173, 1063–3389초)가 합계의 대부분을 차지하는
+긴 꼬리 분포다. `docs/issue-501/proposals/2026-08-08-session-latency-breakdown.md`
+참고.
+
+**실천(이미 관행이던 것을 명문화)**: 오케스트레이션 대화는 승인
+코멘트(또는 리뷰 Approve)를 읽는 바로 그 턴에서 다음 역할을 즉시
+재스폰한다 — 승인을 확인만 하고 별도 턴/알림 주기를 기다렸다가
+재스폰하지 않는다. `_self_trigger_respawn()`이 크래시 경로에서 이미
+그렇게 하듯(이슈 #247), 승인 경로도 워치독 틱을 기다리지 않는다.
+
+**사전 등록한 지표**: 위 (repo, issue, role) 유휴 갭의 중앙값/상위-8합.
+`test/test_latency_report.py`의 `PRACTICE_ADOPTED_TS`(커밋 6009fc8,
+2026-08-08T12:00:00Z)를 `since_ts`로 넘겨 `compute_idle_gaps()`/
+`median_idle_s()`를 돌리면 재스폰-배칭 관행 채택 이후 시작된 유휴 갭만
+골라 재계산된다 — 이번 세션의 전체-구간 수치(중앙값 85초, 상위 8합
+대부분)가 before, `since_ts=PRACTICE_ADOPTED_TS`로 재실행한 값이 after다.
+
 ## 미해결
 
 - **다음이 누구인지는 라우팅 표가 아니라 오케스트레이터의 판단이다.**(이슈 #120)
@@ -1052,6 +1075,32 @@ python3 gates/skip_gate.py
   전이 표를 데이터로 받는 형태로 올리는 일은 시작 전이다.
 - **채점이 수동이다.** 발견이 정답 키를 맞혔는지는 사람이 판정한다(키의 adjudication
   조항). 러너는 채점표만 만든다 — 자동 판정을 흉내 내면 원장이 거짓말을 시작한다.
+
+## Respawn batching — approve and respawn in one cycle (issue #501)
+
+Measured (2026-08-08, `runs/ledger.jsonl`, 123 rows): inter-session idle
+summed across same-(repo, issue, role) session pairs is 388.9m — 4.6x
+in-session non-model overhead (84.0m) and 63.6% of in-session model
+working time (527.7m). Median gap is only 85s (most respawns are already
+fast), but it's a long right tail: the top 8 gaps (issues 171/472/484/173,
+1063-3389s) drive most of the sum. See
+`docs/issue-501/proposals/2026-08-08-session-latency-breakdown.md`.
+
+**Practice (codifying what was already informal)**: the orchestrating
+conversation reads an approval (comment or review Approve) and dispatches
+the next role in that same turn — never confirm-then-wait-for-a-separate-
+notification-cycle before respawning. `_self_trigger_respawn()` already
+does this on the crash path without waiting for a watchdog tick (issue
+#247); the approval path holds to the same rule.
+
+**Pre-registered metric**: median and top-8 sum of the same (repo, issue,
+role) idle gaps. Passing `test/test_latency_report.py`'s
+`PRACTICE_ADOPTED_TS` (commit 6009fc8, 2026-08-08T12:00:00Z) as `since_ts`
+to `compute_idle_gaps()`/`median_idle_s()` selects only gaps whose next
+session started after adoption — this session's whole-window numbers
+(median 85s, tail dominated by the 4 named issues) are the *before*; a
+re-run with `since_ts=PRACTICE_ADOPTED_TS` against a later ledger pull is
+the *after*.
 
 ## Open
 
