@@ -78,6 +78,7 @@ Verdict values:
 | `self-update.sh` | contract | already shipped; `SessionStart` plugin refresh |
 | `decision-queue-stopgate.sh` | contract | new (#466): `Stop` hook, surfaces aged `decision_queue` items (>=1h nudge, >=4h block); zero-install, ships with the plugin |
 | `report-framing-check.sh` | contract | new (#320): `Stop`, checks a PR/board report turn's `last_assistant_message` for the four semantic-effect framing elements (resolved problem, prior cost, newly possible, still broken); zero-install, ships with the plugin, appended to the existing `Stop` array (declared first by `stop-gate.sh`) |
+| `retry-loop-bound.sh` | contract | new (#507): `PreToolUse`/`PostToolUse` on `Write|Edit|MultiEdit|Bash`, bounds identical-refusal retry loops at K/2K denials per `sha256(tool_name, target)` signature (allow-with-context in `[K, 2K)`, deny outright at `>= 2K`); zero-install, ships with the plugin |
 
 ## `.github/workflows/*.yml` (retired, issue #460)
 
