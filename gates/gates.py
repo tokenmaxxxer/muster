@@ -341,6 +341,48 @@ def record_enums(d: Path, cfg: dict) -> list[str]:
     return bad
 
 
+REFUSAL_STATES = {"refused", "not-needed", "cannot-verify"}
+
+
+def record_refusal_reasoned(d: Path, cfg: dict) -> list[str]:
+    """issue #476 H2 — `loop_state`가 거부/불필요/검증불가 계열 값이면
+    `reason:` 필드 존재를 강제한다. `record_enums`와 같은 자리(role 정의를
+    못 읽으면 fail closed, 선언 안 된 필드는 검사 안 함)에, 값-내용 검증이
+    아니라 존재-검증만 한다 — 기존 `record_wellformed_in`의 엄격도와
+    같다: 성실히 채웠는지가 아니라 채웠는지만."""
+    root = d / "work" if (d / "work").exists() else d
+    try:
+        files = changed_files(root)
+    except RuntimeError as e:
+        return [str(e)]
+    bad = []
+    for f in files:
+        m = RECORD_PATH.match(f)
+        if not m:
+            continue
+        role = m.group(1)
+        role_file = ON_THE_RECORD_ROOT / "roles" / f"{role}.json"
+        try:
+            role_cfg = json.loads(role_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            bad.append(f"역할 정의를 읽을 수 없어 refusal 필드를 검사할 수 "
+                       f"없다: {role_file} ({e})")
+            continue
+        declared = role_cfg.get("record_fields", {}).get("loop_state")
+        if declared is None:
+            continue
+        record_file = root / f
+        fm = record_frontmatter(
+            record_file.read_text(encoding="utf-8-sig", errors="replace")
+            if record_file.exists() else "")
+        state = fm.get("loop_state")
+        if state in REFUSAL_STATES and not fm.get("reason", "").strip():
+            bad.append(
+                f"거부/불필요 레코드에 reason: 없음: {f} 의 "
+                f"loop_state={state!r} 인데 reason: 필드가 없거나 비어있다")
+    return bad
+
+
 def _changed_records(work: Path) -> list[str]:
     """변경 파일 중 docs/issue-<n>/reports/<role>.md 형태만. 실패는 fail closed."""
     files = changed_files(work)
@@ -1067,6 +1109,7 @@ def sibling_mention_check_gate(d: Path, cfg: dict) -> list[str]:
 
 ALL = {"writeset": writeset, "deps": deps,
        "record_enums": record_enums,
+       "record_refusal_reasoned": record_refusal_reasoned,
        "record_wellformed": record_wellformed,
        "record_no_tool_residue": record_no_tool_residue,
        "record_derived_counts": record_derived_counts,

@@ -89,5 +89,54 @@ class ReconstructedIncidentShape(unittest.TestCase):
         self.assertEqual(results[4], lr.READY)
 
 
+class ReexecutionBlockingCause(unittest.TestCase):
+    """issue #476 H1 — `.reexecution/<issue>-<role>.json` verdict를
+    레코드 경로로 스코프된 blocking_cause로 바꾸는 지점."""
+
+    def test_no_verdict_file_is_no_cause(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            cause = lr.reexecution_blocking_cause(Path(td), 476, "implementation")
+            self.assertIsNone(cause)
+
+    def test_pass_verdict_is_no_cause(self):
+        import tempfile
+        import reexecution_gate as rg
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            v = rg.Verdict(rg.PASS, "sh x", "deadbeef", 0, "", 0.0)
+            rg.write_verdict(root, 476, "implementation", v)
+            cause = lr.reexecution_blocking_cause(root, 476, "implementation")
+            self.assertIsNone(cause)
+
+    def test_fail_verdict_scopes_to_own_record_path_not_gates(self):
+        import tempfile
+        import reexecution_gate as rg
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            v = rg.Verdict(rg.FAIL, "sh x", "deadbeef", 1, "boom", 0.0)
+            rg.write_verdict(root, 476, "implementation", v)
+            cause = lr.reexecution_blocking_cause(root, 476, "implementation")
+            self.assertIsNotNone(cause)
+            self.assertEqual(cause["scope"],
+                             frozenset({"docs/issue-476/reports/implementation.md"}))
+
+    def test_fail_verdict_blocks_pr_whose_files_never_touch_gates(self):
+        """after-proposal hunt가 재현한 bypass: gates/-스코프 원인은 gates/를
+        건드리지 않는 정상 role PR을 놓친다. 자기 레코드 경로 스코프는
+        그 PR이 항상 건드리는 파일이라 놓치지 않는다."""
+        import tempfile
+        import reexecution_gate as rg
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            v = rg.Verdict(rg.FAIL, "sh x", "deadbeef", 1, "boom", 0.0)
+            rg.write_verdict(root, 476, "implementation", v)
+            cause = lr.reexecution_blocking_cause(root, 476, "implementation")
+            pr_files = frozenset({"docs/issue-476/reports/implementation.md",
+                                  "src/widget.py"})
+            kind, _ = lr.classify("OPEN", "pass", True, True, pr_files, (cause,))
+            self.assertEqual(kind, lr.BLOCKED_ON_SCOPE)
+
+
 if __name__ == "__main__":
     unittest.main()

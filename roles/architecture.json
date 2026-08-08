@@ -17,6 +17,7 @@
   "produces": "ADR (context/decision/consequences), boundary diagram",
   "write_scope": ["docs/issue-<n>/decisions/**"],
   "record_fields": {
-    "loop_state": ["scope-proposed", "scope-approved", "in-progress", "landed"]
+    "loop_state": ["scope-proposed", "scope-approved", "in-progress",
+                   "refused", "not-needed", "cannot-verify", "landed"]
   }
 }

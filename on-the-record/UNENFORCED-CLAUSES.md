@@ -13,6 +13,8 @@ session are reached with zero installation. What follows is not.
 | mechanism | verdict | reason |
 |---|---|---|
 | `landing_readiness.py` | contract, CI-supplement | advisory scope-overlap/checks judgment; not folded into `contract-guard.sh` in this delivery, remains CI-only where installed |
+| `claim_scan.py` | contract, CI-supplement | new (issue #476 H1): scans a record/PR body for claim-language ("reproduced"/"verified"/…) with no adjacent runnable evidence or no traceable target — CLI wrapper reads `gh pr diff`; not yet a `PreToolUse` hook, CI-only where installed |
+| `reexecution_gate.py` | contract, CI-supplement | new (issue #476 H1): SHA-pinned worktree re-execution of a claim-adjacent command, gate-owned verdict written to `.reexecution/<issue>-<role>.json`, never role-writable; feeds `landing_readiness.reexecution_blocking_cause()`, folded into `landing_readiness.py`'s existing CI-supplement path — same boundary, no new install surface |
 
 <!-- gate-porting-additions (issue #457) — the table above is the #452
      spec-verdict extract `gates/test_boundary.py` matches exactly against
