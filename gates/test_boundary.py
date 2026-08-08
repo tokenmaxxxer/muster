@@ -90,6 +90,9 @@ def t_spec_records_the_operator_boundary_decision():
     assert "closure_sweep.py" in text and "spawn_coverage.py" in text
 
 
+_GATE_PORTING_MARKER = "<!-- gate-porting-additions (issue #457)"
+
+
 def _unenforced_mechanism_names(spec_text: str) -> set[str]:
     """mechanisms whose verdict is `contract, CI-supplement` or an
     `out of scope — operator decision` variant — the set issue-452's
@@ -107,10 +110,18 @@ def t_unenforced_clauses_file_matches_spec_exactly():
     deployed plugin tree and its mechanism rows must be *exactly* the set of
     CI-supplement / out-of-scope-operator-decision rows in the boundary
     spec — an equal-set check, not one-directional, so a truncated or
-    emptied UNENFORCED-CLAUSES.md fails instead of vacuously passing."""
+    emptied UNENFORCED-CLAUSES.md fails instead of vacuously passing.
+
+    issue-457 appends its own gate-porting justification tables below a
+    `_GATE_PORTING_MARKER` comment in the same file; only the text above
+    that marker is the #452 spec-verdict extract, so only that slice is
+    compared here."""
     assert UNENFORCED.is_file(), f"{UNENFORCED} 가 없다 — issue-452 로 배포됐어야 한다."
+    contract_section = UNENFORCED.read_text(encoding="utf-8").split(
+        _GATE_PORTING_MARKER, 1
+    )[0]
     expected = _unenforced_mechanism_names(SPEC.read_text(encoding="utf-8"))
-    shipped = set(_recorded_mechanisms(UNENFORCED.read_text(encoding="utf-8")).keys())
+    shipped = set(_recorded_mechanisms(contract_section).keys())
     assert shipped == expected, (
         f"on-the-record/UNENFORCED-CLAUSES.md 의 mechanism 집합이 스펙과 다르다.\n"
         f"missing: {sorted(expected - shipped)}\nextra: {sorted(shipped - expected)}"
@@ -121,6 +132,37 @@ def t_run_md_references_unenforced_clauses():
     assert RUN_MD.is_file(), f"{RUN_MD} 가 없다."
     assert "UNENFORCED-CLAUSES.md" in RUN_MD.read_text(encoding="utf-8"), (
         "run.md 가 UNENFORCED-CLAUSES.md 를 참조하는 줄이 없다(#452)."
+    )
+
+
+GATE_PORTING_ISSUES = [
+    310, 312, 319, 322, 325, 330, 331, 332, 333, 334, 369, 383, 388, 396,
+    407, 435,
+]
+
+_HOOKS_DIR = ROOT / "on-the-record" / "hooks"
+
+
+def t_gate_porting_rows_are_ported_or_justified():
+    """issue #457 acceptance: 각 16개 카테고리-2 이슈 번호가
+    `on-the-record/hooks/**` 안에 실제로 그 이슈를 언급하는 강제 항목으로
+    존재하거나(포팅), `on-the-record/UNENFORCED-CLAUSES.md` 안에 정당화
+    행으로 존재해야(justify) 한다 — 조용한 공백이 하나도 없어야 한다."""
+    hook_text = "\n".join(
+        p.read_text(encoding="utf-8") for p in sorted(_HOOKS_DIR.glob("*.sh"))
+    )
+    unenforced_text = UNENFORCED.read_text(encoding="utf-8")
+    missing = []
+    for n in GATE_PORTING_ISSUES:
+        tag = f"#{n}"
+        ported = tag in hook_text
+        justified = re.search(rf"\|\s*{tag}\s*\|", unenforced_text) is not None
+        if not (ported or justified):
+            missing.append(n)
+    assert not missing, (
+        f"issue #457 카테고리-2 행이 포팅도 정당화도 안 됐다: {missing} — "
+        f"{_HOOKS_DIR}/**.sh 에 강제 항목이 있거나 {UNENFORCED} 에 정당화 "
+        "행이 있어야 한다."
     )
 
 

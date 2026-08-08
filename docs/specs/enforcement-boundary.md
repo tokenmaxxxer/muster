@@ -56,6 +56,8 @@ Verdict values:
 | `deliverable-guard.sh` | contract | already shipped; blocks orchestrator-authored deliverables |
 | `directive.sh` | contract | already shipped; `UserPromptSubmit` role directive injection |
 | `stop-gate.sh` | contract | already shipped; `Stop` hook |
+| `record-claim-guard.sh` | contract | new (#457): `PreToolUse`+`Write|Edit|MultiEdit`, session-side write-time mirror of `gates.py`'s record-claim-integrity checks (#310/#330/#331/#332/#333); zero-install, ships with the plugin |
+| `role-test-claim-guard.sh` | contract | new (#457): `Stop`, role-session mirror of `gates/skip_gate.py` (#334) and the stub/full-suite integrity lesson behind #435, applied to the reply's own pasted test output; zero-install, ships with the plugin |
 | `self-update.sh` | contract | already shipped; `SessionStart` plugin refresh |
 
 ## `.github/workflows/*.yml` (this repo's own CI)

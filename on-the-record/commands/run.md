@@ -12,9 +12,8 @@ argument-hint: "[역할 [맡길 일]] — 예: coding \"issue 7 진행\" | 비�
 `issue-<n>/<역할>` 브랜치에서 일하고 PR 로만 돌아온다. 보드는
 `docs/issue-<n>/reports/<역할>.md` 이고, main 에 머지된 것만이 보드다.
 
-이 계약이 기계적으로 강제하지 못하는 조항의 목록은 설치 없이
-`UNENFORCED-CLAUSES.md` (이 플러그인 트리 내부, `run.md` 와 같은 디렉토리
-상위)에서 읽을 수 있다.
+어떤 계약 절이 기계적으로 강제되지 않는지는 `${CLAUDE_PLUGIN_ROOT}/UNENFORCED-CLAUSES.md`
+를 읽어라 — zero-install 로 (설치 없이) 읽을 수 있는 목록이다 (issue #452, #457).
 
 ## 당신의 루프 (사용자와의 대화 안에서)
 
