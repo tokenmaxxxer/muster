@@ -59,11 +59,21 @@ behavior instead of introducing a second timing policy.
    genuinely-never-spawned issue must still fail this way (distinct from
    issue #451's never-appearing case per the issue text).
 2. **Outcome derivation**: in `_spawn_one` (around spawn.py:3611-3644),
-   compute `already_delivered` (existing `_pr_for_branch` check) and a
-   push-succeeded check independent of `classify()`'s raw verdict —
-   i.e. drop the `outcome == "progressed"` gate at spawn.py:3620 so these
-   checks run whenever `issue is not None and not blocked`, before
-   `fail_closed_downgrade` is applied. Extend
+   compute `already_delivered` and a push-succeeded check independent of
+   `classify()`'s raw verdict — i.e. drop the `outcome == "progressed"`
+   gate at spawn.py:3620 so these checks run whenever `issue is not None
+   and not blocked`, before `fail_closed_downgrade` is applied.
+   `already_delivered` must NOT reuse `_pr_for_branch` unmodified for
+   this purpose: that helper queries `--state all`, so a branch whose
+   only PR was closed *without* merging would count as "delivered" and
+   silently mask a genuinely failed/no-op session under the new
+   unconditional check (found by the after-proposal warrant hunt,
+   docs/reports/2026-08-08-hunt-watch-registration-race-and-outcome-derivation.md).
+   The outcome-derivation use of "a PR exists" must check the PR is
+   **open or merged**, not closed-unmerged (e.g. filter `_pr_for_branch`'s
+   underlying `gh pr list` output on state, or add a merged-or-open
+   variant used only here; `_pr_for_branch`'s existing `--state all`
+   callers for approval-lookup are unaffected). Extend
    `fail_closed_downgrade`'s logic (or an equivalent pre-step) so a raw
    `"silent-failure"` verdict is upgraded to `"progressed"` (or a new,
    more precise label — see tests) when `already_delivered` is true or
@@ -88,9 +98,12 @@ behavior instead of introducing a second timing policy.
 - a case starting `watch` before the roster entry exists, entry appearing
   within the grace window → watch attaches and streams (red before the
   fix, green after).
-- a case: no board delta, but branch already has an open PR
+- a case: no board delta, but branch already has an open or merged PR
   (`already_delivered`-equivalent) and no new local commit → outcome is
   not `silent-failure` (red before, green after).
+- a case: no board delta, branch's only PR is closed *without* merging,
+  no new local commit → outcome stays `silent-failure` (regression guard
+  for the closed-unmerged-PR gap found by the after-proposal hunt).
 - a case: no board delta, `new_commit` true, push succeeded → outcome is
   not `silent-failure` (red before, green after).
 - existing refused-commit-no-push → `failed-no-commit` cases
