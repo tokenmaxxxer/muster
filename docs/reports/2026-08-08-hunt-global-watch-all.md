@@ -55,3 +55,44 @@ the frequency of the opt-in call from per-spawn to per-conversation,
 which is a mitigation, not a structural fix, and the acceptance section
 should be worded accordingly (or a companion check added) rather than
 asserting the gap is closed.
+
+## before-landing — stance 0: assume the gate just touched is bypassable — find the bypass
+
+Verdict: FINDING — watchdog_check_one signal 5 verifies only that watcher_pid is *some* live pid via _alive() (bare os.kill(pid, 0)), never that the pid actually belongs to a spawn.py watch --follow process, so any live-but-unrelated pid recorded under watcher_pid (e.g. via PID reuse after the auto-armed watcher crashes/exits) reads as a healthy watcher and the auto-arm gate silently fails to catch it.
+Kind: silent-failure
+Seed: spawn.py _spawn_one() bounded branch (wproc = subprocess.Popen([... "watch", "--follow" ...]); _workspace_index_put(..., watcher_pid=wproc.pid)) + watchdog_check_one() signal 5 (_workspace_index_load()[key]["watcher_pid"] liveness via _alive()) + _alive() at spawn.py:1500
+cap_seconds: 180
+tier: default
+diff_stat_lines: proposal-scoped (spawn.py auto-arm + watchdog signal 5 + _watch_all, plus test_spawn.py WatcherAutoArm/WatchAll)
+started_at: 2026-08-08T20:03:30+09:00
+ended_at: 2026-08-08T20:06:30+09:00
+
+### Reproduce
+```
+python3 /tmp/claude-1000/-home-jwjung--tokenmaxxxer-work-on-the-record-issue-488-implementation/bccd821c-9126-4e62-8c7a-2c1d19f4aef6/scratchpad/repro.py
+```
+repro.py contents:
+```python
+import sys, os, time
+sys.path.insert(0, "/home/jwjung/.tokenmaxxxer/work/on-the-record-issue-488-implementation")
+import spawn
+
+key = "issue-999999/impl"
+entry = {"work": None, "ts": int(time.time())}
+
+# workspace index says the watcher is this test process own pid --
+# a real, live process, but never a spawn.py watch process.
+spawn._workspace_index_put(999999, "impl", "/nonexistent", "/nonexistent.log", watcher_pid=os.getpid())
+
+anomalies = spawn.watchdog_check_one(key, entry, now=time.time(), state={})
+print("anomalies:", anomalies)
+```
+
+### Observed
+```
+anomalies: []
+```
+_alive(os.getpid()) returns True because the calling test process is itself alive -- signal 5 reports no problem even though watcher_pid never pointed at a spawn.py watch invocation. The same holds for any pid that gets reused by the OS after the real auto-armed watcher subprocess (wproc) exits (crash, stall-timeout expiry, OOM-kill, etc.) but before the next watchdog tick: _alive() has no cmdline/identity check, so the reused pid reads as watcher alive.
+
+### Expected
+Signal 5 (or _alive, when used for this purpose) should confirm pid identity -- e.g. compare /proc/<pid>/cmdline against the expected "spawn.py watch --issue <n> --role <r>" invocation, or record a pid/start-time pair at arm time -- before treating a live pid as evidence the auto-armed watcher is still the one running. As written, "a spawn cannot report success without its own watcher registered" degrades at watchdog-check time to "a spawn cannot report success without some pid number, alive or reused, sitting in watcher_pid."

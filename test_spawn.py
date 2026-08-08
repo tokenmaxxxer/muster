@@ -5830,3 +5830,169 @@ class AwaitBoundedMissingLog(unittest.TestCase):
             self.assertEqual(rc, 0)
             self.assertIn("stall:", out)
             self.assertNotIn("cannot observe", out)
+
+
+class WatcherAutoArm(unittest.TestCase):
+    """이슈 #488: auto-arm — 스폰이 자신의 워처 pid 를 workspace index 에
+    남기고, watchdog 는 그 워처가 죽으면(또는 애초에 없으면) 조용히
+    넘기지 않고 신고한다."""
+
+    def setUp(self):
+        self.td = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.td, ignore_errors=True)
+        old_idx = spawn.WORKSPACE_INDEX
+        spawn.WORKSPACE_INDEX = Path(self.td) / "workspaces.json"
+        self.addCleanup(setattr, spawn, "WORKSPACE_INDEX", old_idx)
+
+    def test_workspace_index_put_records_watcher_pid(self):
+        spawn._workspace_index_put(488, "implementation", "work", "log",
+                                    watcher_pid=12345)
+        entry = spawn._workspace_index_load()["issue-488/implementation"]
+        self.assertEqual(entry["watcher_pid"], 12345)
+
+    def test_workspace_index_put_without_watcher_pid_omits_field(self):
+        spawn._workspace_index_put(488, "implementation", "work", "log")
+        entry = spawn._workspace_index_load()["issue-488/implementation"]
+        self.assertNotIn("watcher_pid", entry)
+
+    def _entry(self, log):
+        return {"log": str(log), "work": None, "ts": int(time.time()),
+                "before_head": None, "pid": None}
+
+    def test_watchdog_flags_dead_watcher(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text"}\n')
+            spawn._workspace_index_put(488, "implementation", "work", str(log),
+                                        watcher_pid=999999999)  # 존재 안 할 pid
+            out = spawn.watchdog_check_one(
+                "issue-488/implementation", self._entry(log), state={})
+            self.assertTrue(any("watcher-dead" in a for a in out))
+
+    def test_watchdog_flags_missing_watcher(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text"}\n')
+            spawn._workspace_index_put(488, "implementation", "work", str(log))
+            out = spawn.watchdog_check_one(
+                "issue-488/implementation", self._entry(log), state={})
+            self.assertTrue(any("watcher-missing" in a for a in out))
+
+    def test_watchdog_silent_when_watcher_alive(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text"}\n')
+            spawn._workspace_index_put(488, "implementation", "work", str(log),
+                                        watcher_pid=os.getpid())
+            out = spawn.watchdog_check_one(
+                "issue-488/implementation", self._entry(log), state={})
+            self.assertFalse(any("watcher-dead" in a for a in out))
+            self.assertFalse(any("watcher-missing" in a for a in out))
+
+    def test_watchdog_silent_when_no_workspace_index_entry(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text"}\n')
+            out = spawn.watchdog_check_one(
+                "issue-999/nobody", self._entry(log), state={})
+            self.assertFalse(any("watcher-" in a for a in out))
+
+    @unittest.skipUnless(Path("/proc").is_dir(), "cmdline 신원 검사는 /proc 필요")
+    def test_watchdog_flags_pid_reused_by_unrelated_process(self):
+        # before-landing hunt 발견: 워처가 죽은 뒤 OS 가 같은 pid 를 다른
+        # 프로세스에 재할당하면 _alive() 만으로는 구분 못 한다 — 살아있는
+        # 이 테스트 프로세스 자신의 pid 를 워처로 등록해도, 그 cmdline 은
+        # "watch" 호출이 아니므로 watcher-dead 로 잡혀야 한다.
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "s.log"
+            log.write_text('{"type":"text"}\n')
+            spawn._workspace_index_put(488, "implementation", "work", str(log),
+                                        watcher_pid=os.getpid())
+            entry = self._entry(log)
+            entry["issue"] = 488
+            out = spawn.watchdog_check_one(
+                "issue-488/implementation", entry, state={})
+            self.assertTrue(any("watcher-dead" in a for a in out))
+
+
+class WatchAll(unittest.TestCase):
+    """이슈 #488: `watch --all` — 워크스페이스 인덱스 전체를 다중화한다.
+    루프 자체는 무한이라 테스트에서 직접 돌리지 않고, 그 루프 몸통이
+    도는 매 반복의 로직(한 키의 새 이벤트를 소비해 offset 을 그 키만큼만
+    미는 것)을 한 이터레이션 상당으로 재현해 검증한다.
+    """
+
+    def setUp(self):
+        self.td = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.td, ignore_errors=True)
+        old_idx = spawn.WORKSPACE_INDEX
+        spawn.WORKSPACE_INDEX = Path(self.td) / "workspaces.json"
+        self.addCleanup(setattr, spawn, "WORKSPACE_INDEX", old_idx)
+        self.work_a = Path(self.td) / "a"
+        self.work_a.mkdir()
+        self.work_b = Path(self.td) / "b"
+        self.work_b.mkdir()
+
+    def _run_one_iteration(self, seen_end):
+        idx = spawn._workspace_index_load()
+        reported = []
+        for key, entry in sorted(idx.items()):
+            if key in seen_end:
+                continue
+            events_path = spawn._events_path(entry["work"])
+            offset_path = spawn._offset_path(entry["work"])
+            seen = spawn._read_offset(offset_path)
+            if not events_path.exists():
+                continue
+            lines = events_path.read_text(encoding="utf-8").splitlines()
+            while len(lines) > seen:
+                ev = json.loads(lines[seen])
+                seen += 1
+                spawn._write_offset(offset_path, seen)
+                reported.append((key, ev["type"]))
+                if ev["type"] == "session-end":
+                    seen_end.add(key)
+                    break
+        return reported
+
+    def test_multiplexes_two_keys_independently(self):
+        spawn._workspace_index_put(1, "implementation", str(self.work_a),
+                                    str(self.work_a) + ".log")
+        spawn._workspace_index_put(2, "implementation", str(self.work_b),
+                                    str(self.work_b) + ".log")
+        spawn._append_event(spawn._events_path(self.work_a), "progress", "x")
+        spawn._append_event(spawn._events_path(self.work_b), "progress", "y")
+        seen_end = set()
+        reported = self._run_one_iteration(seen_end)
+        keys = {k for k, _ in reported}
+        self.assertEqual(keys, {"issue-1/implementation", "issue-2/implementation"})
+
+    def test_key_registered_after_polling_started_is_picked_up(self):
+        # 워처가 시작된 뒤에 등록된 스폰도 다음 이터레이션에서 잡힌다 —
+        # 매 반복 인덱스를 다시 읽기 때문.
+        seen_end = set()
+        first = self._run_one_iteration(seen_end)
+        self.assertEqual(first, [])
+        spawn._workspace_index_put(3, "implementation", str(self.work_a),
+                                    str(self.work_a) + ".log")
+        spawn._append_event(spawn._events_path(self.work_a), "session-end", "done")
+        second = self._run_one_iteration(seen_end)
+        self.assertEqual(second, [("issue-3/implementation", "session-end")])
+        self.assertIn("issue-3/implementation", seen_end)
+
+    def test_offset_advances_only_for_consumed_key(self):
+        spawn._workspace_index_put(1, "implementation", str(self.work_a),
+                                    str(self.work_a) + ".log")
+        spawn._workspace_index_put(2, "implementation", str(self.work_b),
+                                    str(self.work_b) + ".log")
+        spawn._append_event(spawn._events_path(self.work_a), "progress", "x")
+        seen_end = set()
+        self._run_one_iteration(seen_end)
+        self.assertEqual(spawn._read_offset(spawn._offset_path(self.work_a)), 1)
+        self.assertEqual(spawn._read_offset(spawn._offset_path(self.work_b)), 0)
+
+    def test_all_flag_rejects_issue_combo_in_cli(self):
+        with self.assertRaises(SystemExit):
+            with mock.patch.object(sys, "argv",
+                                    ["spawn.py", "watch", "--all", "--issue", "1"]):
+                spawn.main()
