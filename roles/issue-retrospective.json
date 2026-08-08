@@ -15,5 +15,7 @@
   "use_when": "작업이 랜딩되고 defect-verification/conformance-review 가 종결된 뒤. 기록만 읽는다",
   "produces": "timeline, lessons list, one-line advisory (advisory only)",
   "write_scope": [],
-  "record_fields": {}
+  "record_fields": {
+    "loop_state": ["idle", "retrospecting", "candidate-round-done", "round-done"]
+  }
 }
