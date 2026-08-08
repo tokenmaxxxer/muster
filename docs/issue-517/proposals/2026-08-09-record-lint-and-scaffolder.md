@@ -6,6 +6,7 @@ files:
   - on-the-record/hooks/record-scaffold.sh
   - on-the-record/hooks/test_record_scaffold.py
   - on-the-record/hooks/record-claim-guard.sh
+  - on-the-record/hooks/hooks.json
   - gates/ci.py
   - docs/handbooks/record-authoring.md
 ---
@@ -90,12 +91,21 @@ there is exactly one place each rule's logic lives.
   violations (missing `loop_state`, a broken code reference, a missing
   required heading, a bare count claim) asserted via one `record_lint`
   invocation reporting all four.
-- `on-the-record/hooks/record-scaffold.sh`: a PreToolUse (or on-demand
-  CLI) generator that, given a role and issue number, writes
+- `on-the-record/hooks/record-scaffold.sh`: an on-demand CLI generator
+  (invoked as `record-scaffold.sh <role> <issue-n>`, not a PreToolUse
+  hook — a warrant-hunter finding on this proposal noted a PreToolUse
+  form would need registration in `hooks.json`'s lifecycle-event map
+  with no natural trigger event to hang it off; the on-demand CLI form
+  needs no such registration) that writes
   `docs/issue-<n>/reports/<role>.md` with every section/field
   `roles/<role>.json`'s `record_fields` declares, filled with
   recognizable placeholder tokens (e.g. `PLACEHOLDER: <field>`) that
   `record_lint` treats as violations until replaced.
+- `on-the-record/hooks/hooks.json`: no lifecycle entry added for
+  `record-scaffold.sh` (it is CLI-invoked, not hook-triggered) — listed
+  in the write set only so the surrounding hooks map can be read/verified
+  unchanged by the same commit that adds the scaffolder script next to
+  it, per the warrant-hunter finding below.
 - `on-the-record/hooks/test_record_scaffold.py`: asserts the scaffolder's
   raw output fails `record_lint` with only placeholder-remaining
   violations, and a placeholder-filled copy passes clean.
