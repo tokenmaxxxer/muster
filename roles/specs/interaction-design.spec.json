@@ -1,0 +1,32 @@
+{
+  "role": "interaction-design",
+  "source_standard": "NN/g wireflows (nngroup.com/articles/wireflows) + UML state-machine notation (uml-diagrams.org) for the closed node-type enum NN/g itself leaves unspecified",
+  "required_fields": [
+    { "name": "state_name", "type": "string", "required": true },
+    { "name": "entry_trigger", "type": "string", "required": true },
+    { "name": "screen_ref", "type": "ref", "required": true },
+    { "name": "node_type", "type": "enum", "enum": ["state", "choice", "terminal"], "required": true },
+    { "name": "feedback", "type": "string", "required": true },
+    { "name": "transitions", "type": "ref[]", "required": true },
+    { "name": "edge_case_variant", "type": "string", "required": true }
+  ],
+  "reference_resolution": {
+    "rule": "every transitions entry must resolve to another state's state_name elsewhere in the same record — graph reference-resolution (issue-515 invariant 2); every flow must contain at least one terminal node_type.",
+    "checked_by": "on-the-record/hooks/role-spec-reference-guard.sh"
+  },
+  "recomputation": {
+    "rule": "a flow is not complete until every state's edge_case_variant is populated — error-state-before-happy-path-only (NN/g's must-be), never asserted complete from happy-path states alone.",
+    "checked_by": "TBD (follow-up — issue-521 out-of-scope note: per-role recomputation enforcement is a follow-up once evidence from real usage shows which roles need it)"
+  },
+  "write_scope": [],
+  "report_only": true,
+  "loop_state": {
+    "progress": ["sketching"],
+    "terminal": ["reviewed"],
+    "refusal": ["spec-not-confirmed"],
+    "error": ["screen-ref-unresolvable"]
+  },
+  "use_when": {
+    "board_condition": "a requirements-engineering record landed for a screen/flow-facing requirement AND no interaction-design record exists yet for it"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "role": "requirements-engineering",
+  "source_standard": "EARS (Mavin et al., IEEE RE'09) + ISO/IEC/IEEE 29148 bidirectional traceability",
+  "required_fields": [
+    { "name": "statement", "type": "string", "required": true },
+    {
+      "name": "ears_pattern",
+      "type": "enum",
+      "enum": ["ubiquitous", "event-driven", "state-driven", "optional-feature", "unwanted-behaviour", "complex"],
+      "required": true
+    },
+    { "name": "source", "type": "ref", "required": true },
+    {
+      "name": "verification_method",
+      "type": "enum",
+      "enum": ["Inspection", "Analysis", "Demonstration", "Test"],
+      "required": true
+    },
+    { "name": "downstream_link", "type": "ref", "required": true },
+    { "name": "status", "type": "string", "required": false }
+  ],
+  "reference_resolution": {
+    "rule": "statement must match its declared ears_pattern's template grammar (Ubiquitous 'THE <system> SHALL <response>'; Event-driven 'WHEN <trigger>, THE <system> SHALL <response>'; State-driven 'WHILE <precondition>, THE <system> SHALL <response>'; Optional-feature 'WHERE <feature>, THE <system> SHALL <response>'; Unwanted-behaviour 'IF <trigger>, THEN THE <system> SHALL <response>'; Complex = chained combination). source and downstream_link must each resolve to a real repo path, commit sha, or cited artifact — no orphan references (issue-515 invariant 2).",
+    "checked_by": "on-the-record/hooks/role-spec-reference-guard.sh"
+  },
+  "recomputation": {
+    "rule": "status must not move past its initial value before verification_method is populated — bidirectional-traceability-before-status-change, mirroring 29148's own ordering.",
+    "checked_by": "TBD (follow-up — issue-521 out-of-scope note: per-role recomputation enforcement is a follow-up once evidence from real usage shows which roles need it)"
+  },
+  "write_scope": [],
+  "report_only": true,
+  "loop_state": {
+    "progress": ["drafting", "resolving-ambiguity"],
+    "terminal": ["landed"],
+    "refusal": ["hypothesis-not-final"],
+    "error": ["source-unresolvable"]
+  },
+  "use_when": {
+    "board_condition": "a product-discovery record reached a validated verdict AND no requirements-engineering record exists yet turning it into a structured requirements doc"
+  }
+}

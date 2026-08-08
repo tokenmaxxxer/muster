@@ -1,0 +1,31 @@
+{
+  "role": "user-discovery",
+  "source_standard": "Teresa Torres interview snapshots (producttalk.org) + Guest/Bunce/Johnson 2006 and Hennink/Kaiser/Weber 2020 saturation run-length (extension beyond Torres's own confirmed/not-confirmed vocabulary, stated explicitly)",
+  "required_fields": [
+    { "name": "interview_snapshot", "type": "ref", "required": true },
+    { "name": "quote", "type": "string", "required": true },
+    { "name": "opportunity_tag", "type": "enum", "enum": ["need", "pain", "desire"], "required": true },
+    { "name": "snapshot_refs", "type": "ref[]", "required": true },
+    { "name": "saturation_run_length", "type": "string", "required": true },
+    { "name": "verdict", "type": "enum", "enum": ["pain-confirmed", "not-confirmed"], "required": true }
+  ],
+  "reference_resolution": {
+    "rule": "snapshot_refs must resolve to a real interview_snapshot elsewhere in the record, and every opportunity must be backed by >=1 snapshot_refs entry — Torres's minimum-evidence-count rule (issue-515 invariant 2).",
+    "checked_by": "on-the-record/hooks/role-spec-reference-guard.sh"
+  },
+  "recomputation": {
+    "rule": "saturation must be computed from saturation_run_length (a run of consecutive interviews adding zero new opportunity tags), never asserted as a standalone claim independent of the cited interview_snapshot sequence.",
+    "checked_by": "TBD (follow-up — issue-521 out-of-scope note: per-role recomputation enforcement is a follow-up once evidence from real usage shows which roles need it)"
+  },
+  "write_scope": [],
+  "report_only": true,
+  "loop_state": {
+    "progress": ["interviewing"],
+    "terminal": ["pain-confirmed", "not-confirmed"],
+    "refusal": ["no-interview-access"],
+    "error": ["snapshot-unreadable"]
+  },
+  "use_when": {
+    "board_condition": "a product-discovery hypothesis requires user-interview validation AND no user-discovery record with a pain-confirmed|not-confirmed verdict exists yet for that hypothesis"
+  }
+}

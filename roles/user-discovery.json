@@ -13,12 +13,17 @@
     }
   },
   "decides": "이 문제가 실제 사용자의 고통인가",
-  "use_when": "가설 검증을 위해 사용자 인터뷰가 필요할 때",
+  "use_when": "가설 검증을 위해 사용자 인터뷰가 필요할 때 (board_condition: a product-discovery hypothesis requires user-interview validation AND no user-discovery record with a pain-confirmed|not-confirmed verdict exists yet for that hypothesis)",
   "produces": "interview script, per-interview evidence log, pain-confirmed|not-confirmed verdict",
   "write_scope": [],
+  "report_only": true,
+  "spec": "roles/specs/user-discovery.spec.json",
   "record_fields": {
-    "loop_state": [
-      "landed"
-    ]
+    "loop_state": {
+      "progress": ["interviewing"],
+      "terminal": ["pain-confirmed", "not-confirmed"],
+      "refusal": ["no-interview-access"],
+      "error": ["snapshot-unreadable"]
+    }
   }
 }

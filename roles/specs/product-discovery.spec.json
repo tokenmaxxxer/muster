@@ -1,0 +1,42 @@
+{
+  "role": "product-discovery",
+  "source_standard": "Cagan/SVPG Opportunity Assessment + lean-startup pre-registered decision rules (Startup Commons / Kromatic / Startup Project)",
+  "required_fields": [
+    { "name": "problem_statement", "type": "string", "required": true },
+    { "name": "target_market", "type": "string", "required": true },
+    { "name": "market_size_rationale", "type": "string", "required": true },
+    { "name": "competitive_alternatives", "type": "string", "required": true },
+    { "name": "differentiator", "type": "string", "required": true },
+    { "name": "timing_rationale", "type": "string", "required": true },
+    { "name": "go_to_market_plan", "type": "string", "required": true },
+    { "name": "success_metric", "type": "string", "required": true },
+    { "name": "critical_success_factors", "type": "string", "required": true },
+    { "name": "recommendation", "type": "enum", "enum": ["go", "no-go"], "required": true },
+    { "name": "hypothesis_statement", "type": "string", "required": true },
+    { "name": "fail_condition", "type": "string", "required": true },
+    { "name": "time_box", "type": "string", "required": true },
+    { "name": "decision_rule", "type": "string", "required": true },
+    { "name": "confidence_level", "type": "string", "required": false },
+    { "name": "evidence_log", "type": "ref[]", "required": true },
+    { "name": "verdict", "type": "enum", "enum": ["validated", "invalidated", "inconclusive"], "required": true }
+  ],
+  "reference_resolution": {
+    "rule": "evidence_log entries must each resolve to a repo path, commit sha, or a source actually consulted — no orphan references (issue-515 invariant 2).",
+    "checked_by": "on-the-record/hooks/role-spec-reference-guard.sh"
+  },
+  "recomputation": {
+    "rule": "recommendation (go|no-go) must not be asserted before fail_condition, time_box, and decision_rule are populated — pre-registration order (rationale: rule fixed before evidence, never asserted post-hoc).",
+    "checked_by": "TBD (follow-up — issue-521 out-of-scope note: per-role recomputation enforcement is a follow-up once evidence from real usage shows which roles need it)"
+  },
+  "write_scope": [],
+  "report_only": true,
+  "loop_state": {
+    "progress": ["measuring"],
+    "terminal": ["validated", "invalidated", "inconclusive"],
+    "refusal": ["hypothesis-not-falsifiable"],
+    "error": ["evidence-log-unreadable"]
+  },
+  "use_when": {
+    "board_condition": "an issue's requirement is still at problem/hypothesis level AND no product-discovery record with a validated|invalidated verdict exists yet for that issue"
+  }
+}

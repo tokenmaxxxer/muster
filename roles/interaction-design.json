@@ -1,6 +1,7 @@
 {
   "marketplace": "tokenmaxxxer-interaction-design",
   "repo": "tokenmaxxxer/interaction-design-rulebook",
+  "path": "$TOKENMAXXXER_RULEBOOKS/interaction-design-rulebook",
   "sandbox": {
     "enabled": true,
     "network": {
@@ -12,10 +13,17 @@
     }
   },
   "decides": "문제 → 화면·플로우",
-  "use_when": "product-discovery 스펙 확정 후",
+  "use_when": "product-discovery 스펙 확정 후 (board_condition: a requirements-engineering record landed for a screen/flow-facing requirement AND no interaction-design record exists yet for it)",
   "produces": "wireframe/flow diagram, state list, edge-case interaction notes, open design questions",
   "write_scope": [],
+  "report_only": true,
+  "spec": "roles/specs/interaction-design.spec.json",
   "record_fields": {
-    "loop_state": ["reviewed"]
+    "loop_state": {
+      "progress": ["sketching"],
+      "terminal": ["reviewed"],
+      "refusal": ["spec-not-confirmed"],
+      "error": ["screen-ref-unresolvable"]
+    }
   }
 }
