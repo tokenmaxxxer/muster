@@ -16,6 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "docs" / "specs" / "enforcement-boundary.md"
+UNENFORCED = ROOT / "on-the-record" / "UNENFORCED-CLAUSES.md"
+RUN_MD = ROOT / "on-the-record" / "commands" / "run.md"
 
 _ROW_RE = re.compile(r"^\|\s*`?([^`|]+?)`?\s*\|\s*(.+?)\s*\|", re.MULTILINE)
 _SEP_ROW = re.compile(r"^\|[\s:-]+\|")
@@ -86,6 +88,40 @@ def t_spec_records_the_operator_boundary_decision():
     text = SPEC.read_text(encoding="utf-8")
     assert "out of scope — operator decision, 2026-08-07" in text
     assert "closure_sweep.py" in text and "spawn_coverage.py" in text
+
+
+def _unenforced_mechanism_names(spec_text: str) -> set[str]:
+    """mechanisms whose verdict is `contract, CI-supplement` or an
+    `out of scope — operator decision` variant — the set issue-452's
+    shipped list must match exactly."""
+    recorded = _recorded_mechanisms(spec_text)
+    return {
+        name
+        for name, verdict in recorded.items()
+        if "CI-supplement" in verdict or "out of scope — operator decision" in verdict
+    }
+
+
+def t_unenforced_clauses_file_matches_spec_exactly():
+    """issue-452: `on-the-record/UNENFORCED-CLAUSES.md` must ship inside the
+    deployed plugin tree and its mechanism rows must be *exactly* the set of
+    CI-supplement / out-of-scope-operator-decision rows in the boundary
+    spec — an equal-set check, not one-directional, so a truncated or
+    emptied UNENFORCED-CLAUSES.md fails instead of vacuously passing."""
+    assert UNENFORCED.is_file(), f"{UNENFORCED} 가 없다 — issue-452 로 배포됐어야 한다."
+    expected = _unenforced_mechanism_names(SPEC.read_text(encoding="utf-8"))
+    shipped = set(_recorded_mechanisms(UNENFORCED.read_text(encoding="utf-8")).keys())
+    assert shipped == expected, (
+        f"on-the-record/UNENFORCED-CLAUSES.md 의 mechanism 집합이 스펙과 다르다.\n"
+        f"missing: {sorted(expected - shipped)}\nextra: {sorted(shipped - expected)}"
+    )
+
+
+def t_run_md_references_unenforced_clauses():
+    assert RUN_MD.is_file(), f"{RUN_MD} 가 없다."
+    assert "UNENFORCED-CLAUSES.md" in RUN_MD.read_text(encoding="utf-8"), (
+        "run.md 가 UNENFORCED-CLAUSES.md 를 참조하는 줄이 없다(#452)."
+    )
 
 
 def _run(fns):
