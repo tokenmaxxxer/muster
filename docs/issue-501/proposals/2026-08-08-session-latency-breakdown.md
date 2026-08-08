@@ -118,24 +118,39 @@ and would need per-turn timestamps (not present) to split further.
 ### (d) Approval round-trip idle
 
 Not a ledger field — reconstructed from inter-session gaps: for each
-`(issue, role)` pair with more than one session today (42 of 44 issue
-groups touched today had ≥2 sessions), sorted by `ts`, computed `idle =
+`(repo, issue, role)` pair with more than one session today (grouping key
+includes `repo` — issue numbers are only unique within a repo, not
+globally; see resolved finding below), sorted by `ts`, computed `idle =
 next_session_start − prev_session_ts`, where `next_session_start =
 next.ts − next.duration_s`.
 
-- 79 consecutive same-issue session pairs found; 78 had non-negative idle
-  (1 pair overlapped — parallel dispatch, excluded as not a serial gap).
-- Idle sum across those 78 pairs: 23309s (388.5m). Median 86s, p90 1063s,
-  max 3389s (issue 171, implementation→implementation).
-- This total (388.5m) is **larger than total in-session wall-clock time**
-  (611.7m) at 63.5% of it, and larger than the entire non-model overhead
+- 80 consecutive same-(repo,issue) session pairs found; 79 had
+  non-negative idle (1 pair overlapped — parallel dispatch, excluded as
+  not a serial gap).
+- Idle sum across those 79 pairs: 23336s (388.9m). Median 85s, p90 1063s,
+  max 3389s (`tokenmaxxxer-core` issue 171, implementation→implementation).
+- This total (388.9m) is **larger than total in-session wall-clock time**
+  (611.7m) at 63.6% of it, and larger than the entire non-model overhead
   term (84.0m) by 4.6x — but it is heavily right-skewed: median idle is
-  only 86s (fast orchestrator respawn is the typical case), while a
-  handful of long gaps (the top 8 range 1063s-3389s, all on issues 171,
-  472, 484, 173) account for the bulk of the sum. This mixes orchestrator
+  only 85s (fast orchestrator respawn is the typical case), while a
+  handful of long gaps (the top 8 range 1063s-3389s, all on
+  `tokenmaxxxer-core` issues 171 and 173 and `on-the-record` issues 472
+  and 484) account for the bulk of the sum. This mixes orchestrator
   respawn latency and actual human-approval wait time indistinguishably
   (per the survey's stated limit) — cannot attribute the tail to either
   cause specifically from what's recorded.
+
+**resolved_finding** (after-proposal warrant hunt,
+`docs/reports/2026-08-08-hunt-session-latency-breakdown.md`, stance 2):
+the first draft of this idle-gap grouping keyed on issue number alone
+(via `-issue-(\d+)-` on `cwd`, no `repo`), which silently merges
+same-numbered issues across different repos into one fabricated idle gap.
+Today's real ledger has zero such collisions (verified across all 124
+rows / 4 repos touched today), so the originally reported numbers were
+unaffected, but the method itself was wrong. Fixed by keying on
+`(repo, issue, role)` instead; re-run confirmed the totals and top-8 list
+above are the corrected numbers (388.9m sum, same four issues in the
+tail) — the finder re-cleared after the fix.
 
 ### Largest term, named
 
@@ -143,7 +158,7 @@ Ranking the four terms by measured wall-clock-equivalent sum:
 
 1. **Model working time — 527.7m, 86.3% of in-session wall-clock.**
    Dominant *within a session*.
-2. Inter-session idle (mixed respawn+approval-wait) — 388.5m, but
+2. Inter-session idle (mixed respawn+approval-wait) — 388.9m, but
    concentrated in a long tail on 4 issues, not a uniform per-session
    cost.
 3. Non-model in-session overhead (startup+hooks+gates+I/O) — 84.0m, 13.7%
@@ -178,7 +193,7 @@ behavior at all.
   timestamps); would require instrumenting `spawn.py` itself, which is
   step-2-shaped work on an operational-surface file.
 - Separating "orchestrator respawn wait" from "human approval wait"
-  within the 388.5m idle term — same limit, not recorded anywhere today.
+  within the 388.9m idle term — same limit, not recorded anywhere today.
 - Sampling down from 123 to ~80 sessions — used the full available set
   instead, since it was already on disk and cheap to read; no sampling
   bias introduced.
