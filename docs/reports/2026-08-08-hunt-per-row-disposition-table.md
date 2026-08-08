@@ -47,3 +47,10 @@ The gate passes with 9/9 even though the #369 row's verdict was replaced with no
 ### Expected
 
 When the phase-2 ADR this proposal schedules rewrites #369/#383/#325's `UNENFORCED-CLAUSES.md` verdicts to cite the new `roster_watchdog` mechanism, the gate should be able to distinguish a genuine mechanism-citation row from a vacuous or mistyped one — otherwise the proposal's own acceptance claim ("Every class-A row needs a mechanism-or-drop... per the issue's acceptance, gated by `gates/test_boundary.py`") does not hold: any placeholder text in the #369/#383/#325 rows satisfies the check just as well as a correct citation would.
+
+## before-landing (issue-464 phase 2)
+
+docs-only, no before-landing dispatch — all paths in this transition's
+diff (`d608d7e..e2036e7`) are under `docs/`: `docs/issue-464/decisions/2026-08-08-board-state-into-orchestrator-loop.md`,
+`docs/issue-464/reports/architecture.md`, `docs/issue-464/proposals/2026-08-08-per-row-disposition-table.md`.
+proposal: docs/issue-464/proposals/2026-08-08-per-row-disposition-table.md
